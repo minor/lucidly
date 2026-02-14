@@ -3,12 +3,20 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { getSession } from "@/lib/api";
+import { getSession, getChallenge } from "@/lib/api";
 import { ChatMessage } from "@/components/ChatMessage";
 import { ScoreBar } from "@/components/ScoreBar";
 import type { Challenge, Session, Turn } from "@/lib/types";
-import { Loader2, ArrowLeft, Trophy, Code, ImageIcon, Eye } from "lucide-react";
+import { Loader2, ArrowLeft, Trophy, Code, ImageIcon } from "lucide-react";
 import { MODEL_PRICING } from "@/lib/api";
+
+const OUTPUT_PLACEHOLDER_IMAGE =
+  "https://placehold.co/800x400/f8fafc/94a3b8?text=Agent+output";
+const OUTPUT_PLACEHOLDER_CODE = `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8" /><title>Output</title></head>
+<body><header>...</header><main>...</main></body>
+</html>`;
 
 const POLL_INTERVAL_MS = 1500;
 
@@ -17,6 +25,7 @@ export default function AgentRunWatchPage() {
   const router = useRouter();
   const sessionId = params.sessionId as string;
   const [session, setSession] = useState<Session | null>(null);
+  const [challenge, setChallenge] = useState<Challenge | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [outputView, setOutputView] = useState<"preview" | "code">("preview");
@@ -51,6 +60,20 @@ export default function AgentRunWatchPage() {
       clearInterval(interval);
     };
   }, [sessionId]);
+
+  // Fetch challenge when session is available
+  useEffect(() => {
+    if (!session?.challenge_id) return;
+    let ignore = false;
+    getChallenge(session.challenge_id)
+      .then((c) => {
+        if (!ignore) setChallenge(c);
+      })
+      .catch(() => {});
+    return () => {
+      ignore = true;
+    };
+  }, [session?.challenge_id]);
 
   useEffect(() => {
     turnsEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -152,10 +175,137 @@ export default function AgentRunWatchPage() {
         )}
       </div>
 
-      {/* Main content — same two-column layout as play: left = challenge + output, right = chat */}
+      {/* Main content — left = challenge + output (same as play), right = agent chat */}
       <div className="flex flex-1 min-h-0">
-        {/* Left: turns + output */}
+        {/* Left: Challenge description + Your output (same as play page) */}
         <div className="flex-1 flex flex-col min-w-0 border-r border-border overflow-hidden">
+          {/* Challenge description (scrollable) */}
+          <div className="flex-1 min-h-0 overflow-y-auto border-b border-border">
+            <div className="p-6">
+              <h2 className="text-sm font-semibold mb-3">Challenge</h2>
+              <p className="text-sm text-muted leading-relaxed whitespace-pre-wrap mb-4">
+                {challenge?.description ?? "Loading challenge…"}
+              </p>
+              {challenge?.starter_code && (
+                <div className="rounded-lg border border-border bg-code-bg overflow-hidden mb-4">
+                  <div className="px-3 py-1.5 border-b border-border">
+                    <span className="text-xs font-medium text-muted">
+                      Buggy Code
+                    </span>
+                  </div>
+                  <pre className="p-3 overflow-x-auto">
+                    <code className="text-xs font-mono">
+                      {challenge.starter_code}
+                    </code>
+                  </pre>
+                </div>
+              )}
+              {challenge?.embed_url && (
+                <div className="rounded-lg border border-border overflow-hidden bg-muted/20 mb-4 h-[320px]">
+                  <iframe
+                    src={challenge.embed_url}
+                    title="Challenge reference"
+                    className="w-full h-[500px] border-0 rounded-lg pointer-events-none"
+                    sandbox="allow-scripts allow-same-origin"
+                  />
+                </div>
+              )}
+              {challenge?.image_url && !challenge?.embed_url && (
+                <div className="rounded-lg border border-border overflow-hidden bg-muted/20 mb-4">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={challenge.image_url}
+                    alt="Challenge reference"
+                    className="w-full max-h-[280px] object-contain object-top"
+                  />
+                </div>
+              )}
+              {challenge?.test_suite && challenge.test_suite.length > 0 && (
+                <div className="mt-4">
+                  <h3 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">
+                    Test Cases
+                  </h3>
+                  <div className="space-y-1.5">
+                    {challenge.test_suite.map((tc, i) => (
+                      <div
+                        key={i}
+                        className="rounded-lg bg-code-bg px-3 py-2 text-xs font-mono"
+                      >
+                        <span className="text-muted">Input:</span> {tc.input}
+                        <br />
+                        <span className="text-muted">Expected:</span>{" "}
+                        {tc.expected_output}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Your output panel (same styling as play page) */}
+          <div className="shrink-0 h-[240px] flex flex-col border-t border-border bg-muted/5">
+            <div className="flex items-center justify-between border-b border-border px-4 py-2.5 shrink-0 bg-background/80">
+              <h3 className="text-sm font-semibold text-foreground">
+                Your output
+              </h3>
+              <div className="flex items-center gap-1 rounded-lg border border-border bg-muted/30 p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setOutputView("preview")}
+                  className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                    outputView === "preview"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted hover:text-foreground"
+                  }`}
+                >
+                  <ImageIcon className="h-3 w-3" />
+                  Preview
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOutputView("code")}
+                  className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                    outputView === "code"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted hover:text-foreground"
+                  }`}
+                >
+                  <Code className="h-3 w-3" />
+                  Code
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 min-h-0 overflow-hidden rounded-b-lg mx-2 mb-2 border border-border bg-code-bg/50">
+              {outputView === "preview" ? (
+                latestCode ? (
+                  <iframe
+                    title="Agent output"
+                    sandbox="allow-scripts"
+                    srcDoc={latestCode}
+                    className="w-full h-full border-0 bg-white"
+                  />
+                ) : (
+                  <div className="h-full flex items-center justify-center bg-muted/20">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={OUTPUT_PLACEHOLDER_IMAGE}
+                      alt="Agent output"
+                      className="max-h-full w-full object-contain object-top"
+                    />
+                  </div>
+                )
+              ) : (
+                <pre className="h-full overflow-auto p-4 text-xs font-mono whitespace-pre">
+                  <code>{latestCode || OUTPUT_PLACEHOLDER_CODE}</code>
+                </pre>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Right: Agent chat (turns) + final score when completed */}
+        <div className="flex flex-col w-[480px] shrink-0 overflow-hidden">
           <div className="flex-1 overflow-y-auto p-6">
             {session?.turns?.length ? (
               <div className="space-y-0">
@@ -186,87 +336,34 @@ export default function AgentRunWatchPage() {
               </p>
             )}
           </div>
-          {/* Output panel */}
-          {latestCode && (
-            <div className="border-t border-border p-4">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-semibold text-muted">
-                  Generated output
-                </span>
-                <div className="inline-flex rounded-lg border border-border bg-muted/30 p-0.5">
-                  <button
-                    type="button"
-                    onClick={() => setOutputView("preview")}
-                    className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium ${
-                      outputView === "preview"
-                        ? "bg-background text-foreground shadow-sm"
-                        : "text-muted hover:text-foreground"
-                    }`}
-                  >
-                    <ImageIcon className="h-3.5 w-3.5" />
-                    Preview
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setOutputView("code")}
-                    className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium ${
-                      outputView === "code"
-                        ? "bg-background text-foreground shadow-sm"
-                        : "text-muted hover:text-foreground"
-                    }`}
-                  >
-                    <Code className="h-3.5 w-3.5" />
-                    Code
-                  </button>
+          {session?.status === "completed" && (
+            <div className="shrink-0 border-t border-border p-4 bg-muted/5">
+              <h2 className="text-xs font-semibold uppercase tracking-wider text-muted mb-2">
+                Final score
+              </h2>
+              <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
+                <div>
+                  <span className="text-muted">Composite </span>
+                  <span className="font-mono font-semibold text-accent">
+                    {session.composite_score ?? "—"}
+                  </span>
                 </div>
-              </div>
-              <div className="rounded-xl border border-border overflow-hidden bg-code-bg">
-                {outputView === "preview" ? (
-                  <div className="min-h-[160px] bg-muted/20">
-                    <iframe
-                      title="Preview"
-                      sandbox="allow-scripts"
-                      srcDoc={latestCode}
-                      className="w-full h-[240px] border-0 rounded-none"
-                    />
-                  </div>
-                ) : (
-                  <pre className="p-4 overflow-auto max-h-[240px] m-0 text-xs font-mono text-foreground/90 whitespace-pre">
-                    <code>{latestCode}</code>
-                  </pre>
-                )}
+                <div>
+                  <span className="text-muted">Accuracy </span>
+                  <span className="font-mono">{session.accuracy_score ?? "—"}</span>
+                </div>
+                <div>
+                  <span className="text-muted">Turns </span>
+                  <span className="font-mono">{session.total_turns}</span>
+                </div>
+                <div>
+                  <span className="text-muted">Tokens </span>
+                  <span className="font-mono">{session.total_tokens}</span>
+                </div>
               </div>
             </div>
           )}
         </div>
-        {/* Right: score when completed */}
-        {session?.status === "completed" && (
-          <div className="w-72 shrink-0 border-l border-border p-6">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-muted mb-3">
-              Final score
-            </h2>
-            <div className="space-y-2 text-sm">
-              <div className="flex justify-between">
-                <span className="text-muted">Composite</span>
-                <span className="font-mono font-semibold text-accent">
-                  {session.composite_score ?? "—"}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted">Accuracy</span>
-                <span className="font-mono">{session.accuracy_score ?? "—"}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted">Turns</span>
-                <span className="font-mono">{session.total_turns}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted">Tokens</span>
-                <span className="font-mono">{session.total_tokens}</span>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
