@@ -3,11 +3,19 @@
 Tests the Claude Vision API integration for comparing images.
 
 Usage:
-    python backend/test_vision_comparison.py
+    python backend/evaluation/tests/test_vision_comparison.py
+    # OR from backend directory:
+    python -m evaluation.tests.test_vision_comparison
 """
 
 import asyncio
-from vision_comparison import VisionComparator, VisionComparisonResult
+import sys
+from pathlib import Path
+
+# Add backend directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+from evaluation import VisionComparator, VisionComparisonResult
 
 
 async def test_vision_comparison():

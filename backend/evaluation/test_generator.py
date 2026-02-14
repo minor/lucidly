@@ -5,6 +5,13 @@ from typing import Any
 from pydantic import BaseModel
 import httpx
 
+import sys
+from pathlib import Path
+
+# Add parent directory to path for absolute imports
+if str(Path(__file__).parent.parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from challenges import Challenge, TestCase
 from llm import LLM, LLMResponse
 from config import settings

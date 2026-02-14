@@ -4,10 +4,18 @@ import json
 from typing import Any
 from dataclasses import dataclass
 
+import sys
+from pathlib import Path
+
+# Add parent directory to path for absolute imports
+if str(Path(__file__).parent.parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from challenges import Challenge, TestCase
-from test_generator import GeneratedTestSuite
 from modal_execution import ModalExecutor, ExecutionType
-from vision_comparison import VisionComparator
+from .test_generator import GeneratedTestSuite
+from .vision_comparison import VisionComparator
+from .screenshot_vision_integration import compare_with_challenge_reference
 
 
 @dataclass
@@ -72,33 +80,24 @@ class ChallengeEvaluator:
         # Execute code in sandbox (placeholder for now)
         execution_output = await self._execute_code_placeholder(generated_code, "ui")
         
-        # Try to extract screenshot URL from execution output
-        # In real implementation, this would come from ModalExecutor.execute_ui_with_screenshot()
-        screenshot_url = None
-        if execution_output and isinstance(execution_output, str):
-            # Check if execution_output contains a URL (when Modal is implemented)
-            import re
-            url_match = re.search(r'https?://[^\s<>"{}|\\^`\[\]]+', execution_output)
-            if url_match and ("screenshot" in execution_output.lower() or "image" in execution_output.lower()):
-                screenshot_url = url_match.group(0)
-        
-        # Use vision comparison if both reference image and screenshot are available
+        # Use vision comparison if reference image is available
+        # Capture screenshot directly from generated HTML (no persistence needed)
         vision_comparison_result = None
-        if (
-            self.vision_comparator
-            and challenge.image_url
-            and screenshot_url
-            and "Placeholder" not in str(screenshot_url)
-        ):
+        if self.vision_comparator and challenge.image_url:
             try:
-                vision_comparison_result = await self.vision_comparator.compare_images(
-                    reference_image_url=challenge.image_url,
-                    generated_image_url=screenshot_url,
-                    challenge_description=challenge.description,
+                # Use the integrated screenshot + vision comparison function
+                vision_comparison_result = await compare_with_challenge_reference(
+                    generated_html=generated_code,
+                    challenge=challenge,
+                    generated_selector=None,  # Can specify 'iframe' or other selector if needed
+                    width=1280,
+                    height=720,
                 )
             except Exception as e:
                 # Vision comparison failed, fall back to code analysis
                 print(f"Vision comparison failed: {e}")
+                import traceback
+                traceback.print_exc()
                 vision_comparison_result = None
         
         # Analyze code structure (fallback or supplement to vision comparison)
@@ -257,7 +256,7 @@ class ChallengeEvaluator:
         Uses existing run_function_tests logic.
         Prioritizes challenge.test_suite if available, otherwise uses generated test suite.
         """
-        from scoring import run_function_tests
+        from .scoring import run_function_tests
         
         # Prioritize challenge's test_suite if available
         if challenge.test_suite:

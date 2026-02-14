@@ -9,6 +9,13 @@ import httpx
 from typing import Any
 from dataclasses import dataclass
 
+import sys
+from pathlib import Path
+
+# Add parent directory to path for absolute imports
+if str(Path(__file__).parent.parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from config import settings
 
 
@@ -39,16 +46,27 @@ class VisionComparator:
         Compare a reference image with a generated screenshot using Claude Vision.
         
         Args:
-            reference_image_url: URL to the challenge's reference/ground truth image
-            generated_image_url: URL to the generated screenshot from sandbox
+            reference_image_url: URL to the challenge's reference/ground truth image,
+                                or base64 data URL (data:image/png;base64,...)
+            generated_image_url: URL to the generated screenshot from sandbox,
+                                or base64 data URL (data:image/png;base64,...)
             challenge_description: Optional description of what should match
         
         Returns:
             VisionComparisonResult with similarity score and detailed feedback
         """
-        # Fetch images and convert to base64
-        reference_image_data = await self._fetch_image_as_base64(reference_image_url)
-        generated_image_data = await self._fetch_image_as_base64(generated_image_url)
+        # Check if inputs are already base64 data URLs
+        if reference_image_url.startswith("data:image/"):
+            reference_image_data = reference_image_url
+        else:
+            # Fetch from URL and convert to base64
+            reference_image_data = await self._fetch_image_as_base64(reference_image_url)
+        
+        if generated_image_url.startswith("data:image/"):
+            generated_image_data = generated_image_url
+        else:
+            # Fetch from URL and convert to base64
+            generated_image_data = await self._fetch_image_as_base64(generated_image_url)
         
         # Build the comparison prompt
         comparison_prompt = self._build_comparison_prompt(challenge_description)
@@ -57,6 +75,36 @@ class VisionComparator:
         response = await self._call_vision_api(
             reference_image_data,
             generated_image_data,
+            comparison_prompt,
+        )
+        
+        # Parse response to extract similarity score and feedback
+        return self._parse_vision_response(response)
+    
+    async def compare_base64_images(
+        self,
+        reference_image_base64: str,
+        generated_image_base64: str,
+        challenge_description: str | None = None,
+    ) -> VisionComparisonResult:
+        """
+        Compare two base64-encoded images directly (no URL fetching).
+        
+        Args:
+            reference_image_base64: Base64 data URL of reference image (data:image/png;base64,...)
+            generated_image_base64: Base64 data URL of generated image (data:image/png;base64,...)
+            challenge_description: Optional description of what should match
+        
+        Returns:
+            VisionComparisonResult with similarity score and detailed feedback
+        """
+        # Build the comparison prompt
+        comparison_prompt = self._build_comparison_prompt(challenge_description)
+        
+        # Call Claude Vision API directly with base64 data
+        response = await self._call_vision_api(
+            reference_image_base64,
+            generated_image_base64,
             comparison_prompt,
         )
         

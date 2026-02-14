@@ -4,18 +4,24 @@ This is a simpler version that tests one challenge at a time.
 Useful for debugging or quick validation.
 
 Usage:
-    python backend/test_pipeline_quick.py [challenge_id]
+    python backend/evaluation/tests/test_pipeline_quick.py [challenge_id]
+    # OR from backend directory:
+    python -m evaluation.tests.test_pipeline_quick [challenge_id]
     
 Examples:
-    python backend/test_pipeline_quick.py build-landing-page
-    python backend/test_pipeline_quick.py nyt-front-page-scraper
+    python backend/evaluation/tests/test_pipeline_quick.py build-landing-page
+    python backend/evaluation/tests/test_pipeline_quick.py nyt-front-page-scraper
 """
 
 import asyncio
 import sys
+from pathlib import Path
+
+# Add backend directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
 from challenges import get_challenge_by_id, get_all_challenges
-from test_generator import TestGenerator
-from evaluator import ChallengeEvaluator
+from evaluation import TestGenerator, ChallengeEvaluator
 
 
 async def quick_test(challenge_id: str | None = None):
@@ -61,7 +67,7 @@ async def quick_test(challenge_id: str | None = None):
         import traceback
         traceback.print_exc()
         return
-    
+
     # Step 2: Test evaluation with placeholder code
     print(f"\nStep 2: Testing evaluation...")
     evaluator = ChallengeEvaluator()

@@ -22,14 +22,15 @@ from sessions import (
     Turn,
     LeaderboardEntry,
 )
-from scoring import (
+from evaluation import (
     compute_composite_score,
     compute_accuracy_function,
     compute_accuracy_text,
     run_function_tests_detailed,
+    TestGenerator,
+    GeneratedTestSuite,
+    ChallengeEvaluator,
 )
-from test_generator import TestGenerator, GeneratedTestSuite
-from evaluator import ChallengeEvaluator
 from sandbox import create_sandbox, terminate_sandbox
 
 # ---------------------------------------------------------------------------
@@ -437,7 +438,7 @@ async def chat_stream(req: ChatRequest):
                     
                     payload = {
                         "model": model,
-                        "max_tokens": 4096,
+                        "max_tokens": 16384,
                         "messages": messages_for_api,
                         "system": system_message,
                         "stream": True,

@@ -6,16 +6,23 @@ This script tests:
 3. End-to-end pipeline functionality
 
 Usage:
-    python backend/test_pipeline.py
+    python backend/evaluation/tests/test_pipeline.py
+    # OR from backend directory:
+    python -m evaluation.tests.test_pipeline
 """
 
 import asyncio
 import json
 from typing import Any
 
+import sys
+from pathlib import Path
+
+# Add backend directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
 from challenges import Challenge, get_challenge_by_id, get_all_challenges
-from test_generator import TestGenerator
-from evaluator import ChallengeEvaluator
+from evaluation import TestGenerator, ChallengeEvaluator
 from llm import LLM
 
 
