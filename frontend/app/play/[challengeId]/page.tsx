@@ -16,7 +16,6 @@ import {
   Loader2,
   CheckCircle,
   ArrowLeft,
-  Info,
   Trophy,
 } from "lucide-react";
 
@@ -43,7 +42,6 @@ export default function ChallengePage() {
   const [error, setError] = useState<string | null>(null);
   const [completed, setCompleted] = useState(false);
   const [scores, setScores] = useState<Scores | null>(null);
-  const [showInfo, setShowInfo] = useState(true);
 
   // Metrics
   const [totalTokens, setTotalTokens] = useState(0);
@@ -96,7 +94,6 @@ export default function ChallengePage() {
     async (prompt: string) => {
       if (!sessionId || loading || completed) return;
 
-      // Add user message
       setChat((prev) => [...prev, { role: "user", content: prompt }]);
       setLoading(true);
       setError(null);
@@ -178,16 +175,6 @@ export default function ChallengePage() {
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => setShowInfo(!showInfo)}
-            className={`rounded-lg p-2 transition-colors ${
-              showInfo
-                ? "bg-accent/10 text-accent"
-                : "text-muted hover:text-foreground"
-            }`}
-          >
-            <Info className="h-4 w-4" />
-          </button>
           {!completed && totalTurns > 0 && (
             <button
               onClick={handleComplete}
@@ -201,7 +188,7 @@ export default function ChallengePage() {
         </div>
       </header>
 
-      {/* Score bar */}
+      {/* Efficiency stats at top */}
       <div className="border-b border-border px-6 py-2">
         <ScoreBar
           accuracy={lastAccuracy}
@@ -212,119 +199,106 @@ export default function ChallengePage() {
         />
       </div>
 
-      {/* Main content */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Chat area */}
-        <div className="flex flex-1 flex-col">
-          <div className="flex-1 overflow-y-auto px-6 py-4">
-            {/* Challenge info card */}
-            {showInfo && challenge && (
-              <div className="mb-6 rounded-xl border border-border bg-card p-5">
-                <h2 className="text-sm font-semibold mb-2">
-                  Challenge Description
-                </h2>
-                <p className="text-sm text-muted leading-relaxed whitespace-pre-wrap">
-                  {challenge.description}
-                </p>
-                {challenge.test_suite && challenge.test_suite.length > 0 && (
-                  <div className="mt-4">
-                    <h3 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">
-                      Test Cases
-                    </h3>
-                    <div className="space-y-1.5">
-                      {challenge.test_suite.map((tc, i) => (
-                        <div
-                          key={i}
-                          className="rounded-lg bg-code-bg px-3 py-2 text-xs font-mono"
-                        >
-                          <span className="text-muted">Input:</span>{" "}
-                          {tc.input}
-                          <br />
-                          <span className="text-muted">Expected:</span>{" "}
-                          {tc.expected_output}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+      {/* Main content: left = description + output, right = chat */}
+      <div className="flex flex-1 min-h-0">
+        {/* Left: Challenge description and output */}
+        <div className="flex-1 flex flex-col min-w-0 border-r border-border">
+          {/* Top left: Challenge description and image/visual */}
+          <div className="border-b border-border p-5 overflow-y-auto">
+            <h2 className="text-sm font-semibold mb-2">Challenge</h2>
+            <p className="text-sm text-muted leading-relaxed whitespace-pre-wrap mb-4">
+              {challenge?.description}
+            </p>
+            {challenge?.image_url && (
+              <div className="rounded-lg border border-border overflow-hidden bg-muted/20">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={challenge.image_url}
+                  alt="Challenge reference"
+                  className="w-full max-h-[280px] object-contain object-top"
+                />
               </div>
             )}
+            {challenge?.test_suite && challenge.test_suite.length > 0 && (
+              <div className="mt-4">
+                <h3 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">
+                  Test Cases
+                </h3>
+                <div className="space-y-1.5">
+                  {challenge.test_suite.map((tc, i) => (
+                    <div
+                      key={i}
+                      className="rounded-lg bg-code-bg px-3 py-2 text-xs font-mono"
+                    >
+                      <span className="text-muted">Input:</span> {tc.input}
+                      <br />
+                      <span className="text-muted">Expected:</span>{" "}
+                      {tc.expected_output}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
 
-            {/* Chat messages */}
+          {/* Bottom left: Output (hard-coded for now) */}
+          <div className="flex-1 min-h-0 flex flex-col p-5 overflow-hidden">
+            <h2 className="text-sm font-semibold mb-2">Output</h2>
+            <div className="flex-1 rounded-lg border border-border bg-code-bg p-4 overflow-auto">
+              <pre className="text-xs font-mono text-muted whitespace-pre-wrap">
+                {`// Your generated output will appear here.
+// For now this is a placeholder.
+
+// Example (landing page):
+// <!DOCTYPE html>
+// <html>...</html>
+
+// Example (snake game):
+// Canvas + JS game loop
+
+// Example (NYT scraper):
+// [{"title": "...", "url": "..."}, ...]`}
+              </pre>
+            </div>
+          </div>
+        </div>
+
+        {/* Right: Chat panel (IDE-style, no avatars) */}
+        <div className="flex flex-col w-[420px] shrink-0">
+          <div className="flex-1 overflow-y-auto px-4 py-4">
             {chat.map((entry, i) => (
               <ChatMessage key={i} {...entry} />
             ))}
-
-            {/* Loading indicator */}
             {loading && (
               <div className="flex items-center gap-2 py-4 text-sm text-muted">
                 <Loader2 className="h-4 w-4 animate-spin" />
                 Generating...
               </div>
             )}
-
-            {/* Completion card */}
+            {error && (
+              <div className="my-4 rounded-lg border border-error/20 bg-error/5 p-3">
+                <p className="text-sm text-error">{error}</p>
+              </div>
+            )}
             {completed && scores && (
-              <div className="my-6 rounded-xl border border-accent/30 bg-accent/5 p-6 text-center">
-                <Trophy className="mx-auto h-8 w-8 text-accent mb-3" />
-                <h2 className="text-xl font-serif font-semibold mb-1">
-                  Challenge Complete!
-                </h2>
-                <p className="text-3xl font-bold font-mono text-accent">
+              <div className="my-4 rounded-xl border border-accent/30 bg-accent/5 p-4 text-center">
+                <Trophy className="mx-auto h-6 w-6 text-accent mb-2" />
+                <p className="text-lg font-bold font-mono text-accent">
                   {scores.composite_score}
-                  <span className="text-sm font-normal text-muted">
-                    {" "}
-                    / 1000
-                  </span>
+                  <span className="text-xs font-normal text-muted"> / 1000</span>
                 </p>
-                <div className="mt-4 flex justify-center gap-6 text-sm">
-                  <div>
-                    <p className="font-semibold font-mono">
-                      {scores.accuracy_score}
-                    </p>
-                    <p className="text-xs text-muted">Accuracy</p>
-                  </div>
-                  <div>
-                    <p className="font-semibold font-mono">
-                      {scores.speed_score}
-                    </p>
-                    <p className="text-xs text-muted">Speed</p>
-                  </div>
-                  <div>
-                    <p className="font-semibold font-mono">
-                      {scores.token_score}
-                    </p>
-                    <p className="text-xs text-muted">Tokens</p>
-                  </div>
-                  <div>
-                    <p className="font-semibold font-mono">
-                      {scores.turn_score}
-                    </p>
-                    <p className="text-xs text-muted">Turns</p>
-                  </div>
-                </div>
                 <button
                   onClick={() => router.push("/play")}
-                  className="mt-6 rounded-lg bg-foreground px-6 py-2 text-sm font-medium text-background transition-opacity hover:opacity-80"
+                  className="mt-3 rounded-lg bg-foreground px-4 py-1.5 text-xs font-medium text-background hover:opacity-80"
                 >
                   Try Another Challenge
                 </button>
               </div>
             )}
-
-            {/* Error */}
-            {error && (
-              <div className="my-4 rounded-xl border border-error/20 bg-error/5 p-4 text-center">
-                <p className="text-sm text-error">{error}</p>
-              </div>
-            )}
-
             <div ref={chatEndRef} />
           </div>
-
-          {/* Prompt input */}
           {!completed && (
-            <div className="border-t border-border px-6 py-4">
+            <div className="border-t border-border p-4">
               <PromptInput
                 onSubmit={handleSubmit}
                 loading={loading}
