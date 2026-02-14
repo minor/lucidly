@@ -2,3 +2,4 @@ node_modules
 *.lock
 __pycache__
 *.lockb
+*.env

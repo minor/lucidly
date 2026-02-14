@@ -101,3 +101,73 @@ export function createSessionWebSocket(sessionId: string): WebSocket {
   const wsBase = API_BASE.replace(/^http/, "ws");
   return new WebSocket(`${wsBase}/ws/session/${sessionId}`);
 }
+
+// ---- Chat ----
+
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export async function streamChat(
+  messages: ChatMessage[],
+  model?: string,
+  onChunk?: (chunk: string) => void,
+  onComplete?: (fullResponse: string) => void,
+  onError?: (error: string) => void
+): Promise<void> {
+  const response = await fetch(`${API_BASE}/api/chat/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messages, model }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: response.statusText }));
+    onError?.(error.detail || "Failed to stream chat");
+    return;
+  }
+
+  const reader = response.body?.getReader();
+  const decoder = new TextDecoder();
+
+  if (!reader) {
+    onError?.("No response body");
+    return;
+  }
+
+  let buffer = "";
+  let fullResponse = "";
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.type === "chunk") {
+              fullResponse += data.content;
+              onChunk?.(data.content);
+            } else if (data.type === "done") {
+              onComplete?.(data.content || fullResponse);
+            } else if (data.type === "error") {
+              onError?.(data.message || "Unknown error");
+              return;
+            }
+          } catch (e) {
+            // Skip invalid JSON
+          }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}

@@ -8,6 +8,9 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_base_url: str = "https://api.openai.com/v1"
     default_model: str = "gpt-4o"
+    
+    # Anthropic/Claude configuration
+    anthropic_api_key: str = ""
 
     # Server configuration
     host: str = "0.0.0.0"
@@ -22,6 +25,7 @@ class Settings(BaseSettings):
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",
+        "case_sensitive": False,
     }
 
 
