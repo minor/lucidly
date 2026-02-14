@@ -8,6 +8,7 @@ import { ChatMessage } from "@/components/ChatMessage";
 import { ScoreBar } from "@/components/ScoreBar";
 import type { Challenge, Session, Turn } from "@/lib/types";
 import { Loader2, ArrowLeft, Trophy, Code, Eye } from "lucide-react";
+import { MODEL_PRICING } from "@/lib/api";
 
 const POLL_INTERVAL_MS = 1500;
 
@@ -120,6 +121,15 @@ export default function AgentRunWatchPage() {
       : "") ||
     "";
 
+  // Calculate total cost from turns
+  const totalCost = session?.turns?.reduce((acc, turn) => {
+    const model = session.model_used || "claude-3-opus-20240229";
+    const pricing = MODEL_PRICING[model] || MODEL_PRICING["claude-3-opus-20240229"];
+    const inputCost = (turn.prompt_tokens * pricing.input) / 1_000_000;
+    const outputCost = (turn.response_tokens * pricing.output) / 1_000_000;
+    return acc + inputCost + outputCost;
+  }, 0) ?? 0;
+
   return (
     <div className="flex h-screen flex-col">
       {/* Header — same style as play page */}
@@ -167,6 +177,7 @@ export default function AgentRunWatchPage() {
               : undefined
           }
           compositeScore={session?.composite_score ?? undefined}
+          cost={totalCost}
         />
         {isActive && (
           <span className="text-xs text-muted">Watching agent run…</span>

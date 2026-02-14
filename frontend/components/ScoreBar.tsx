@@ -102,7 +102,7 @@ export function ScoreBar({
             {tokens.toLocaleString()}
           </p>
           <p className="text-[10px] text-muted uppercase tracking-wider">
-            Tokens Output
+            Tokens
           </p>
         </div>
       </div>

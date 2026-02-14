@@ -110,6 +110,7 @@ export default function ChallengePage() {
   const [elapsed, setElapsed] = useState(0);
   const [totalTurns, setTotalTurns] = useState(0);
   const [totalTokens, setTotalTokens] = useState(0);
+  const [totalInputTokens, setTotalInputTokens] = useState(0);
   const [estimatedTokens, setEstimatedTokens] = useState(0);
   const [totalCost, setTotalCost] = useState(0);
   const [inputCost, setInputCost] = useState(0);
@@ -387,6 +388,7 @@ export default function ChallengePage() {
           // Opus input cost: dynamic pricing
           const pricing = MODEL_PRICING["claude-3-opus-20240229"];
           setInputCost((usage.input_tokens * pricing.input) / 1_000_000);
+          setTotalInputTokens((t) => t + usage.input_tokens);
         }
       },
       abortControllerRef.current?.signal
@@ -453,8 +455,9 @@ export default function ChallengePage() {
       <div className="flex items-center justify-between gap-4 border-b border-border px-6 py-2">
         <ScoreBar
           turns={totalTurns}
-          tokens={Math.round(totalTokens + estimatedTokens)}
+          tokens={Math.round(totalTokens + totalInputTokens + estimatedTokens)}
           elapsedSec={elapsed}
+          accuracy={testResults ? testResults.passed_count / testResults.total_count : undefined}
           cost={
             totalCost +
             inputCost +
