@@ -2,10 +2,10 @@
 
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { getChallenge, runTests, createSandbox, terminateSandbox } from "@/lib/api";
+import { getChallenge, runTests, runCode, createSandbox, terminateSandbox, MODEL_PRICING } from "@/lib/api";
 import { PromptInput } from "@/components/PromptInput";
 import { ScoreBar } from "@/components/ScoreBar";
-import { streamChat, type ChatMessage, type TestCaseResult, type RunTestsResponse, type StreamDoneData } from "@/lib/api";
+import { streamChat, type ChatMessage, type TestCaseResult, type RunTestsResponse, type StreamDoneData, type RunCodeResponse } from "@/lib/api";
 import type { Challenge } from "@/lib/types";
 import {
   Loader2,
@@ -133,6 +133,10 @@ export default function ChallengePage() {
   const [latestCode, setLatestCode] = useState<string>("");
   const [runningTests, setRunningTests] = useState(false);
 
+  // Code execution state (data challenges)
+  const [codeResult, setCodeResult] = useState<RunCodeResponse | null>(null);
+  const [runningCode, setRunningCode] = useState(false);
+
   // Sandbox state
   const [sandboxId, setSandboxId] = useState<string | null>(null);
   const [sandboxError, setSandboxError] = useState<string | null>(null);
@@ -178,11 +182,13 @@ export default function ChallengePage() {
     scrollToBottom();
   }, [messages, currentStreamingMessage]);
 
-  // Create sandbox when challenge loads (for function challenges with tests)
+  // Create sandbox when challenge loads (for function challenges with tests OR data challenges)
   useEffect(() => {
     if (!challenge) return;
     const hasFunctionTests = challenge.test_suite && challenge.test_suite.length > 0;
-    if (!hasFunctionTests) return;
+    const isDataChallenge = challenge.category === "data";
+    // Only create sandbox for function/data challenges
+    if (!hasFunctionTests && !isDataChallenge) return;
 
     let ignore = false;
     async function initSandbox() {
@@ -255,6 +261,25 @@ export default function ChallengePage() {
             setRunningTests(false);
           });
       }
+    } else if (isDataChallenge && sandboxId) {
+      // Auto-run code for data challenges
+      const code = extractPythonCode(latest.content);
+      if (code) {
+        setRenderedCode(code); // Reuse renderedCode for data challenges to show in "Code" tab if needed
+        setRunningCode(true);
+        setCodeResult(null);
+        
+        runCode(sandboxId, code)
+          .then((result) => {
+            setCodeResult(result);
+            setRunningCode(false);
+          })
+          .catch((e) => {
+            console.error("Failed to run code:", e);
+            setCodeResult({ stdout: "", stderr: `Error running code: ${e}`, returncode: 1 });
+            setRunningCode(false);
+          });
+      }
     }
   }, [messages, challenge, challengeId, sandboxId]);
 
@@ -266,8 +291,9 @@ export default function ChallengePage() {
       // Persist estimated tokens and cost so far
       if (estimatedTokens > 0 || inputCost > 0) {
         setTotalTokens((t) => t + Math.round(estimatedTokens));
-        // Calculate estimated output cost (Opus input=$15/M, output=$75/M)
-        const outputCost = (estimatedTokens * 75) / 1_000_000;
+        // Calculate estimated output cost dynamically
+        const pricing = MODEL_PRICING["claude-3-opus-20240229"];
+        const outputCost = (estimatedTokens * pricing.output) / 1_000_000;
         setTotalCost((c) => c + inputCost + outputCost);
         setEstimatedTokens(0);
         setInputCost(0);
@@ -333,8 +359,9 @@ export default function ChallengePage() {
       },
       (usage) => {
         if (usage.input_tokens) {
-          // Opus input cost: $15/M tokens
-          setInputCost((usage.input_tokens * 15) / 1_000_000);
+          // Opus input cost: dynamic pricing
+          const pricing = MODEL_PRICING["claude-3-opus-20240229"];
+          setInputCost((usage.input_tokens * pricing.input) / 1_000_000);
         }
       },
       abortControllerRef.current?.signal
@@ -344,8 +371,12 @@ export default function ChallengePage() {
   const isUiChallenge = challenge?.category === "ui";
   const hasFunctionTests =
     challenge?.test_suite && challenge.test_suite.length > 0;
+  const isDataChallenge = challenge?.category === "data";
+
   const hasBottomPanel =
-    (isUiChallenge && renderedCode) || (hasFunctionTests && (testResults || runningTests));
+    (isUiChallenge && renderedCode) || 
+    (hasFunctionTests && (testResults || runningTests)) ||
+    (isDataChallenge && (codeResult || runningCode));
 
   if (initializing) {
     return (
@@ -389,7 +420,11 @@ export default function ChallengePage() {
           turns={totalTurns}
           tokens={Math.round(totalTokens + estimatedTokens)}
           elapsedSec={elapsed}
-          cost={totalCost + inputCost + ((estimatedTokens * 75) / 1_000_000)}
+          cost={
+            totalCost +
+            inputCost +
+            ((estimatedTokens * MODEL_PRICING["claude-3-opus-20240229"].output) / 1_000_000)
+          }
         />
       </div>
 
@@ -468,6 +503,48 @@ export default function ChallengePage() {
           {/* Bottom: Output panel */}
           {hasBottomPanel && (
             <div className="h-1/2 flex flex-col">
+              {/* ---- Data Challenge Execution Output ---- */}
+              {isDataChallenge && (
+                <div className="flex flex-col h-full bg-card">
+                  <div className="px-4 py-2 border-b border-border bg-muted/30 flex justify-between items-center">
+                    <span className="text-sm font-medium">Execution Output</span>
+                    {codeResult && (
+                      <span className={`text-xs ${codeResult.returncode === 0 ? "text-green-500" : "text-red-400"}`}>
+                        {codeResult.returncode === 0 ? "Success" : "Failed"}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex-1 p-4 overflow-auto font-mono text-xs">
+                    {runningCode ? (
+                      <div className="flex items-center gap-2 text-muted-foreground">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Running code...
+                      </div>
+                    ) : codeResult ? (
+                      <div className="space-y-4">
+                        {codeResult.stdout && (
+                          <div>
+                            <div className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">Stdout</div>
+                            <pre className="whitespace-pre-wrap text-foreground bg-muted/30 p-2 rounded">{codeResult.stdout}</pre>
+                          </div>
+                        )}
+                        {codeResult.stderr && (
+                          <div>
+                            <div className="text-[10px] text-error mb-1 uppercase tracking-wider text-red-400">Stderr</div>
+                            <pre className="whitespace-pre-wrap text-red-400 bg-red-400/10 p-2 rounded">{codeResult.stderr}</pre>
+                          </div>
+                        )}
+                        {!codeResult.stdout && !codeResult.stderr && (
+                          <div className="text-muted-foreground italic">No output</div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-muted-foreground italic">Run your code to see output here</div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* ---- UI Preview ---- */}
               {isUiChallenge && renderedCode && (
                 <>
@@ -725,6 +802,9 @@ export default function ChallengePage() {
           {/* Input Area */}
           <div className="border-t border-border bg-background">
             <div className="px-6 py-4">
+              <div className="flex justify-between items-center mb-2">
+                <div></div>
+              </div>
               <PromptInput
                 onSubmit={handleSubmit}
                 onStop={handleStop}

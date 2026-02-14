@@ -439,10 +439,25 @@ async def chat_stream(req: ChatRequest):
                                 except json.JSONDecodeError:
                                     continue
                         
-                        # Calculate cost (Claude Opus 4 pricing: $15/M input, $75/M output)
-                        cost = (input_tokens * 15 + output_tokens * 75) / 1_000_000
+                        # Dynamic cost calculation
+                        from config import MODEL_PRICING
+                        model_name = req.model or "claude-3-opus"
+                        pricing = MODEL_PRICING.get(model_name)
                         
-                        yield f"data: {json.dumps({'type': 'done', 'content': full_response, 'input_tokens': input_tokens, 'output_tokens': output_tokens, 'cost': round(cost, 4)})}\n\n"
+                        # Fallback logic if exact match fails
+                        if not pricing:
+                            for key, p in MODEL_PRICING.items():
+                                if model_name.startswith(key):
+                                    pricing = p
+                                    break
+                        
+                        # Defauit to Opus if still not found
+                        if not pricing:
+                            pricing = {"input": 15.0, "output": 75.0}
+
+                        cost = (input_tokens * pricing["input"] + output_tokens * pricing["output"]) / 1_000_000
+                        
+                        yield f"data: {json.dumps({'type': 'done', 'content': full_response, 'input_tokens': input_tokens, 'output_tokens': output_tokens, 'cost': cost})}\n\n"
             else:
                 # Use OpenAI-compatible API (e.g., OpenRouter)
                 conversation_history = []
@@ -531,6 +546,11 @@ async def terminate_sandbox_endpoint(sandbox_id: str):
 # ---------------------------------------------------------------------------
 
 
+class RunCodeRequest(BaseModel):
+    sandbox_id: str
+    code: str
+
+
 class RunTestsRequest(BaseModel):
     code: str
     challenge_id: str
@@ -585,3 +605,12 @@ async def run_tests(req: RunTestsRequest) -> RunTestsResponse:
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "model": settings.default_model}
+@app.post("/api/run-code")
+async def run_code(req: RunCodeRequest):
+    """Run arbitrary code in a sandbox (for data challenges)."""
+    try:
+        from sandbox import run_code_in_sandbox
+        result = await run_code_in_sandbox(req.sandbox_id, req.code)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

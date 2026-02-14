@@ -222,6 +222,12 @@ export interface RunTestsResponse {
   total_count: number;
 }
 
+export interface RunCodeResponse {
+  stdout: string;
+  stderr: string;
+  returncode: number;
+}
+
 export async function runTests(
   code: string,
   challengeId: string,
@@ -233,3 +239,22 @@ export async function runTests(
   });
 }
 
+export async function runCode(
+  sandboxId: string,
+  code: string
+): Promise<RunCodeResponse> {
+  return fetchJSON<RunCodeResponse>("/api/run-code", {
+    method: "POST",
+    body: JSON.stringify({ sandbox_id: sandboxId, code }),
+  });
+}
+
+
+export const MODEL_PRICING: Record<string, { input: number; output: number }> = {
+  "claude-3-opus-20240229": { input: 15.0, output: 75.0 },
+  "claude-3-opus": { input: 15.0, output: 75.0 },
+  "claude-3-5-sonnet-20240620": { input: 3.0, output: 15.0 },
+  "claude-3-5-sonnet": { input: 3.0, output: 15.0 },
+  "o1-mini": { input: 3.0, output: 12.0 },
+  "o1-preview": { input: 15.0, output: 60.0 },
+};

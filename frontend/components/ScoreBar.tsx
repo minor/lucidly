@@ -27,8 +27,7 @@ export function ScoreBar({
 
   const formatCost = (c: number) => {
     if (c === 0) return "$0.00";
-    if (c < 0.01) return `$${c.toFixed(4)}`;
-    return `$${c.toFixed(2)}`;
+    return `$${c.toFixed(4)}`;
   };
 
   return (
