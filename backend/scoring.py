@@ -97,6 +97,17 @@ def run_function_tests(code: str, test_suite: list[dict]) -> list[bool]:
     Each test case has an `input` expression and `expected_output` string.
     We exec() the code then eval() the input expression and compare.
     """
+    # Use Modal sandbox if available
+    try:
+        from sandbox import app, run_python_tests_in_sandbox
+        with app.run():
+             return run_python_tests_in_sandbox.remote(code, test_suite)
+    except ImportError:
+        print("Modal not installed. Falling back to local execution.")
+    except Exception as e:
+        print(f"Modal sandbox failed: {e}. Falling back to local execution (INSECURE).")
+        
+    # Fallback to local execution (same as before)
     results: list[bool] = []
 
     # Helper functions available in test context
