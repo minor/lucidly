@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { Sparkles } from "lucide-react";
 import { PromptInput } from "@/components/PromptInput";
 import { streamChat, type ChatMessage } from "@/lib/api";
@@ -11,6 +11,70 @@ export default function ChatPage() {
   const [currentStreamingMessage, setCurrentStreamingMessage] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
+  
+  // Chat window resize state
+  const [chatWidth, setChatWidth] = useState(50); // Percentage of screen width
+  const [isResizing, setIsResizing] = useState(false);
+  const startXRef = useRef<number>(0);
+  const startWidthRef = useRef<number>(0);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Load chat width from localStorage on mount
+  useEffect(() => {
+    const savedWidth = localStorage.getItem("chat-width");
+    if (savedWidth) {
+      const parsedWidth = parseFloat(savedWidth);
+      if (parsedWidth >= 33.33 && parsedWidth <= 100) {
+        setChatWidth(parsedWidth);
+      }
+    }
+  }, []);
+
+  // Save chat width to localStorage when it changes
+  useEffect(() => {
+    if (chatWidth >= 33.33 && chatWidth <= 100) {
+      localStorage.setItem("chat-width", chatWidth.toString());
+    }
+  }, [chatWidth]);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsResizing(true);
+    startXRef.current = e.clientX;
+    startWidthRef.current = chatWidth;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  }, [chatWidth]);
+
+  const handleMouseMove = useCallback((e: MouseEvent) => {
+    if (!isResizing || !containerRef.current) return;
+    
+    const containerWidth = containerRef.current.offsetWidth;
+    const diff = e.clientX - startXRef.current;
+    const diffPercent = (diff / containerWidth) * 100;
+    // When dragging right (positive diff), chat window gets smaller (decrease width)
+    // When dragging left (negative diff), chat window gets larger (increase width)
+    const newWidth = Math.max(33.33, Math.min(100, startWidthRef.current - diffPercent));
+    setChatWidth(newWidth);
+  }, [isResizing]);
+
+  const handleMouseUp = useCallback(() => {
+    setIsResizing(false);
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+  }, []);
+
+  useEffect(() => {
+    if (isResizing) {
+      document.addEventListener("mousemove", handleMouseMove);
+      document.addEventListener("mouseup", handleMouseUp);
+      return () => {
+        document.removeEventListener("mousemove", handleMouseMove);
+        document.removeEventListener("mouseup", handleMouseUp);
+      };
+    }
+  }, [isResizing, handleMouseMove, handleMouseUp]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -60,12 +124,37 @@ export default function ChatPage() {
   };
 
   return (
-    <div className="flex h-full">
+    <div ref={containerRef} className="flex h-full relative">
       {/* Left Side - Blank */}
-      <div className="w-1/2 border-r border-border"></div>
+      <div 
+        className="border-r border-border"
+        style={{ width: `${100 - chatWidth}%` }}
+      ></div>
+
+      {/* Resize handle */}
+      <div
+        onMouseDown={handleMouseDown}
+        className="absolute top-0 bottom-0 cursor-col-resize"
+        style={{ 
+          left: `calc(${100 - chatWidth}% - 20px)`,
+          zIndex: 1000,
+          width: '40px',
+          pointerEvents: 'auto',
+          userSelect: 'none',
+          backgroundColor: '#ff0000',
+          border: '2px solid #ff0000'
+        }}
+        aria-label="Resize chat window"
+        title="Drag to resize"
+      />
 
       {/* Right Side - Chat Interface (Cursor-style) */}
-      <div className="w-1/2 flex flex-col h-full bg-background">
+      <div 
+        className={`flex flex-col h-full bg-background ${
+          !isResizing ? "transition-all duration-200" : ""
+        }`}
+        style={{ width: `${chatWidth}%` }}
+      >
         {/* Minimal Header */}
         <div className="border-b border-border px-6 py-3 flex items-center gap-2">
           <Sparkles className="h-4 w-4 text-muted" />

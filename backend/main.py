@@ -4,7 +4,7 @@ import json
 import time
 import httpx
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from config import settings
 from llm import LLM
 from challenges import get_all_challenges, get_challenge_by_id
+from agents import get_all_agents, get_agent_by_id
 from sessions import (
     create_session,
     get_session,
@@ -70,6 +71,7 @@ class CreateSessionRequest(BaseModel):
 class PromptRequest(BaseModel):
     prompt: str
     model: str | None = None
+    system_prompt: str | None = None
 
 
 class ChatMessage(BaseModel):
@@ -92,6 +94,11 @@ class PromptResponse(BaseModel):
     test_results: list[bool] | None = None
     evaluation_details: dict | None = None  # Additional evaluation details
     execution_output: str | None = None  # Output from code execution
+
+
+class AgentRunRequest(BaseModel):
+    agent_id: str
+    challenge_id: str
 
 
 # ---------------------------------------------------------------------------
@@ -157,11 +164,23 @@ async def get_session_state(session_id: str):
     return session
 
 
+def _require_agent_token_if_agent(session, request: Request) -> None:
+    if not session.username.startswith("agent:"):
+        return
+    secret = settings.agent_internal_secret
+    if not secret:
+        return
+    token = request.headers.get("X-Agent-Token") or request.headers.get("Authorization", "").replace("Bearer ", "")
+    if token != secret:
+        raise HTTPException(status_code=401, detail="Invalid or missing agent token")
+
+
 @app.post("/api/sessions/{session_id}/prompt")
-async def submit_prompt(session_id: str, req: PromptRequest):
+async def submit_prompt(session_id: str, request: Request, req: PromptRequest):
     session = get_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
+    _require_agent_token_if_agent(session, request)
     if session.status != "active":
         raise HTTPException(status_code=400, detail="Session is not active")
 
@@ -181,6 +200,7 @@ async def submit_prompt(session_id: str, req: PromptRequest):
     response = await llm_instance.generate(
         req.prompt,
         conversation_history=history if history else None,
+        system_prompt=req.system_prompt,
     )
 
     # Generate tests if not already present, then evaluate
@@ -229,10 +249,11 @@ async def submit_prompt(session_id: str, req: PromptRequest):
 
 
 @app.post("/api/sessions/{session_id}/complete")
-async def finish_session(session_id: str):
+async def finish_session(session_id: str, request: Request):
     session = get_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
+    _require_agent_token_if_agent(session, request)
     if session.status != "active":
         raise HTTPException(status_code=400, detail="Session already completed")
 
@@ -285,6 +306,42 @@ async def finish_session(session_id: str):
 @app.get("/api/leaderboard")
 async def leaderboard(limit: int = 50, category: str | None = None):
     return get_leaderboard(limit=limit, category=category)
+
+
+# ---------------------------------------------------------------------------
+# Agents (benchmark runs)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/agents")
+async def list_agents():
+    return get_all_agents()
+
+
+@app.post("/api/agent-runs")
+async def start_agent_run(req: AgentRunRequest):
+    agent = get_agent_by_id(req.agent_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    challenge = get_challenge_by_id(req.challenge_id)
+    if challenge is None:
+        raise HTTPException(status_code=404, detail="Challenge not found")
+    username = f"agent:{agent.id}"
+    session = create_session(req.challenge_id, agent.model, username)
+    try:
+        import modal
+        fn = modal.Function.lookup(settings.modal_app_name, "run_agent")
+        fn.spawn(
+            session_id=session.id,
+            challenge_id=req.challenge_id,
+            agent_id=req.agent_id,
+            backend_url=settings.backend_public_url,
+            agent_token=settings.agent_internal_secret or "",
+        )
+    except Exception:
+        # Modal not configured or deploy missing; frontend can still poll session
+        pass
+    return {"session_id": session.id, "challenge_id": req.challenge_id, "agent_id": req.agent_id}
 
 
 # ---------------------------------------------------------------------------

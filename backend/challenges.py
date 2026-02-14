@@ -34,7 +34,7 @@ SEED_CHALLENGES: list[Challenge] = [
         ),
         category="ui",
         difficulty="medium",
-        embed_url="https://treehacks.com/",
+        embed_url="https://openai.com/",
     ),
     Challenge(
         id="build-snake-game",

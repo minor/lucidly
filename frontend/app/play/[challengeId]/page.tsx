@@ -17,6 +17,7 @@ import {
   CheckCircle2,
   XCircle,
   FlaskConical,
+  GripHorizontal,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -110,8 +111,13 @@ export default function ChallengePage() {
   const [totalTurns, setTotalTurns] = useState(0);
   const [totalTokens, setTotalTokens] = useState(0);
 
-  // Your output panel: Preview | Code (v0-style toggle)
+  // Your output panel: resizable height (small initially), Preview | Code toggle
+  const OUTPUT_PANEL_MIN = 120;
+  const OUTPUT_PANEL_INITIAL = 200;
+  const [outputPanelHeight, setOutputPanelHeight] = useState(OUTPUT_PANEL_INITIAL);
   const [outputView, setOutputView] = useState<"preview" | "code">("preview");
+  const resizeStartYRef = useRef<number>(0);
+  const resizeStartHeightRef = useRef<number>(OUTPUT_PANEL_INITIAL);
 
   // Chat state
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -119,6 +125,70 @@ export default function ChallengePage() {
   const [currentStreamingMessage, setCurrentStreamingMessage] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
+
+  // Chat window resize state
+  const [chatWidth, setChatWidth] = useState(50); // Percentage of screen width
+  const [isResizingChat, setIsResizingChat] = useState(false);
+  const chatResizeStartXRef = useRef<number>(0);
+  const chatResizeStartWidthRef = useRef<number>(0);
+  const mainContainerRef = useRef<HTMLDivElement>(null);
+
+  // Load chat width from localStorage on mount
+  useEffect(() => {
+    const savedWidth = localStorage.getItem("challenge-chat-width");
+    if (savedWidth) {
+      const parsedWidth = parseFloat(savedWidth);
+      if (parsedWidth >= 33.33 && parsedWidth <= 100) {
+        setChatWidth(parsedWidth);
+      }
+    }
+  }, []);
+
+  // Save chat width to localStorage when it changes
+  useEffect(() => {
+    if (chatWidth >= 33.33 && chatWidth <= 100) {
+      localStorage.setItem("challenge-chat-width", chatWidth.toString());
+    }
+  }, [chatWidth]);
+
+  const handleChatResizeMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsResizingChat(true);
+    chatResizeStartXRef.current = e.clientX;
+    chatResizeStartWidthRef.current = chatWidth;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  }, [chatWidth]);
+
+  const handleChatResizeMouseMove = useCallback((e: MouseEvent) => {
+    if (!isResizingChat || !mainContainerRef.current) return;
+    
+    const containerWidth = mainContainerRef.current.offsetWidth;
+    const diff = e.clientX - chatResizeStartXRef.current;
+    const diffPercent = (diff / containerWidth) * 100;
+    // When dragging right (positive diff), chat window gets smaller (decrease width)
+    // When dragging left (negative diff), chat window gets larger (increase width)
+    const newWidth = Math.max(33.33, Math.min(100, chatResizeStartWidthRef.current - diffPercent));
+    setChatWidth(newWidth);
+  }, [isResizingChat]);
+
+  const handleChatResizeMouseUp = useCallback(() => {
+    setIsResizingChat(false);
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+  }, []);
+
+  useEffect(() => {
+    if (isResizingChat) {
+      document.addEventListener("mousemove", handleChatResizeMouseMove);
+      document.addEventListener("mouseup", handleChatResizeMouseUp);
+      return () => {
+        document.removeEventListener("mousemove", handleChatResizeMouseMove);
+        document.removeEventListener("mouseup", handleChatResizeMouseUp);
+      };
+    }
+  }, [isResizingChat, handleChatResizeMouseMove, handleChatResizeMouseUp]);
 
   // UI preview state
   const [renderedCode, setRenderedCode] = useState<string>("");
@@ -163,6 +233,25 @@ export default function ChallengePage() {
     }, 1000);
     return () => clearInterval(interval);
   }, []);
+
+  // Draggable resize for "Your output" panel (drag up = expand)
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    resizeStartYRef.current = e.clientY;
+    resizeStartHeightRef.current = outputPanelHeight;
+    const onMove = (moveEvent: MouseEvent) => {
+      const delta = resizeStartYRef.current - moveEvent.clientY;
+      const next = resizeStartHeightRef.current + delta;
+      const max = typeof window !== "undefined" ? Math.max(400, window.innerHeight * 0.7) : 600;
+      setOutputPanelHeight(Math.min(max, Math.max(OUTPUT_PANEL_MIN, next)));
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }, [outputPanelHeight]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -294,7 +383,22 @@ export default function ChallengePage() {
   const hasFunctionTests =
     challenge?.test_suite && challenge.test_suite.length > 0;
   const hasBottomPanel =
-    (isUiChallenge && renderedCode) || (hasFunctionTests && (testResults || runningTests));
+    isUiChallenge || (hasFunctionTests && (testResults || runningTests));
+
+  // Placeholder for "Your output" when no code generated yet (UI challenges)
+  const OUTPUT_PLACEHOLDER_IMAGE =
+    "https://placehold.co/800x400/f8fafc/94a3b8?text=Your+rendered+page";
+  const OUTPUT_PLACEHOLDER_CODE = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>My Page</title>
+</head>
+<body>
+  <header>...</header>
+  <main>...</main>
+</body>
+</html>`;
 
   if (initializing) {
     return (
@@ -324,31 +428,34 @@ export default function ChallengePage() {
             </div>
           </div>
         </div>
-        <button
-          type="button"
-          className="rounded-lg bg-foreground px-4 py-2 text-xs font-medium text-background transition-opacity hover:opacity-90"
-        >
-          Submit solution
-        </button>
       </header>
 
-      {/* Efficiency stats */}
-      <div className="border-b border-border px-6 py-2">
+      {/* Efficiency stats + Submit solution */}
+      <div className="flex items-center justify-between gap-4 border-b border-border px-6 py-2">
         <ScoreBar
           turns={totalTurns}
           tokens={totalTokens}
           elapsedSec={elapsed}
         />
+        <button
+          type="button"
+          className="shrink-0 rounded-lg bg-foreground px-4 py-2 text-xs font-medium text-background transition-opacity hover:opacity-90"
+        >
+          Submit solution
+        </button>
       </div>
 
       {/* Main content */}
-      <div className="flex flex-1 min-h-0">
+      <div ref={mainContainerRef} className="flex flex-1 min-h-0 relative">
         {/* Left panel: Challenge description + output */}
-        <div className="flex-1 flex flex-col min-w-0 border-r border-border">
-          {/* Top: Challenge description (scrollable) */}
+        <div 
+          className="flex flex-col min-w-0 border-r border-border"
+          style={{ width: `${100 - chatWidth}%` }}
+        >
+          {/* Top: Challenge description (scrollable); flexes to fill space above output panel */}
           <div
             className={`${
-              hasBottomPanel ? "h-1/2" : "flex-1"
+              hasBottomPanel ? "min-h-0 flex-1" : "flex-1"
             } overflow-y-auto border-b border-border`}
           >
             <div className="p-6">
@@ -371,11 +478,11 @@ export default function ChallengePage() {
                 </div>
               )}
               {challenge?.embed_url && (
-                <div className="rounded-lg border border-border overflow-hidden bg-muted/20 mb-4">
+                <div className="rounded-lg border border-border overflow-hidden bg-muted/20 mb-4 h-[680px]">
                   <iframe
                     src={challenge.embed_url}
-                    title="Challenge reference"
-                    className="w-full h-[320px] border-0 rounded-lg"
+                    title="Challenge reference (top of page only)"
+                    className="w-full h-[900px] border-0 rounded-lg pointer-events-none"
                     sandbox="allow-scripts allow-same-origin"
                   />
                 </div>
@@ -413,19 +520,37 @@ export default function ChallengePage() {
             </div>
           </div>
 
-          {/* Bottom: Output panel */}
+          {/* Resize handle (drag up to expand output panel) */}
           {hasBottomPanel && (
-            <div className="h-1/2 flex flex-col">
-              {/* ---- UI Preview ---- */}
-              {isUiChallenge && renderedCode && (
+            <button
+              type="button"
+              onMouseDown={handleResizeStart}
+              className="flex w-full cursor-n-resize items-center justify-center border-t border-border bg-muted/10 py-1.5 text-muted hover:bg-muted/20 hover:text-foreground focus:outline-none"
+              aria-label="Resize output panel"
+            >
+              <GripHorizontal className="h-4 w-4" />
+            </button>
+          )}
+
+          {/* Bottom: Output panel (resizable height) */}
+          {hasBottomPanel && (
+            <div
+              className="flex shrink-0 flex-col border-t border-border bg-muted/5 overflow-hidden"
+              style={{ height: outputPanelHeight }}
+            >
+              {/* ---- UI Preview (always shown for UI challenges; placeholder until code is generated) ---- */}
+              {isUiChallenge && (
                 <>
-                  <div className="flex items-center border-b border-border px-4 py-2 shrink-0">
-                    <div className="flex items-center gap-1">
+                  <div className="flex items-center justify-between border-b border-border px-4 py-2.5 shrink-0 bg-background/80">
+                    <h3 className="text-sm font-semibold text-foreground">
+                      Your output
+                    </h3>
+                    <div className="flex items-center gap-1 rounded-lg border border-border bg-muted/30 p-0.5">
                       <button
                         onClick={() => setPreviewTab("preview")}
-                        className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                        className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
                           previewTab === "preview"
-                            ? "bg-accent/10 text-accent"
+                            ? "bg-background text-foreground shadow-sm"
                             : "text-muted hover:text-foreground"
                         }`}
                       >
@@ -434,9 +559,9 @@ export default function ChallengePage() {
                       </button>
                       <button
                         onClick={() => setPreviewTab("code")}
-                        className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                        className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
                           previewTab === "code"
-                            ? "bg-accent/10 text-accent"
+                            ? "bg-background text-foreground shadow-sm"
                             : "text-muted hover:text-foreground"
                         }`}
                       >
@@ -445,17 +570,28 @@ export default function ChallengePage() {
                       </button>
                     </div>
                   </div>
-                  <div className="flex-1 min-h-0 overflow-hidden">
+                  <div className="flex-1 min-h-0 overflow-hidden rounded-b-lg mx-2 mb-2 border border-border bg-code-bg/50">
                     {previewTab === "preview" ? (
-                      <iframe
-                        srcDoc={renderedCode}
-                        className="h-full w-full border-0 bg-white"
-                        sandbox="allow-scripts"
-                        title="Rendered output"
-                      />
+                      renderedCode ? (
+                        <iframe
+                          srcDoc={renderedCode}
+                          className="h-full w-full border-0 bg-white"
+                          sandbox="allow-scripts"
+                          title="Rendered output"
+                        />
+                      ) : (
+                        <div className="h-full flex items-center justify-center bg-muted/20">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={OUTPUT_PLACEHOLDER_IMAGE}
+                            alt="Your rendered output"
+                            className="max-h-full w-full object-contain object-top"
+                          />
+                        </div>
+                      )
                     ) : (
                       <pre className="h-full overflow-auto p-4 bg-code-bg text-xs font-mono">
-                        <code>{renderedCode}</code>
+                        <code>{renderedCode || OUTPUT_PLACEHOLDER_CODE}</code>
                       </pre>
                     )}
                   </div>
@@ -592,8 +728,30 @@ export default function ChallengePage() {
           )}
         </div>
 
+        {/* Resize handle */}
+        <div
+          onMouseDown={handleChatResizeMouseDown}
+          className={`absolute top-0 bottom-0 cursor-col-resize transition-colors ${
+            isResizingChat ? "bg-accent/20" : "bg-transparent hover:bg-border/30"
+          }`}
+          style={{ 
+            left: `calc(${100 - chatWidth}% - 2px)`,
+            zIndex: 100,
+            width: '4px',
+            pointerEvents: 'auto',
+            userSelect: 'none'
+          }}
+          aria-label="Resize chat window"
+          title="Drag to resize"
+        />
+
         {/* Right: Chat panel with streaming */}
-        <div className="flex flex-col w-1/2 shrink-0 border-l border-border">
+        <div 
+          className={`flex flex-col shrink-0 border-l border-border ${
+            !isResizingChat ? "transition-all duration-200" : ""
+          }`}
+          style={{ width: `${chatWidth}%` }}
+        >
           {/* Chat Header */}
           <div className="border-b border-border px-6 py-3 flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-muted" />
