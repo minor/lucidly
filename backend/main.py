@@ -26,8 +26,9 @@ from scoring import (
     compute_composite_score,
     compute_accuracy_function,
     compute_accuracy_text,
-    run_function_tests,
+    run_function_tests_detailed,
 )
+from sandbox import create_sandbox, terminate_sandbox
 
 # ---------------------------------------------------------------------------
 # App setup
@@ -159,12 +160,10 @@ async def submit_prompt(session_id: str, req: PromptRequest):
     accuracy = 0.0
     test_results = None
 
-    if challenge.category == "function" and challenge.test_suite:
-        test_dicts = [t.model_dump() for t in challenge.test_suite]
-        test_results = run_function_tests(response.generated_code, test_dicts)
-        accuracy = compute_accuracy_function(test_results)
-    elif challenge.target_code:
+    if challenge.target_code:
         accuracy = compute_accuracy_text(response.generated_code, challenge.target_code)
+    # Note: test-suite accuracy is computed via the /api/run-tests endpoint
+    # which uses the persistent sandbox created by the frontend
 
     # Record turn
     turn = Turn(
@@ -297,12 +296,9 @@ async def session_ws(ws: WebSocket, session_id: str):
                 # Compute accuracy
                 accuracy = 0.0
                 test_results = None
-                if challenge and challenge.category == "function" and challenge.test_suite:
-                    test_dicts = [t.model_dump() for t in challenge.test_suite]
-                    test_results = run_function_tests(generated_code, test_dicts)
-                    accuracy = compute_accuracy_function(test_results)
-                elif challenge and challenge.target_code:
+                if challenge and challenge.target_code:
                     accuracy = compute_accuracy_text(generated_code, challenge.target_code)
+                # Note: test-suite accuracy is computed via /api/run-tests
 
                 # We don't have token counts in streaming mode (most APIs
                 # don't return them mid-stream), so estimate from text length.
@@ -486,6 +482,84 @@ async def chat_stream(req: ChatRequest):
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
         },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Sandbox lifecycle endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/sandbox/create")
+async def create_sandbox_endpoint():
+    """Create a persistent Modal sandbox. Returns sandbox_id."""
+    try:
+        sandbox_id = await create_sandbox()
+        return {"sandbox_id": sandbox_id}
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create Modal sandbox: {e}",
+        )
+
+
+@app.post("/api/sandbox/{sandbox_id}/terminate")
+async def terminate_sandbox_endpoint(sandbox_id: str):
+    """Terminate a persistent Modal sandbox."""
+    found = await terminate_sandbox(sandbox_id)
+    if not found:
+        raise HTTPException(status_code=404, detail="Sandbox not found")
+    return {"status": "terminated"}
+
+
+# ---------------------------------------------------------------------------
+# Run tests endpoint — execute code in a persistent sandbox
+# ---------------------------------------------------------------------------
+
+
+class RunTestsRequest(BaseModel):
+    code: str
+    challenge_id: str
+    sandbox_id: str
+
+
+class TestCaseResult(BaseModel):
+    input: str
+    expected: str
+    actual: str | None = None
+    passed: bool
+    error: str | None = None
+
+
+class RunTestsResponse(BaseModel):
+    results: list[TestCaseResult]
+    all_passed: bool
+    passed_count: int
+    total_count: int
+
+
+@app.post("/api/run-tests")
+async def run_tests(req: RunTestsRequest) -> RunTestsResponse:
+    """Run code against a challenge's test suite in a persistent Modal sandbox."""
+    challenge = get_challenge_by_id(req.challenge_id)
+    if challenge is None:
+        raise HTTPException(status_code=404, detail="Challenge not found")
+    if not challenge.test_suite:
+        raise HTTPException(status_code=400, detail="Challenge has no test suite")
+
+    test_dicts = [t.model_dump() for t in challenge.test_suite]
+    try:
+        raw_results = await run_function_tests_detailed(req.sandbox_id, req.code, test_dicts)
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    results = [TestCaseResult(**r) for r in raw_results]
+    passed_count = sum(1 for r in results if r.passed)
+    return RunTestsResponse(
+        results=results,
+        all_passed=passed_count == len(results),
+        passed_count=passed_count,
+        total_count=len(results),
     )
 
 

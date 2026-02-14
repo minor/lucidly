@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { getChallenge } from "@/lib/api";
+import { getChallenge, runTests, createSandbox, terminateSandbox } from "@/lib/api";
 import { PromptInput } from "@/components/PromptInput";
-import { streamChat, type ChatMessage } from "@/lib/api";
+import { streamChat, type ChatMessage, type TestCaseResult, type RunTestsResponse } from "@/lib/api";
 import type { Challenge } from "@/lib/types";
 import {
   Loader2,
@@ -12,13 +12,59 @@ import {
   Sparkles,
   Eye,
   Code,
+  CheckCircle2,
+  XCircle,
+  FlaskConical,
 } from "lucide-react";
 
+// ---------------------------------------------------------------------------
+// Code extraction helpers
+// ---------------------------------------------------------------------------
+
 /**
- * Extract code blocks from a markdown-formatted LLM response.
- * Returns the content inside ``` fences, or the full text if no fences.
+ * Extract the best Python code block from a markdown-formatted LLM response.
+ * Strategy:
+ *   1. Collect all code blocks from the response
+ *   2. Among python-tagged blocks, prefer the one containing `def ` or `class `
+ *      (the actual implementation, not a usage example)
+ *   3. If multiple contain `def`, take the largest one
+ *   4. Fall back to the last python block, then the last block overall
  */
-function extractCode(text: string): string {
+function extractPythonCode(text: string): string {
+  const pattern = /```(\w*)\s*\n([\s\S]*?)```/g;
+  const blocks: { lang: string; code: string }[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = pattern.exec(text)) !== null) {
+    blocks.push({ lang: m[1].toLowerCase(), code: m[2].trim() });
+  }
+  if (blocks.length === 0) return "";
+
+  // Filter to python blocks
+  const pythonBlocks = blocks.filter(
+    (b) => b.lang === "python" || b.lang === "py" || b.lang === ""
+  );
+  const candidates = pythonBlocks.length > 0 ? pythonBlocks : blocks;
+
+  // Prefer blocks that contain function/class definitions (actual implementations)
+  const withDef = candidates.filter(
+    (b) => /\bdef\s+\w+/.test(b.code) || /\bclass\s+\w+/.test(b.code)
+  );
+
+  if (withDef.length > 0) {
+    // Take the largest implementation block
+    return withDef.reduce((a, b) =>
+      a.code.length >= b.code.length ? a : b
+    ).code;
+  }
+
+  // Fall back to last candidate
+  return candidates[candidates.length - 1].code;
+}
+
+/**
+ * Extract all code blocks concatenated (for HTML).
+ */
+function extractAllCode(text: string): string {
   const pattern = /```(?:\w+)?\s*\n([\s\S]*?)```/g;
   const matches: string[] = [];
   let m: RegExpExecArray | null;
@@ -43,6 +89,10 @@ function isHtmlCode(code: string): boolean {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
 export default function ChallengePage() {
   const params = useParams();
   const router = useRouter();
@@ -59,9 +109,20 @@ export default function ChallengePage() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
-  // Rendered output state
+  // UI preview state
   const [renderedCode, setRenderedCode] = useState<string>("");
   const [previewTab, setPreviewTab] = useState<"preview" | "code">("preview");
+
+  // Test results state
+  const [testResults, setTestResults] = useState<RunTestsResponse | null>(null);
+  const [testTab, setTestTab] = useState<"results" | "code">("results");
+  const [latestCode, setLatestCode] = useState<string>("");
+  const [runningTests, setRunningTests] = useState(false);
+
+  // Sandbox state
+  const [sandboxId, setSandboxId] = useState<string | null>(null);
+  const [sandboxError, setSandboxError] = useState<string | null>(null);
+  const sandboxIdRef = useRef<string | null>(null);
 
   // Initialize challenge
   useEffect(() => {
@@ -91,17 +152,85 @@ export default function ChallengePage() {
     scrollToBottom();
   }, [messages, currentStreamingMessage]);
 
-  // Extract renderable code from the latest assistant message
+  // Create sandbox when challenge loads (for function challenges with tests)
+  useEffect(() => {
+    if (!challenge) return;
+    const hasFunctionTests = challenge.test_suite && challenge.test_suite.length > 0;
+    if (!hasFunctionTests) return;
+
+    let ignore = false;
+    async function initSandbox() {
+      try {
+        const { sandbox_id } = await createSandbox();
+        if (ignore) return;
+        setSandboxId(sandbox_id);
+        sandboxIdRef.current = sandbox_id;
+      } catch (err) {
+        if (!ignore) setSandboxError((err as Error).message);
+      }
+    }
+    initSandbox();
+
+    // Terminate sandbox on cleanup (navigation away or close)
+    return () => {
+      ignore = true;
+      if (sandboxIdRef.current) {
+        terminateSandbox(sandboxIdRef.current).catch(() => {});
+        sandboxIdRef.current = null;
+      }
+    };
+  }, [challenge]);
+
+  // Also terminate sandbox on page close/refresh
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (sandboxIdRef.current) {
+        // Use sendBeacon for reliable cleanup on page close
+        const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+        navigator.sendBeacon(
+          `${API_BASE}/api/sandbox/${sandboxIdRef.current}/terminate`,
+          ""
+        );
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, []);
+
+  // Extract code and run tests when messages change
   useEffect(() => {
     const assistantMessages = messages.filter((m) => m.role === "assistant");
     if (assistantMessages.length === 0) return;
 
     const latest = assistantMessages[assistantMessages.length - 1];
-    const code = extractCode(latest.content);
-    if (code && isHtmlCode(code)) {
-      setRenderedCode(code);
+    const isUi = challenge?.category === "ui";
+    const hasFunctionTests = challenge?.test_suite && challenge.test_suite.length > 0;
+
+    if (isUi) {
+      const code = extractAllCode(latest.content);
+      if (code && isHtmlCode(code)) {
+        setRenderedCode(code);
+      }
     }
-  }, [messages]);
+
+    if (hasFunctionTests && sandboxId) {
+      const code = extractPythonCode(latest.content);
+      if (code) {
+        setLatestCode(code);
+        // Auto-run tests in persistent sandbox
+        setRunningTests(true);
+        runTests(code, challengeId, sandboxId)
+          .then((results) => {
+            setTestResults(results);
+            setRunningTests(false);
+          })
+          .catch((err) => {
+            console.error("Test run failed:", err);
+            setRunningTests(false);
+          });
+      }
+    }
+  }, [messages, challenge, challengeId, sandboxId]);
 
   const handleSubmit = async (prompt: string) => {
     if (!prompt.trim() || isStreaming) return;
@@ -141,6 +270,10 @@ export default function ChallengePage() {
   };
 
   const isUiChallenge = challenge?.category === "ui";
+  const hasFunctionTests =
+    challenge?.test_suite && challenge.test_suite.length > 0;
+  const hasBottomPanel =
+    (isUiChallenge && renderedCode) || (hasFunctionTests && (testResults || runningTests));
 
   if (initializing) {
     return (
@@ -174,15 +307,33 @@ export default function ChallengePage() {
 
       {/* Main content */}
       <div className="flex flex-1 min-h-0">
-        {/* Left panel: Challenge description + rendered output */}
+        {/* Left panel: Challenge description + output */}
         <div className="flex-1 flex flex-col min-w-0 border-r border-border">
           {/* Top: Challenge description (scrollable) */}
-          <div className={`${isUiChallenge && renderedCode ? "h-1/2" : "flex-1"} overflow-y-auto border-b border-border`}>
+          <div
+            className={`${
+              hasBottomPanel ? "h-1/2" : "flex-1"
+            } overflow-y-auto border-b border-border`}
+          >
             <div className="p-6">
               <h2 className="text-sm font-semibold mb-3">Challenge</h2>
               <p className="text-sm text-muted leading-relaxed whitespace-pre-wrap mb-4">
                 {challenge?.description}
               </p>
+              {challenge?.starter_code && (
+                <div className="rounded-lg border border-border bg-code-bg overflow-hidden mb-4">
+                  <div className="px-3 py-1.5 border-b border-border">
+                    <span className="text-xs font-medium text-muted">
+                      Buggy Code
+                    </span>
+                  </div>
+                  <pre className="p-3 overflow-x-auto">
+                    <code className="text-xs font-mono">
+                      {challenge.starter_code}
+                    </code>
+                  </pre>
+                </div>
+              )}
               {challenge?.image_url && (
                 <div className="rounded-lg border border-border overflow-hidden bg-muted/20 mb-4">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -193,36 +344,16 @@ export default function ChallengePage() {
                   />
                 </div>
               )}
-              {challenge?.test_suite && challenge.test_suite.length > 0 && (
-                <div className="mt-4">
-                  <h3 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">
-                    Test Cases
-                  </h3>
-                  <div className="space-y-1.5">
-                    {challenge.test_suite.map((tc, i) => (
-                      <div
-                        key={i}
-                        className="rounded-lg bg-code-bg px-3 py-2 text-xs font-mono"
-                      >
-                        <span className="text-muted">Input:</span> {tc.input}
-                        <br />
-                        <span className="text-muted">Expected:</span>{" "}
-                        {tc.expected_output}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
           </div>
 
-          {/* Bottom: Rendered output (only for UI challenges) */}
-          {isUiChallenge && (
-            <div className={`${renderedCode ? "h-1/2" : "h-0"} flex flex-col transition-all duration-300`}>
-              {renderedCode && (
+          {/* Bottom: Output panel */}
+          {hasBottomPanel && (
+            <div className="h-1/2 flex flex-col">
+              {/* ---- UI Preview ---- */}
+              {isUiChallenge && renderedCode && (
                 <>
-                  {/* Preview header with tabs */}
-                  <div className="flex items-center justify-between border-b border-border px-4 py-2 shrink-0">
+                  <div className="flex items-center border-b border-border px-4 py-2 shrink-0">
                     <div className="flex items-center gap-1">
                       <button
                         onClick={() => setPreviewTab("preview")}
@@ -248,8 +379,6 @@ export default function ChallengePage() {
                       </button>
                     </div>
                   </div>
-
-                  {/* Preview / Code content */}
                   <div className="flex-1 min-h-0 overflow-hidden">
                     {previewTab === "preview" ? (
                       <iframe
@@ -262,6 +391,133 @@ export default function ChallengePage() {
                       <pre className="h-full overflow-auto p-4 bg-code-bg text-xs font-mono">
                         <code>{renderedCode}</code>
                       </pre>
+                    )}
+                  </div>
+                </>
+              )}
+
+              {/* ---- Function Test Results ---- */}
+              {hasFunctionTests && !isUiChallenge && (
+                <>
+                  <div className="flex items-center justify-between border-b border-border px-4 py-2 shrink-0">
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => setTestTab("results")}
+                        className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                          testTab === "results"
+                            ? "bg-accent/10 text-accent"
+                            : "text-muted hover:text-foreground"
+                        }`}
+                      >
+                        <FlaskConical className="h-3 w-3" />
+                        Tests
+                      </button>
+                      <button
+                        onClick={() => setTestTab("code")}
+                        className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                          testTab === "code"
+                            ? "bg-accent/10 text-accent"
+                            : "text-muted hover:text-foreground"
+                        }`}
+                      >
+                        <Code className="h-3 w-3" />
+                        Code
+                      </button>
+                    </div>
+                    {testResults && (
+                      <span
+                        className={`text-xs font-medium ${
+                          testResults.all_passed
+                            ? "text-green-500"
+                            : "text-red-400"
+                        }`}
+                      >
+                        {testResults.passed_count}/{testResults.total_count}{" "}
+                        passed
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex-1 min-h-0 overflow-y-auto">
+                    {runningTests ? (
+                      <div className="flex items-center justify-center h-full gap-2">
+                        <Loader2 className="h-4 w-4 animate-spin text-muted" />
+                        <span className="text-sm text-muted">
+                          Running tests…
+                        </span>
+                      </div>
+                    ) : testTab === "results" && testResults ? (
+                      <div className="p-4 space-y-2">
+                        {/* Summary banner */}
+                        <div
+                          className={`rounded-lg px-3 py-2 text-xs font-medium ${
+                            testResults.all_passed
+                              ? "bg-green-500/10 text-green-500"
+                              : "bg-red-400/10 text-red-400"
+                          }`}
+                        >
+                          {testResults.all_passed
+                            ? "✓ All tests passed!"
+                            : `✗ ${testResults.total_count - testResults.passed_count} test(s) failed`}
+                        </div>
+
+                        {/* Individual results */}
+                        {testResults.results.map((tc, i) => (
+                          <div
+                            key={i}
+                            className={`rounded-lg border px-3 py-2 text-xs ${
+                              tc.passed
+                                ? "border-green-500/20 bg-green-500/5"
+                                : "border-red-400/20 bg-red-400/5"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 mb-1">
+                              {tc.passed ? (
+                                <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0" />
+                              ) : (
+                                <XCircle className="h-3.5 w-3.5 text-red-400 shrink-0" />
+                              )}
+                              <span className="font-mono text-foreground truncate">
+                                {tc.input}
+                              </span>
+                            </div>
+                            {!tc.passed && (
+                              <div className="ml-5.5 mt-1 space-y-0.5 text-xs font-mono">
+                                {tc.error ? (
+                                  <div className="text-red-400">
+                                    Error: {tc.error}
+                                  </div>
+                                ) : (
+                                  <>
+                                    <div className="text-muted">
+                                      Expected:{" "}
+                                      <span className="text-green-500">
+                                        {tc.expected}
+                                      </span>
+                                    </div>
+                                    <div className="text-muted">
+                                      Got:{" "}
+                                      <span className="text-red-400">
+                                        {tc.actual}
+                                      </span>
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : testTab === "code" && latestCode ? (
+                      <pre className="h-full overflow-auto p-4 bg-code-bg text-xs font-mono">
+                        <code>{latestCode}</code>
+                      </pre>
+                    ) : (
+                      <div className="flex items-center justify-center h-full">
+                        <span className="text-sm text-muted">
+                          No test results yet
+                        </span>
+                      </div>
                     )}
                   </div>
                 </>

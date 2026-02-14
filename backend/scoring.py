@@ -90,59 +90,20 @@ def compute_composite_score(
     }
 
 
-def run_function_tests(code: str, test_suite: list[dict]) -> list[bool]:
+async def run_function_tests(sandbox_id: str, code: str, test_suite: list[dict]) -> list[bool]:
     """
-    Execute generated code and run test cases against it (MVP approach).
-
-    Each test case has an `input` expression and `expected_output` string.
-    We exec() the code then eval() the input expression and compare.
+    Run test cases via a persistent Modal sandbox. Returns list of booleans.
     """
-    # Use Modal sandbox if available
-    try:
-        from sandbox import app, run_python_tests_in_sandbox
-        with app.run():
-             return run_python_tests_in_sandbox.remote(code, test_suite)
-    except ImportError:
-        print("Modal not installed. Falling back to local execution.")
-    except Exception as e:
-        print(f"Modal sandbox failed: {e}. Falling back to local execution (INSECURE).")
-        
-    # Fallback to local execution (same as before)
-    results: list[bool] = []
+    from sandbox import run_tests_in_sandbox
+    detailed = await run_tests_in_sandbox(sandbox_id, code, test_suite)
+    return [r["passed"] for r in detailed]
 
-    # Helper functions available in test context
-    helpers = """
-class ListNode:
-    def __init__(self, val=0, next=None):
-        self.val = val
-        self.next = next
 
-def arr_to_list(arr):
-    head = None
-    for v in reversed(arr):
-        head = ListNode(v, head)
-    return head
+async def run_function_tests_detailed(sandbox_id: str, code: str, test_suite: list[dict]) -> list[dict]:
+    """
+    Run test cases via a persistent Modal sandbox. Returns detailed results.
+    """
+    from sandbox import run_tests_in_sandbox
+    return await run_tests_in_sandbox(sandbox_id, code, test_suite)
 
-def list_to_arr(node):
-    result = []
-    while node:
-        result.append(node.val)
-        node = node.next
-    return result
-"""
 
-    namespace: dict = {}
-    try:
-        exec(helpers + "\n" + code, namespace)
-    except Exception:
-        return [False] * len(test_suite)
-
-    for test in test_suite:
-        try:
-            actual = eval(test["input"], namespace)
-            expected = eval(test["expected_output"], namespace)
-            results.append(actual == expected)
-        except Exception:
-            results.append(False)
-
-    return results
