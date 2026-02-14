@@ -2,9 +2,11 @@
 
 import json
 import time
+import httpx
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from config import settings
@@ -58,6 +60,16 @@ class CreateSessionRequest(BaseModel):
 
 class PromptRequest(BaseModel):
     prompt: str
+    model: str | None = None
+
+
+class ChatMessage(BaseModel):
+    role: str  # "user" or "assistant"
+    content: str
+
+
+class ChatRequest(BaseModel):
+    messages: list[ChatMessage]
     model: str | None = None
 
 
@@ -321,6 +333,160 @@ async def session_ws(ws: WebSocket, session_id: str):
 
     except WebSocketDisconnect:
         pass
+
+
+# ---------------------------------------------------------------------------
+# Chat endpoint — streaming chat with Claude Code API
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/chat/stream")
+async def chat_stream(req: ChatRequest):
+    """
+    Stream chat responses from Claude Code API.
+    Uses Server-Sent Events (SSE) for real-time streaming.
+    Supports both Anthropic API directly and OpenAI-compatible APIs (like OpenRouter).
+    """
+    # Convert messages to Anthropic format (or OpenAI format if using OpenRouter)
+    anthropic_messages = []
+    for msg in req.messages:
+        anthropic_messages.append({
+            "role": msg.role,
+            "content": msg.content
+        })
+    
+    if not anthropic_messages or anthropic_messages[-1]["role"] != "user":
+        raise HTTPException(status_code=400, detail="Last message must be from user")
+    
+    # Use Anthropic API directly if API key is set, otherwise fall back to OpenAI-compatible
+    use_anthropic = bool(settings.anthropic_api_key)
+    
+    # Validate that we have at least one API key configured
+    if not use_anthropic and not settings.openai_api_key:
+        raise HTTPException(
+            status_code=500,
+            detail="No API key configured. Please set either ANTHROPIC_API_KEY or OPENAI_API_KEY in your .env file."
+        )
+    
+    # Use correct Anthropic model names
+    # Valid models: claude-3-5-sonnet-20240620, claude-3-opus-20240229, claude-3-sonnet-20240229, claude-3-haiku-20240307
+    model = req.model or ("claude-opus-4-6" if use_anthropic else "anthropic/claude-opus-4-6")
+    
+    async def generate():
+        """Generator function for SSE streaming."""
+        try:
+            if use_anthropic:
+                # Use Anthropic API directly
+                async with httpx.AsyncClient(timeout=60.0) as client:
+                    headers = {
+                        "x-api-key": settings.anthropic_api_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    }
+                    
+                    # Extract system message if present, otherwise use default
+                    system_message = "You are a helpful AI assistant. Provide clear, concise, and helpful responses."
+                    messages_for_api = anthropic_messages.copy()
+                    
+                    payload = {
+                        "model": model,
+                        "max_tokens": 4096,
+                        "messages": messages_for_api,
+                        "system": system_message,
+                        "stream": True,
+                    }
+                    
+                    async with client.stream(
+                        "POST",
+                        "https://api.anthropic.com/v1/messages",
+                        headers=headers,
+                        json=payload,
+                    ) as response:
+                        if response.status_code != 200:
+                            error_text = await response.aread()
+                            error_detail = error_text.decode()
+                            # Provide more helpful error messages
+                            if response.status_code == 401:
+                                error_detail = f"Invalid or missing Anthropic API key. Please check your ANTHROPIC_API_KEY in .env file. Original error: {error_detail}"
+                            elif response.status_code == 404:
+                                error_detail = f"Model not found. Please check the model name. Valid models: claude-3-5-sonnet-20240620, claude-3-opus-20240229, claude-3-sonnet-20240229. Original error: {error_detail}"
+                            # Can't raise HTTPException in streaming response, so yield error instead
+                            yield f"data: {json.dumps({'type': 'error', 'message': error_detail})}\n\n"
+                            return
+                        
+                        full_response = ""
+                        async for line in response.aiter_lines():
+                            if line.startswith("data: "):
+                                data_str = line[6:]
+                                if data_str == "[DONE]":
+                                    break
+                                try:
+                                    data = json.loads(data_str)
+                                    if data.get("type") == "content_block_delta":
+                                        chunk = data.get("delta", {}).get("text", "")
+                                        if chunk:
+                                            full_response += chunk
+                                            yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
+                                    elif data.get("type") == "message_stop":
+                                        break
+                                except json.JSONDecodeError:
+                                    continue
+                        
+                        yield f"data: {json.dumps({'type': 'done', 'content': full_response})}\n\n"
+            else:
+                # Use OpenAI-compatible API (e.g., OpenRouter)
+                conversation_history = []
+                current_prompt = ""
+                
+                for msg in anthropic_messages:
+                    if msg["role"] == "user":
+                        if current_prompt:
+                            conversation_history.append({"role": "user", "content": current_prompt})
+                        current_prompt = msg["content"]
+                    elif msg["role"] == "assistant":
+                        if current_prompt:
+                            conversation_history.append({"role": "user", "content": current_prompt})
+                            current_prompt = ""
+                        conversation_history.append({"role": "assistant", "content": msg["content"]})
+                
+                if not settings.openai_api_key:
+                    raise ValueError("OPENAI_API_KEY is not set. Please configure it in your .env file.")
+                
+                claude_llm = LLM(
+                    base_url=settings.openai_base_url,
+                    api_key=settings.openai_api_key,
+                    model=model,
+                    system_prompt="You are a helpful AI assistant. Provide clear, concise, and helpful responses.",
+                )
+                
+                full_response = ""
+                async for chunk in claude_llm.stream(
+                    current_prompt,
+                    conversation_history=conversation_history if conversation_history else None,
+                ):
+                    full_response += chunk
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
+                
+                yield f"data: {json.dumps({'type': 'done', 'content': full_response})}\n\n"
+        except Exception as e:
+            error_msg = str(e)
+            # Provide more helpful error messages
+            if "401" in error_msg or "API key" in error_msg or "authentication" in error_msg.lower():
+                error_msg = f"Authentication failed: {error_msg}. Please check your API key configuration in .env file."
+            elif "404" in error_msg or "not found" in error_msg.lower():
+                error_msg = f"Model not found: {error_msg}. Please check the model name."
+            # Yield error as SSE message instead of raising exception
+            yield f"data: {json.dumps({'type': 'error', 'message': error_msg})}\n\n"
+    
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
