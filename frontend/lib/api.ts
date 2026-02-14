@@ -109,17 +109,28 @@ export interface ChatMessage {
   content: string;
 }
 
+export interface StreamDoneData {
+  content: string;
+  input_tokens?: number;
+  output_tokens?: number;
+  cost?: number;
+}
+
 export async function streamChat(
   messages: ChatMessage[],
   model?: string,
   onChunk?: (chunk: string) => void,
   onComplete?: (fullResponse: string) => void,
-  onError?: (error: string) => void
+  onError?: (error: string) => void,
+  onDone?: (data: StreamDoneData) => void,
+  onUsage?: (usage: { input_tokens: number }) => void,
+  signal?: AbortSignal
 ): Promise<void> {
   const response = await fetch(`${API_BASE}/api/chat/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ messages, model }),
+    signal,
   });
 
   if (!response.ok) {
@@ -155,8 +166,16 @@ export async function streamChat(
             if (data.type === "chunk") {
               fullResponse += data.content;
               onChunk?.(data.content);
+            } else if (data.type === "usage") {
+              onUsage?.({ input_tokens: data.input_tokens });
             } else if (data.type === "done") {
               onComplete?.(data.content || fullResponse);
+              onDone?.({
+                content: data.content || fullResponse,
+                input_tokens: data.input_tokens,
+                output_tokens: data.output_tokens,
+                cost: data.cost,
+              });
             } else if (data.type === "error") {
               onError?.(data.message || "Unknown error");
               return;

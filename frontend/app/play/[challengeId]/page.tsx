@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { getChallenge, runTests, createSandbox, terminateSandbox } from "@/lib/api";
 import { PromptInput } from "@/components/PromptInput";
 import { ScoreBar } from "@/components/ScoreBar";
-import { streamChat, type ChatMessage, type TestCaseResult, type RunTestsResponse } from "@/lib/api";
+import { streamChat, type ChatMessage, type TestCaseResult, type RunTestsResponse, type StreamDoneData } from "@/lib/api";
 import type { Challenge } from "@/lib/types";
 import {
   Loader2,
@@ -109,6 +109,9 @@ export default function ChallengePage() {
   const [elapsed, setElapsed] = useState(0);
   const [totalTurns, setTotalTurns] = useState(0);
   const [totalTokens, setTotalTokens] = useState(0);
+  const [estimatedTokens, setEstimatedTokens] = useState(0);
+  const [totalCost, setTotalCost] = useState(0);
+  const [inputCost, setInputCost] = useState(0);
 
   // Your output panel: Preview | Code (v0-style toggle)
   const [outputView, setOutputView] = useState<"preview" | "code">("preview");
@@ -134,6 +137,9 @@ export default function ChallengePage() {
   const [sandboxId, setSandboxId] = useState<string | null>(null);
   const [sandboxError, setSandboxError] = useState<string | null>(null);
   const sandboxIdRef = useRef<string | null>(null);
+  
+  // Abort controller for cancelling generation
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Initialize challenge
   useEffect(() => {
@@ -252,6 +258,23 @@ export default function ChallengePage() {
     }
   }, [messages, challenge, challengeId, sandboxId]);
 
+  const handleStop = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+      setIsStreaming(false);
+      // Persist estimated tokens and cost so far
+      if (estimatedTokens > 0 || inputCost > 0) {
+        setTotalTokens((t) => t + Math.round(estimatedTokens));
+        // Calculate estimated output cost (Opus input=$15/M, output=$75/M)
+        const outputCost = (estimatedTokens * 75) / 1_000_000;
+        setTotalCost((c) => c + inputCost + outputCost);
+        setEstimatedTokens(0);
+        setInputCost(0);
+      }
+    }
+  };
+
   const handleSubmit = async (prompt: string) => {
     if (!prompt.trim() || isStreaming) return;
 
@@ -261,11 +284,17 @@ export default function ChallengePage() {
     setIsStreaming(true);
     setCurrentStreamingMessage("");
 
+    // Create new abort controller
+    if (abortControllerRef.current) abortControllerRef.current.abort();
+    abortControllerRef.current = new AbortController();
+
     await streamChat(
       updatedMessages,
       undefined,
       (chunk) => {
         setCurrentStreamingMessage((prev) => prev + chunk);
+        // Estimate tokens: roughly 1 token per 4 chars
+        setEstimatedTokens((prev) => prev + chunk.length / 4);
       },
       (fullResponse) => {
         const assistantMessage: ChatMessage = {
@@ -275,9 +304,12 @@ export default function ChallengePage() {
         setMessages([...updatedMessages, assistantMessage]);
         setCurrentStreamingMessage("");
         setIsStreaming(false);
+        setEstimatedTokens(0);
         setTotalTurns((t) => t + 1);
+        abortControllerRef.current = null;
       },
       (error) => {
+        if (error === "AbortError") return; // Ignore aborts
         console.error("Chat error:", error);
         const errorMessage: ChatMessage = {
           role: "assistant",
@@ -286,7 +318,26 @@ export default function ChallengePage() {
         setMessages([...updatedMessages, errorMessage]);
         setCurrentStreamingMessage("");
         setIsStreaming(false);
-      }
+        setEstimatedTokens(0);
+        abortControllerRef.current = null;
+      },
+      (data: StreamDoneData) => {
+        if (data.output_tokens) {
+          setTotalTokens((t) => t + data.output_tokens!);
+        }
+        if (data.cost) {
+          setTotalCost((c) => c + data.cost!);
+        }
+        setEstimatedTokens(0);
+        setInputCost(0);
+      },
+      (usage) => {
+        if (usage.input_tokens) {
+          // Opus input cost: $15/M tokens
+          setInputCost((usage.input_tokens * 15) / 1_000_000);
+        }
+      },
+      abortControllerRef.current?.signal
     );
   };
 
@@ -336,8 +387,9 @@ export default function ChallengePage() {
       <div className="border-b border-border px-6 py-2">
         <ScoreBar
           turns={totalTurns}
-          tokens={totalTokens}
+          tokens={Math.round(totalTokens + estimatedTokens)}
           elapsedSec={elapsed}
+          cost={totalCost + inputCost + ((estimatedTokens * 75) / 1_000_000)}
         />
       </div>
 
@@ -675,6 +727,7 @@ export default function ChallengePage() {
             <div className="px-6 py-4">
               <PromptInput
                 onSubmit={handleSubmit}
+                onStop={handleStop}
                 loading={isStreaming}
                 placeholder="Ask anything..."
                 disabled={isStreaming}

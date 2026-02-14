@@ -386,7 +386,7 @@ async def chat_stream(req: ChatRequest):
                     
                     payload = {
                         "model": model,
-                        "max_tokens": 4096,
+                        "max_tokens": settings.max_tokens,
                         "messages": messages_for_api,
                         "system": system_message,
                         "stream": True,
@@ -411,6 +411,8 @@ async def chat_stream(req: ChatRequest):
                             return
                         
                         full_response = ""
+                        input_tokens = 0
+                        output_tokens = 0
                         async for line in response.aiter_lines():
                             if line.startswith("data: "):
                                 data_str = line[6:]
@@ -418,17 +420,29 @@ async def chat_stream(req: ChatRequest):
                                     break
                                 try:
                                     data = json.loads(data_str)
-                                    if data.get("type") == "content_block_delta":
+                                    event_type = data.get("type")
+                                    if event_type == "message_start":
+                                        usage = data.get("message", {}).get("usage", {})
+                                        input_tokens = usage.get("input_tokens", 0)
+                                        # Send input tokens immediately
+                                        yield f"data: {json.dumps({'type': 'usage', 'input_tokens': input_tokens})}\n\n"
+                                    elif event_type == "content_block_delta":
                                         chunk = data.get("delta", {}).get("text", "")
                                         if chunk:
                                             full_response += chunk
                                             yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
-                                    elif data.get("type") == "message_stop":
+                                    elif event_type == "message_delta":
+                                        usage = data.get("usage", {})
+                                        output_tokens = usage.get("output_tokens", 0)
+                                    elif event_type == "message_stop":
                                         break
                                 except json.JSONDecodeError:
                                     continue
                         
-                        yield f"data: {json.dumps({'type': 'done', 'content': full_response})}\n\n"
+                        # Calculate cost (Claude Opus 4 pricing: $15/M input, $75/M output)
+                        cost = (input_tokens * 15 + output_tokens * 75) / 1_000_000
+                        
+                        yield f"data: {json.dumps({'type': 'done', 'content': full_response, 'input_tokens': input_tokens, 'output_tokens': output_tokens, 'cost': round(cost, 4)})}\n\n"
             else:
                 # Use OpenAI-compatible API (e.g., OpenRouter)
                 conversation_history = []

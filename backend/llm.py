@@ -44,7 +44,7 @@ class LLM:
         api_key: str | None = None,
         model: str | None = None,
         system_prompt: str = CODING_SYSTEM_PROMPT,
-        max_tokens: int = 4096,
+        max_tokens: int = settings.max_tokens,
         temperature: float = 0.2,
     ) -> None:
         self.base_url = base_url or settings.openai_base_url
