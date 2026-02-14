@@ -97,7 +97,7 @@ SEED_CHALLENGES: list[Challenge] = [
             "Find and fix the bug. Your fixed function must be named "
             "`longest_increasing_subsequence`."
         ),
-        category="function",
+        category="debug",
         difficulty="easy",
         starter_code=(
             "import bisect\n\n"

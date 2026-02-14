@@ -10,11 +10,21 @@ import modal
 # In-memory store: sandbox_id -> modal.Sandbox
 _sandboxes: dict[str, modal.Sandbox] = {}
 
+# Define the image with necessary dependencies for data challenges
+_sandbox_image = (
+    modal.Image.debian_slim()
+    .pip_install("pandas", "requests", "beautifulsoup4", "numpy", "lxml")
+)
+
 
 async def create_sandbox() -> str:
     """Create a new persistent Modal sandbox. Returns the sandbox_id."""
     app = await modal.App.lookup.aio("lucidly-sandbox", create_if_missing=True)
-    sb = await modal.Sandbox.create.aio(app=app, timeout=3600)  # 1 hour idle timeout
+    sb = await modal.Sandbox.create.aio(
+        image=_sandbox_image,
+        app=app,
+        timeout=3600,  # 1 hour idle timeout
+    )
     _sandboxes[sb.object_id] = sb
     return sb.object_id
 
@@ -28,20 +38,17 @@ async def run_tests_in_sandbox(
 
     Returns list of dicts with: input, expected, actual, passed, error.
     """
-    sb = _sandboxes.get(sandbox_id)
-    if sb is None:
-        raise RuntimeError(f"Sandbox {sandbox_id} not found. It may have been terminated.")
-
     # Build a self-contained test runner script
     runner_script = _build_test_runner(code, test_suite)
 
-    # Execute in sandbox
-    process = await sb.exec.aio("python", "-c", runner_script, timeout=30)
-    stdout = await process.stdout.read.aio()
-    stderr = await process.stderr.read.aio()
-    await process.wait.aio()
+    # Execute in sandbox using the helper
+    result = await run_code_in_sandbox(sandbox_id, runner_script)
+    
+    stdout = result["stdout"]
+    stderr = result["stderr"]
+    returncode = result["returncode"]
 
-    if process.returncode != 0:
+    if returncode != 0:
         return [
             {
                 "input": tc["input"],
@@ -66,6 +73,28 @@ async def run_tests_in_sandbox(
             }
             for tc in test_suite
         ]
+
+
+async def run_code_in_sandbox(
+    sandbox_id: str,
+    code: str,
+) -> dict:
+    """Execute arbitrary code in the sandbox and return stdout/stderr."""
+    sb = _sandboxes.get(sandbox_id)
+    if sb is None:
+        raise RuntimeError(f"Sandbox {sandbox_id} not found. It may have been terminated.")
+
+    # Execute in sandbox
+    process = await sb.exec.aio("python", "-c", code, timeout=30)
+    stdout = await process.stdout.read.aio()
+    stderr = await process.stderr.read.aio()
+    await process.wait.aio()
+
+    return {
+        "stdout": stdout,
+        "stderr": stderr,
+        "returncode": process.returncode,
+    }
 
 
 async def terminate_sandbox(sandbox_id: str) -> bool:

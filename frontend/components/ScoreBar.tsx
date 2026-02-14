@@ -1,12 +1,13 @@
 "use client";
 
-import { Zap, Clock, Coins, RefreshCw } from "lucide-react";
+import { Zap, Clock, Coins, RefreshCw, DollarSign } from "lucide-react";
 
 interface ScoreBarProps {
   accuracy?: number;
   turns: number;
   tokens: number;
   elapsedSec: number;
+  cost?: number;
   compositeScore?: number;
 }
 
@@ -15,12 +16,18 @@ export function ScoreBar({
   turns,
   tokens,
   elapsedSec,
+  cost,
   compositeScore,
 }: ScoreBarProps) {
   const formatTime = (sec: number) => {
     const m = Math.floor(sec / 60);
     const s = Math.floor(sec % 60);
     return `${m}:${s.toString().padStart(2, "0")}`;
+  };
+
+  const formatCost = (c: number) => {
+    if (c === 0) return "$0.00";
+    return `$${c.toFixed(4)}`;
   };
 
   return (
@@ -87,16 +94,33 @@ export function ScoreBar({
         </div>
       </div>
 
-      {/* Tokens */}
+      {/* Tokens Output */}
       <div className="flex items-center gap-2">
         <Coins className="h-3.5 w-3.5 text-muted" />
         <div>
-          <p className="text-sm font-semibold font-mono">{tokens}</p>
+          <p className="text-sm font-semibold font-mono">
+            {tokens.toLocaleString()}
+          </p>
           <p className="text-[10px] text-muted uppercase tracking-wider">
-            Tokens
+            Tokens Output
           </p>
         </div>
       </div>
+
+      {/* Inference Cost */}
+      {cost !== undefined && (
+        <div className="flex items-center gap-2">
+          <DollarSign className="h-3.5 w-3.5 text-muted" />
+          <div>
+            <p className="text-sm font-semibold font-mono">
+              {formatCost(cost)}
+            </p>
+            <p className="text-[10px] text-muted uppercase tracking-wider">
+              Cost
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
