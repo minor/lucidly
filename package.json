@@ -1,0 +1,12 @@
+{
+  "name": "lucidly",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently --names server,frontend --prefix-colors blue,green \"bun run dev:server\" \"bun run dev:frontend\"",
+    "dev:server": "cd backend && uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000",
+    "dev:frontend": "cd frontend && bun run dev"
+  },
+  "devDependencies": {
+    "concurrently": "latest"
+  }
+}
