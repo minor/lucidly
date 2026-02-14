@@ -45,8 +45,8 @@ export function PromptInput({
   };
 
   return (
-    <div className="relative w-full max-w-2xl mx-auto">
-      <div className="flex items-end gap-2 rounded-2xl border border-input-border bg-input px-4 py-3 shadow-sm transition-shadow focus-within:shadow-md focus-within:border-accent/40">
+    <div className="relative w-full">
+      <div className="flex items-end gap-2 rounded-lg border border-input-border bg-input px-3 py-2.5 transition-colors focus-within:border-accent/50">
         <textarea
           ref={textareaRef}
           value={value}
@@ -61,23 +61,16 @@ export function PromptInput({
         <button
           onClick={handleSubmit}
           disabled={!value.trim() || loading || disabled}
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-foreground text-background transition-opacity hover:opacity-80 disabled:opacity-30"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-foreground text-background transition-opacity hover:opacity-90 disabled:opacity-30 disabled:cursor-not-allowed"
           aria-label="Submit prompt"
         >
           {loading ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
           ) : (
-            <ArrowRight className="h-4 w-4" />
+            <ArrowRight className="h-3.5 w-3.5" />
           )}
         </button>
       </div>
-      <p className="mt-2 text-center text-xs text-muted/60">
-        Press{" "}
-        <kbd className="rounded border border-border bg-background px-1 py-0.5 text-[10px] font-mono">
-          Cmd+Enter
-        </kbd>{" "}
-        to submit
-      </p>
     </div>
   );
 }
