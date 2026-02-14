@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { getChallenge } from "@/lib/api";
 import { PromptInput } from "@/components/PromptInput";
+import { ScoreBar } from "@/components/ScoreBar";
 import { streamChat, type ChatMessage } from "@/lib/api";
 import type { Challenge } from "@/lib/types";
 import {
@@ -22,6 +23,12 @@ export default function ChallengePage() {
   const [challenge, setChallenge] = useState<Challenge | null>(null);
   const [initializing, setInitializing] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Efficiency stats (timer, turns, tokens)
+  const startTimeRef = useRef<number>(Date.now());
+  const [elapsed, setElapsed] = useState(0);
+  const [totalTurns, setTotalTurns] = useState(0);
+  const [totalTokens, setTotalTokens] = useState(0);
 
   // Your output panel: Preview | Code (v0-style toggle)
   const [outputView, setOutputView] = useState<"preview" | "code">("preview");
@@ -56,6 +63,7 @@ export default function ChallengePage() {
         const challengeData = await getChallenge(challengeId);
         if (ignore) return;
         setChallenge(challengeData);
+        startTimeRef.current = Date.now();
       } catch (err) {
         if (!ignore) setError((err as Error).message);
       } finally {
@@ -67,6 +75,14 @@ export default function ChallengePage() {
       ignore = true;
     };
   }, [challengeId]);
+
+  // Timer for efficiency stats
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setElapsed((Date.now() - startTimeRef.current) / 1000);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -101,6 +117,7 @@ export default function ChallengePage() {
         setMessages([...updatedMessages, assistantMessage]);
         setCurrentStreamingMessage("");
         setIsStreaming(false);
+        setTotalTurns((t) => t + 1);
       },
       (error) => {
         console.error("Chat error:", error);
@@ -143,7 +160,22 @@ export default function ChallengePage() {
             </div>
           </div>
         </div>
+        <button
+          type="button"
+          className="rounded-lg bg-foreground px-4 py-2 text-xs font-medium text-background transition-opacity hover:opacity-90"
+        >
+          Submit solution
+        </button>
       </header>
+
+      {/* Efficiency stats */}
+      <div className="border-b border-border px-6 py-2">
+        <ScoreBar
+          turns={totalTurns}
+          tokens={totalTokens}
+          elapsedSec={elapsed}
+        />
+      </div>
 
       {/* Main content: left = description, right = chat */}
       <div className="flex flex-1 min-h-0">
