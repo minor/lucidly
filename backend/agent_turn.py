@@ -6,7 +6,7 @@ import time
 
 from challenges import get_challenge_by_id
 from llm import LLM
-from scoring import compute_accuracy_text, compute_composite_score
+from evaluation.scoring import compute_accuracy_text, compute_composite_score
 from sessions import (
     add_turn,
     add_to_leaderboard,

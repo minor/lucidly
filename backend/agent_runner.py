@@ -13,7 +13,7 @@ from agents import get_agent_by_id
 from challenges import get_challenge_by_id
 from agent_turn import complete_agent_session, execute_prompt_turn
 from llm import LLM
-from scoring import compute_accuracy_text
+from evaluation.scoring import compute_accuracy_text
 from sessions import get_session, add_turn, Turn
 
 logger = logging.getLogger(__name__)

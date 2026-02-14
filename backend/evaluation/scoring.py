@@ -8,6 +8,13 @@ Score = 0.40 * Accuracy
 All sub-scores are on a 0-1000 scale; the composite is also 0-1000.
 """
 
+import sys
+from pathlib import Path
+
+# Add parent directory to path for absolute imports
+if str(Path(__file__).parent.parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from config import settings
 
 
