@@ -4,6 +4,7 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { getChallenge, runTests, createSandbox, terminateSandbox } from "@/lib/api";
 import { PromptInput } from "@/components/PromptInput";
+import { ScoreBar } from "@/components/ScoreBar";
 import { streamChat, type ChatMessage, type TestCaseResult, type RunTestsResponse } from "@/lib/api";
 import type { Challenge } from "@/lib/types";
 import {
@@ -11,6 +12,7 @@ import {
   ArrowLeft,
   Sparkles,
   Eye,
+  ImageIcon,
   Code,
   CheckCircle2,
   XCircle,
@@ -102,6 +104,15 @@ export default function ChallengePage() {
   const [initializing, setInitializing] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Efficiency stats (timer, turns, tokens)
+  const startTimeRef = useRef<number>(Date.now());
+  const [elapsed, setElapsed] = useState(0);
+  const [totalTurns, setTotalTurns] = useState(0);
+  const [totalTokens, setTotalTokens] = useState(0);
+
+  // Your output panel: Preview | Code (v0-style toggle)
+  const [outputView, setOutputView] = useState<"preview" | "code">("preview");
+
   // Chat state
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -132,6 +143,7 @@ export default function ChallengePage() {
         const challengeData = await getChallenge(challengeId);
         if (ignore) return;
         setChallenge(challengeData);
+        startTimeRef.current = Date.now();
       } catch (err) {
         if (!ignore) setError((err as Error).message);
       } finally {
@@ -143,6 +155,14 @@ export default function ChallengePage() {
       ignore = true;
     };
   }, [challengeId]);
+
+  // Timer for efficiency stats
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setElapsed((Date.now() - startTimeRef.current) / 1000);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -255,6 +275,7 @@ export default function ChallengePage() {
         setMessages([...updatedMessages, assistantMessage]);
         setCurrentStreamingMessage("");
         setIsStreaming(false);
+        setTotalTurns((t) => t + 1);
       },
       (error) => {
         console.error("Chat error:", error);
@@ -303,7 +324,22 @@ export default function ChallengePage() {
             </div>
           </div>
         </div>
+        <button
+          type="button"
+          className="rounded-lg bg-foreground px-4 py-2 text-xs font-medium text-background transition-opacity hover:opacity-90"
+        >
+          Submit solution
+        </button>
       </header>
+
+      {/* Efficiency stats */}
+      <div className="border-b border-border px-6 py-2">
+        <ScoreBar
+          turns={totalTurns}
+          tokens={totalTokens}
+          elapsedSec={elapsed}
+        />
+      </div>
 
       {/* Main content */}
       <div className="flex flex-1 min-h-0">
@@ -334,7 +370,17 @@ export default function ChallengePage() {
                   </pre>
                 </div>
               )}
-              {challenge?.image_url && (
+              {challenge?.embed_url && (
+                <div className="rounded-lg border border-border overflow-hidden bg-muted/20 mb-4">
+                  <iframe
+                    src={challenge.embed_url}
+                    title="Challenge reference"
+                    className="w-full h-[320px] border-0 rounded-lg"
+                    sandbox="allow-scripts allow-same-origin"
+                  />
+                </div>
+              )}
+              {challenge?.image_url && !challenge?.embed_url && (
                 <div className="rounded-lg border border-border overflow-hidden bg-muted/20 mb-4">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
@@ -342,6 +388,26 @@ export default function ChallengePage() {
                     alt="Challenge reference"
                     className="w-full max-h-[280px] object-contain object-top"
                   />
+                </div>
+              )}
+              {challenge?.test_suite && challenge.test_suite.length > 0 && (
+                <div className="mt-4">
+                  <h3 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">
+                    Test Cases
+                  </h3>
+                  <div className="space-y-1.5">
+                    {challenge.test_suite.map((tc, i) => (
+                      <div
+                        key={i}
+                        className="rounded-lg bg-code-bg px-3 py-2 text-xs font-mono"
+                      >
+                        <span className="text-muted">Input:</span> {tc.input}
+                        <br />
+                        <span className="text-muted">Expected:</span>{" "}
+                        {tc.expected_output}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>

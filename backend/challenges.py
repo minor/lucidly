@@ -18,6 +18,7 @@ class Challenge(BaseModel):
     test_suite: list[TestCase] | None = None
     starter_code: str | None = None
     image_url: str | None = None  # URL or path to challenge visual (image/gif)
+    embed_url: str | None = None  # URL to embed as live page (e.g. for animated UIs)
 
 
 # ---------------------------------------------------------------------------
@@ -29,13 +30,11 @@ SEED_CHALLENGES: list[Challenge] = [
         id="build-landing-page",
         title="Build this UI: Landing Page",
         description=(
-            "Recreate this landing page design. Match the layout, typography, "
-            "colors, and key sections shown in the reference image. Use HTML and CSS "
-            "(vanilla or a framework of your choice). Focus on visual fidelity."
+            "Recreate this landing page UI."
         ),
         category="ui",
         difficulty="medium",
-        image_url="https://placehold.co/640x400/1a1a2e/eee?text=Landing+Page+Design",
+        embed_url="https://treehacks.com/",
     ),
     Challenge(
         id="build-snake-game",
