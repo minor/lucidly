@@ -52,8 +52,26 @@ async def run_agent(
         r.raise_for_status()
         challenge = r.json()
 
-    description = challenge.get("description", "")
-    title = challenge.get("title", "Challenge")
+    def _challenge_brief(c: dict) -> str:
+        title = c.get("title") or "Challenge"
+        description = c.get("description") or ""
+        embed_url = c.get("embed_url")
+        image_url = c.get("image_url")
+        starter_code = c.get("starter_code")
+        parts = [f"Challenge: {title}\n\n{description}"]
+        if embed_url:
+            parts.append(f"Reference page (recreate this design): {embed_url}")
+        if image_url:
+            parts.append(f"Reference image or animation: {image_url}")
+        if starter_code:
+            parts.append(f"Starter code to extend or fix:\n```\n{starter_code}\n```")
+        parts.append(
+            "Your response will be executed and shown in a live preview. You must output runnable code in a single markdown code block. "
+            "For UI challenges, output one complete HTML document (inline CSS/JS is fine). Do not respond with only 'DONE' or a summary—the first response must contain the code."
+        )
+        return "\n\n".join(parts)
+
+    brief = _challenge_brief(challenge)
 
     if agent_id == "claude-sdk":
         return await _run_claude_sdk(
@@ -61,16 +79,14 @@ async def run_agent(
             challenge_id=challenge_id,
             base_url=base,
             headers=headers,
-            title=title,
-            description=description,
+            brief=brief,
         )
     if agent_id == "openai-assistant":
         return await _run_openai_assistant(
             session_id=session_id,
             base_url=base,
             headers=headers,
-            title=title,
-            description=description,
+            brief=brief,
             challenge=challenge,
         )
 
@@ -82,20 +98,19 @@ async def run_agent(
     )
 
     def first_turn_prompt(aid: str) -> str:
-        b = f"Challenge: {title}\n\n{description}\n\n"
         if aid == "openai-cot":
             return (
-                b
-                + "Think step by step. First analyze the requirement, then plan the solution, then write the code. "
+                brief
+                + "\n\nThink step by step. First analyze the requirement, then plan the solution, then write the code. "
                 "Put your reasoning first, then output the final code in a single markdown code block."
             )
         return (
-            b
-            + "Generate complete, runnable code that fulfills this challenge. "
-            "Output only the code, or use a single markdown code block."
+            brief
+            + "\n\nGenerate complete, runnable code that fulfills this challenge. Output the code in a single markdown code block."
         )
 
     turn = 0
+    prev_had_code = True
     async with httpx.AsyncClient(timeout=120.0) as http_client:
         while turn < MAX_TURNS:
             turn += 1
@@ -105,10 +120,17 @@ async def run_agent(
                 if agent_id == "openai-cot":
                     payload["system_prompt"] = COT_SYSTEM_PROMPT
             else:
-                prompt = (
-                    "Review the previous response and improve the code if accuracy was not 100%. "
-                    "Otherwise respond with: DONE"
-                )
+                if not prev_had_code:
+                    prompt = (
+                        "Your previous response did not include runnable code in a markdown code block. "
+                        "Please output a complete HTML document now in a single markdown code block (```html on one line, then your code, then ```). "
+                        "No explanations—just the code block."
+                    )
+                else:
+                    prompt = (
+                        "Review the previous response and improve the code if accuracy was not 100%. "
+                        "Otherwise respond with: DONE"
+                    )
                 payload = {"prompt": prompt}
 
             r = await http_client.post(
@@ -119,6 +141,8 @@ async def run_agent(
             if r.status_code != 200:
                 raise RuntimeError(f"Prompt failed: {r.status_code} {r.text}")
             data = r.json()
+
+            prev_had_code = bool((data.get("generated_code") or "").strip())
 
             accuracy = data.get("accuracy", 0.0)
             if accuracy >= ACCURACY_THRESHOLD:
@@ -140,8 +164,7 @@ async def _run_claude_sdk(
     challenge_id: str,
     base_url: str,
     headers: dict,
-    title: str,
-    description: str,
+    brief: str,
 ) -> dict:
     """Run Claude Agent SDK with a tool that POSTs prompts to the backend."""
     import httpx
@@ -185,17 +208,17 @@ async def _run_claude_sdk(
         mcp_servers={"lucidly-challenge": custom_server},
         allowed_tools=["mcp__lucidly-challenge__submit_prompt"],
         system_prompt=(
-            f"You are completing a coding challenge.\n\n"
-            f"Challenge: {title}\n\n{description}\n\n"
-            "Use the submit_prompt tool to send prompts to the code generation API. "
+            "You are completing a coding challenge. Use the submit_prompt tool to send prompts to the code generation API. "
             "Each call returns the model's response, generated code, and an accuracy score. "
-            "Iterate until accuracy is 1.0 or you have tried enough. Then reply with DONE."
+            "Your first tool call must ask for code that fulfills the challenge (the response will be run in a preview). "
+            "Iterate until accuracy is 1.0 or you have tried enough. Then reply with DONE.\n\n"
+            f"{brief}"
         ),
         max_turns=MAX_TURNS,
     )
 
     async with ClaudeSDKClient(options=options) as client:
-        prompt = f"Complete this coding challenge. Use the submit_prompt tool to generate and refine code. Challenge: {title}\n\n{description}"
+        prompt = "Complete this coding challenge. Use the submit_prompt tool to generate and refine code. Your first response must request runnable code (HTML for UI challenges) in a markdown code block."
         await client.query(prompt)
         async for _ in client.receive_response():
             pass
@@ -214,8 +237,7 @@ async def _run_openai_assistant(
     session_id: str,
     base_url: str,
     headers: dict,
-    title: str,
-    description: str,
+    brief: str,
     challenge: dict,
 ) -> dict:
     """Run OpenAI Assistants API with submit_prompt function that POSTs to backend."""
@@ -231,11 +253,10 @@ async def _run_openai_assistant(
     assistant = await client.beta.assistants.create(
         name="Lucidly Challenge Agent",
         instructions=(
-            f"You are completing a coding challenge.\n\n"
-            f"Challenge: {title}\n\n{description}\n\n"
-            "Use the submit_prompt tool to send prompts to the code generation API. "
-            "Each call returns the model's response, generated code, and accuracy. "
-            "Iterate until accuracy is 1.0 or you have tried enough. Then reply with DONE."
+            "You are completing a coding challenge. Use the submit_prompt tool to send prompts to the code generation API. "
+            "Each call returns the model's response, generated code, and accuracy. Your first tool call must request runnable code. "
+            "Iterate until accuracy is 1.0 or you have tried enough. Then reply with DONE.\n\n"
+            f"{brief}"
         ),
         model=model,
         tools=[

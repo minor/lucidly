@@ -8,10 +8,10 @@ from config import settings
 
 
 CODING_SYSTEM_PROMPT = (
-    "You are a code generation assistant in a competitive prompting challenge. "
-    "The user will describe what they want built. Generate ONLY the code — no "
-    "explanations, no markdown fences unless specifically asked. The code should "
-    "be complete, runnable, and match the user's requirements exactly."
+    "You are a code generation assistant. The user will describe what they want built. "
+    "You must output the code inside a single markdown code block (e.g. ```html then newline then your code then ```). "
+    "The code should be complete, runnable, and match the user's requirements. "
+    "For UI challenges, output one complete HTML document (inline CSS/JS is fine)."
 )
 
 
@@ -152,13 +152,30 @@ class LLM:
     def extract_code_blocks(text: str) -> str:
         """
         Extract code from markdown fenced code blocks.
-        If no fences found, return the full text (assuming it's raw code).
+        Allows optional newline after opening fence. If no fences, try to extract
+        HTML (<!DOCTYPE...> or <html...>...</html>). Otherwise return empty.
         """
-        pattern = r"```(?:\w+)?\s*\n(.*?)```"
+        if not (text or "").strip():
+            return ""
+
+        # Fenced blocks: allow optional newline after ```language
+        pattern = r"```(?:\w+)?\s*\n?(.*?)```"
         matches = re.findall(pattern, text, re.DOTALL)
-
         if matches:
-            return "\n\n".join(match.strip() for match in matches)
+            return "\n\n".join(match.strip() for match in matches if match.strip())
 
-        # No fences found — the response might already be raw code
-        return text.strip()
+        # No fences: try to extract HTML so we don't put refusal text in iframe
+        html_match = re.search(
+            r"(<!DOCTYPE\s+html[^>]*>.*?</html>|<html[\s\S]*?</html>)",
+            text,
+            re.IGNORECASE | re.DOTALL,
+        )
+        if html_match:
+            return html_match.group(1).strip()
+
+        # If the whole response looks like raw HTML (starts with <), use it
+        stripped = text.strip()
+        if stripped.startswith("<"):
+            return stripped
+
+        return ""
