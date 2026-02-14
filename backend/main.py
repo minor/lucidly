@@ -356,9 +356,13 @@ async def session_ws(ws: WebSocket, session_id: str):
 
                 # Stream response
                 full_response = ""
+                # GPT-5 Mini and Nano require temperature=1
+                temperature = 1.0 if model in ["gpt-5-mini", "gpt-5-nano"] else None
+                
                 async for chunk in llm_instance.stream(
                     prompt_text,
                     conversation_history=history if history else None,
+                    temperature=temperature,
                 ):
                     full_response += chunk
                     await ws.send_json({"type": "stream", "content": chunk})
@@ -439,8 +443,10 @@ async def chat_stream(req: ChatRequest):
     if not anthropic_messages or anthropic_messages[-1]["role"] != "user":
         raise HTTPException(status_code=400, detail="Last message must be from user")
     
-    # Use Anthropic API directly if API key is set, otherwise fall back to OpenAI-compatible
-    use_anthropic = bool(settings.anthropic_api_key)
+    # Determine if we should use Anthropic API directly based on model name
+    # Default to OpenAI if model is not explicitly Claude
+    is_claude_model = req.model is not None and req.model.startswith("claude")
+    use_anthropic = bool(settings.anthropic_api_key) and is_claude_model
     
     # Validate that we have at least one API key configured
     if not use_anthropic and not settings.openai_api_key:
@@ -451,7 +457,15 @@ async def chat_stream(req: ChatRequest):
     
     # Use correct Anthropic model names
     # Valid models: claude-3-5-sonnet-20240620, claude-3-opus-20240229, claude-3-sonnet-20240229, claude-3-haiku-20240307
-    model = req.model or ("claude-opus-4-6" if use_anthropic else "anthropic/claude-opus-4-6")
+    # Map short names to full IDs for Anthropic API
+    MODEL_MAPPING = {
+        "claude-opus-4-6": "claude-opus-4-6",  # Assuming standard date suffix or similar
+        "claude-sonnet-4-5": "claude-sonnet-4-5-20250929",
+        "claude-haiku-4-5": "claude-haiku-4-5-20251001",
+    }
+    
+    raw_model = req.model or settings.default_model
+    model = MODEL_MAPPING.get(raw_model, raw_model)
     
     async def generate():
         """Generator function for SSE streaming."""
@@ -569,10 +583,15 @@ async def chat_stream(req: ChatRequest):
                     system_prompt="You are a helpful AI assistant. Provide clear, concise, and helpful responses.",
                 )
                 
+                
                 full_response = ""
+                # GPT-5 Mini and Nano require temperature=1
+                temperature = 1.0 if model in ["gpt-5-mini", "gpt-5-nano"] else None
+                
                 async for chunk in claude_llm.stream(
                     current_prompt,
                     conversation_history=conversation_history if conversation_history else None,
+                    temperature=temperature,
                 ):
                     full_response += chunk
                     yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
