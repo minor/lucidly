@@ -7,7 +7,8 @@ class Settings(BaseSettings):
     # LLM provider configuration
     openai_api_key: str = ""
     openai_base_url: str = "https://api.openai.com/v1"
-    default_model: str = "gpt-4o"
+    default_model: str = "o1-mini"
+    max_tokens: int = 16384
     
     # Anthropic/Claude configuration
     anthropic_api_key: str = ""
@@ -36,3 +37,16 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+# Pricing (per 1M tokens)
+MODEL_PRICING = {
+    # Anthropic
+    "claude-3-opus-20240229": {"input": 15.0, "output": 75.0},
+    "claude-3-opus": {"input": 15.0, "output": 75.0},
+    "claude-3-5-sonnet-20240620": {"input": 3.0, "output": 15.0},
+    "claude-3-5-sonnet": {"input": 3.0, "output": 15.0},
+    # OpenAI
+    "o1-mini": {"input": 3.0, "output": 12.0},
+    "o1-preview": {"input": 15.0, "output": 60.0},
+}

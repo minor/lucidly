@@ -107,11 +107,6 @@ class AgentRunRequest(BaseModel):
     challenge_id: str
 
 
-class AgentRunRequest(BaseModel):
-    agent_id: str
-    challenge_id: str
-
-
 # ---------------------------------------------------------------------------
 # Challenge endpoints
 # ---------------------------------------------------------------------------
@@ -476,7 +471,7 @@ async def chat_stream(req: ChatRequest):
                     
                     payload = {
                         "model": model,
-                        "max_tokens": 16384,
+                        "max_tokens": settings.max_tokens,
                         "messages": messages_for_api,
                         "system": system_message,
                         "stream": True,
@@ -501,6 +496,8 @@ async def chat_stream(req: ChatRequest):
                             return
                         
                         full_response = ""
+                        input_tokens = 0
+                        output_tokens = 0
                         async for line in response.aiter_lines():
                             if line.startswith("data: "):
                                 data_str = line[6:]
@@ -508,17 +505,44 @@ async def chat_stream(req: ChatRequest):
                                     break
                                 try:
                                     data = json.loads(data_str)
-                                    if data.get("type") == "content_block_delta":
+                                    event_type = data.get("type")
+                                    if event_type == "message_start":
+                                        usage = data.get("message", {}).get("usage", {})
+                                        input_tokens = usage.get("input_tokens", 0)
+                                        # Send input tokens immediately
+                                        yield f"data: {json.dumps({'type': 'usage', 'input_tokens': input_tokens})}\n\n"
+                                    elif event_type == "content_block_delta":
                                         chunk = data.get("delta", {}).get("text", "")
                                         if chunk:
                                             full_response += chunk
                                             yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
-                                    elif data.get("type") == "message_stop":
+                                    elif event_type == "message_delta":
+                                        usage = data.get("usage", {})
+                                        output_tokens = usage.get("output_tokens", 0)
+                                    elif event_type == "message_stop":
                                         break
                                 except json.JSONDecodeError:
                                     continue
                         
-                        yield f"data: {json.dumps({'type': 'done', 'content': full_response})}\n\n"
+                        # Dynamic cost calculation
+                        from config import MODEL_PRICING
+                        model_name = req.model or "claude-3-opus"
+                        pricing = MODEL_PRICING.get(model_name)
+                        
+                        # Fallback logic if exact match fails
+                        if not pricing:
+                            for key, p in MODEL_PRICING.items():
+                                if model_name.startswith(key):
+                                    pricing = p
+                                    break
+                        
+                        # Default to Opus if still not found
+                        if not pricing:
+                            pricing = {"input": 15.0, "output": 75.0}
+
+                        cost = (input_tokens * pricing["input"] + output_tokens * pricing["output"]) / 1_000_000
+                        
+                        yield f"data: {json.dumps({'type': 'done', 'content': full_response, 'input_tokens': input_tokens, 'output_tokens': output_tokens, 'cost': cost})}\n\n"
             else:
                 # Use OpenAI-compatible API (e.g., OpenRouter)
                 conversation_history = []
@@ -607,6 +631,11 @@ async def terminate_sandbox_endpoint(sandbox_id: str):
 # ---------------------------------------------------------------------------
 
 
+class RunCodeRequest(BaseModel):
+    sandbox_id: str
+    code: str
+
+
 class RunTestsRequest(BaseModel):
     code: str
     challenge_id: str
@@ -661,3 +690,12 @@ async def run_tests(req: RunTestsRequest) -> RunTestsResponse:
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "model": settings.default_model}
+@app.post("/api/run-code")
+async def run_code(req: RunCodeRequest):
+    """Run arbitrary code in a sandbox (for data challenges)."""
+    try:
+        from sandbox import run_code_in_sandbox
+        result = await run_code_in_sandbox(req.sandbox_id, req.code)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

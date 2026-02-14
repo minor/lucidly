@@ -127,17 +127,28 @@ export interface ChatMessage {
   content: string;
 }
 
+export interface StreamDoneData {
+  content: string;
+  input_tokens?: number;
+  output_tokens?: number;
+  cost?: number;
+}
+
 export async function streamChat(
   messages: ChatMessage[],
   model?: string,
   onChunk?: (chunk: string) => void,
   onComplete?: (fullResponse: string) => void,
-  onError?: (error: string) => void
+  onError?: (error: string) => void,
+  onDone?: (data: StreamDoneData) => void,
+  onUsage?: (usage: { input_tokens: number }) => void,
+  signal?: AbortSignal
 ): Promise<void> {
   const response = await fetch(`${API_BASE}/api/chat/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ messages, model }),
+    signal,
   });
 
   if (!response.ok) {
@@ -173,8 +184,16 @@ export async function streamChat(
             if (data.type === "chunk") {
               fullResponse += data.content;
               onChunk?.(data.content);
+            } else if (data.type === "usage") {
+              onUsage?.({ input_tokens: data.input_tokens });
             } else if (data.type === "done") {
               onComplete?.(data.content || fullResponse);
+              onDone?.({
+                content: data.content || fullResponse,
+                input_tokens: data.input_tokens,
+                output_tokens: data.output_tokens,
+                cost: data.cost,
+              });
             } else if (data.type === "error") {
               onError?.(data.message || "Unknown error");
               return;
@@ -221,6 +240,12 @@ export interface RunTestsResponse {
   total_count: number;
 }
 
+export interface RunCodeResponse {
+  stdout: string;
+  stderr: string;
+  returncode: number;
+}
+
 export async function runTests(
   code: string,
   challengeId: string,
@@ -232,3 +257,22 @@ export async function runTests(
   });
 }
 
+export async function runCode(
+  sandboxId: string,
+  code: string
+): Promise<RunCodeResponse> {
+  return fetchJSON<RunCodeResponse>("/api/run-code", {
+    method: "POST",
+    body: JSON.stringify({ sandbox_id: sandboxId, code }),
+  });
+}
+
+
+export const MODEL_PRICING: Record<string, { input: number; output: number }> = {
+  "claude-3-opus-20240229": { input: 15.0, output: 75.0 },
+  "claude-3-opus": { input: 15.0, output: 75.0 },
+  "claude-3-5-sonnet-20240620": { input: 3.0, output: 15.0 },
+  "claude-3-5-sonnet": { input: 3.0, output: 15.0 },
+  "o1-mini": { input: 3.0, output: 12.0 },
+  "o1-preview": { input: 15.0, output: 60.0 },
+};

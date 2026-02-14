@@ -5,8 +5,10 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { getSession } from "@/lib/api";
 import { ChatMessage } from "@/components/ChatMessage";
-import type { Session, Turn } from "@/lib/types";
-import { Loader2, ArrowLeft, Trophy, Code, ImageIcon } from "lucide-react";
+import { ScoreBar } from "@/components/ScoreBar";
+import type { Challenge, Session, Turn } from "@/lib/types";
+import { Loader2, ArrowLeft, Trophy, Code, ImageIcon, Eye } from "lucide-react";
+import { MODEL_PRICING } from "@/lib/api";
 
 const POLL_INTERVAL_MS = 1500;
 
@@ -18,6 +20,7 @@ export default function AgentRunWatchPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [outputView, setOutputView] = useState<"preview" | "code">("preview");
+  const [elapsed, setElapsed] = useState(0);
   const turnsEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -53,6 +56,18 @@ export default function AgentRunWatchPage() {
     turnsEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [session?.turns?.length]);
 
+  // Calculate elapsed time
+  useEffect(() => {
+    if (!session?.started_at) return;
+    const updateElapsed = () => {
+      const elapsedSec = (Date.now() / 1000 - session.started_at);
+      setElapsed(Math.max(0, elapsedSec));
+    };
+    updateElapsed();
+    const interval = setInterval(updateElapsed, 1000);
+    return () => clearInterval(interval);
+  }, [session?.started_at]);
+
   if (loading && !session) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
@@ -78,6 +93,15 @@ export default function AgentRunWatchPage() {
 
   const isActive = session?.status === "active";
   const latestCode = session?.final_code || (session?.turns?.length ? session?.turns[session.turns.length - 1]?.generated_code : "") || "";
+
+  // Calculate total cost from turns
+  const totalCost = session?.turns?.reduce((acc, turn) => {
+    const model = session.model_used || "claude-3-opus-20240229";
+    const pricing = MODEL_PRICING[model] || MODEL_PRICING["claude-3-opus-20240229"];
+    const inputCost = (turn.prompt_tokens * pricing.input) / 1_000_000;
+    const outputCost = (turn.response_tokens * pricing.output) / 1_000_000;
+    return acc + inputCost + outputCost;
+  }, 0) ?? 0;
 
   return (
     <div className="flex h-screen flex-col">
@@ -109,6 +133,26 @@ export default function AgentRunWatchPage() {
         )}
       </header>
 
+      {/* Stats bar — same as play page (read-only) */}
+      <div className="flex items-center justify-between gap-4 border-b border-border px-6 py-2">
+        <ScoreBar
+          turns={session?.total_turns ?? 0}
+          tokens={session?.total_tokens ?? 0}
+          elapsedSec={elapsed}
+          accuracy={
+            session?.turns?.length
+              ? session.turns[session.turns.length - 1].accuracy_at_turn
+              : undefined
+          }
+          compositeScore={session?.composite_score ?? undefined}
+          cost={totalCost}
+        />
+        {isActive && (
+          <span className="text-xs text-muted">Watching agent run…</span>
+        )}
+      </div>
+
+      {/* Main content — same two-column layout as play: left = challenge + output, right = chat */}
       <div className="flex flex-1 min-h-0">
         {/* Left: turns + output */}
         <div className="flex-1 flex flex-col min-w-0 border-r border-border overflow-hidden">
