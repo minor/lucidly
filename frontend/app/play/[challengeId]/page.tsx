@@ -126,70 +126,6 @@ export default function ChallengePage() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
-  // Chat window resize state
-  const [chatWidth, setChatWidth] = useState(50); // Percentage of screen width
-  const [isResizingChat, setIsResizingChat] = useState(false);
-  const chatResizeStartXRef = useRef<number>(0);
-  const chatResizeStartWidthRef = useRef<number>(0);
-  const mainContainerRef = useRef<HTMLDivElement>(null);
-
-  // Load chat width from localStorage on mount
-  useEffect(() => {
-    const savedWidth = localStorage.getItem("challenge-chat-width");
-    if (savedWidth) {
-      const parsedWidth = parseFloat(savedWidth);
-      if (parsedWidth >= 33.33 && parsedWidth <= 100) {
-        setChatWidth(parsedWidth);
-      }
-    }
-  }, []);
-
-  // Save chat width to localStorage when it changes
-  useEffect(() => {
-    if (chatWidth >= 33.33 && chatWidth <= 100) {
-      localStorage.setItem("challenge-chat-width", chatWidth.toString());
-    }
-  }, [chatWidth]);
-
-  const handleChatResizeMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsResizingChat(true);
-    chatResizeStartXRef.current = e.clientX;
-    chatResizeStartWidthRef.current = chatWidth;
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-  }, [chatWidth]);
-
-  const handleChatResizeMouseMove = useCallback((e: MouseEvent) => {
-    if (!isResizingChat || !mainContainerRef.current) return;
-    
-    const containerWidth = mainContainerRef.current.offsetWidth;
-    const diff = e.clientX - chatResizeStartXRef.current;
-    const diffPercent = (diff / containerWidth) * 100;
-    // When dragging right (positive diff), chat window gets smaller (decrease width)
-    // When dragging left (negative diff), chat window gets larger (increase width)
-    const newWidth = Math.max(33.33, Math.min(100, chatResizeStartWidthRef.current - diffPercent));
-    setChatWidth(newWidth);
-  }, [isResizingChat]);
-
-  const handleChatResizeMouseUp = useCallback(() => {
-    setIsResizingChat(false);
-    document.body.style.cursor = "";
-    document.body.style.userSelect = "";
-  }, []);
-
-  useEffect(() => {
-    if (isResizingChat) {
-      document.addEventListener("mousemove", handleChatResizeMouseMove);
-      document.addEventListener("mouseup", handleChatResizeMouseUp);
-      return () => {
-        document.removeEventListener("mousemove", handleChatResizeMouseMove);
-        document.removeEventListener("mouseup", handleChatResizeMouseUp);
-      };
-    }
-  }, [isResizingChat, handleChatResizeMouseMove, handleChatResizeMouseUp]);
-
   // UI preview state
   const [renderedCode, setRenderedCode] = useState<string>("");
   const [previewTab, setPreviewTab] = useState<"preview" | "code">("preview");
@@ -446,12 +382,9 @@ export default function ChallengePage() {
       </div>
 
       {/* Main content */}
-      <div ref={mainContainerRef} className="flex flex-1 min-h-0 relative">
+      <div className="flex flex-1 min-h-0">
         {/* Left panel: Challenge description + output */}
-        <div 
-          className="flex flex-col min-w-0 border-r border-border"
-          style={{ width: `${100 - chatWidth}%` }}
-        >
+        <div className="flex-1 flex flex-col min-w-0 border-r border-border">
           {/* Top: Challenge description (scrollable); flexes to fill space above output panel */}
           <div
             className={`${
@@ -728,30 +661,8 @@ export default function ChallengePage() {
           )}
         </div>
 
-        {/* Resize handle */}
-        <div
-          onMouseDown={handleChatResizeMouseDown}
-          className={`absolute top-0 bottom-0 cursor-col-resize transition-colors ${
-            isResizingChat ? "bg-accent/20" : "bg-transparent hover:bg-border/30"
-          }`}
-          style={{ 
-            left: `calc(${100 - chatWidth}% - 2px)`,
-            zIndex: 100,
-            width: '4px',
-            pointerEvents: 'auto',
-            userSelect: 'none'
-          }}
-          aria-label="Resize chat window"
-          title="Drag to resize"
-        />
-
         {/* Right: Chat panel with streaming */}
-        <div 
-          className={`flex flex-col shrink-0 border-l border-border ${
-            !isResizingChat ? "transition-all duration-200" : ""
-          }`}
-          style={{ width: `${chatWidth}%` }}
-        >
+        <div className="flex flex-col w-1/2 shrink-0 border-l border-border">
           {/* Chat Header */}
           <div className="border-b border-border px-6 py-3 flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-muted" />

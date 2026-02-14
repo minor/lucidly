@@ -82,7 +82,7 @@ class LLM:
         response = await self.client.chat.completions.create(
             model=model or self.model,
             messages=messages,
-            max_tokens=max_tokens or self.max_tokens,
+            max_completion_tokens=max_tokens or self.max_tokens,
             temperature=temperature if temperature is not None else self.temperature,
         )
 
@@ -121,7 +121,7 @@ class LLM:
         stream = await self.client.chat.completions.create(
             model=model or self.model,
             messages=messages,
-            max_tokens=max_tokens or self.max_tokens,
+            max_completion_tokens=max_tokens or self.max_tokens,
             temperature=temperature if temperature is not None else self.temperature,
             stream=True,
         )
