@@ -397,7 +397,7 @@ export default function ChallengePage() {
       (usage) => {
         if (usage.input_tokens) {
           // Input cost: dynamic pricing based on selected model
-          const pricing = MODEL_PRICING[model] || MODEL_PRICING["claude-3-opus-20240229"];
+          const pricing = MODEL_PRICING[model] || MODEL_PRICING["gpt-5.2"];
           setInputCost((usage.input_tokens * pricing.input) / 1_000_000);
           setTotalInputTokens((t) => t + usage.input_tokens);
         }

@@ -596,7 +596,30 @@ async def chat_stream(req: ChatRequest):
                     full_response += chunk
                     yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
                 
-                yield f"data: {json.dumps({'type': 'done', 'content': full_response})}\n\n"
+                # Estimate tokens (approx 1.3 tokens per word is standard, but keeping consistent with session_ws * 2 if preferred, 
+                # though * 1.3 is closer to reality for English. Let's use a simple heuristic.)
+                # session_ws uses * 2. Let's use * 1.5 as a middle ground or stick to simple word count.
+                # Actually, main.py session_ws uses len(split()) * 2.
+                est_input_tokens = len(current_prompt.split()) * 2
+                est_output_tokens = len(full_response.split()) * 2
+                
+                # Emit usage event for input tokens so frontend updates headers
+                yield f"data: {json.dumps({'type': 'usage', 'input_tokens': est_input_tokens})}\n\n"
+
+                # Dynamic cost calculation
+                from config import MODEL_PRICING
+                pricing = MODEL_PRICING.get(model)
+                if not pricing:
+                     for key, p in MODEL_PRICING.items():
+                        if model.startswith(key):
+                            pricing = p
+                            break
+                if not pricing:
+                    pricing = {"input": 0.0, "output": 0.0}
+
+                cost = (est_input_tokens * pricing["input"] + est_output_tokens * pricing["output"]) / 1_000_000
+                
+                yield f"data: {json.dumps({'type': 'done', 'content': full_response, 'input_tokens': est_input_tokens, 'output_tokens': est_output_tokens, 'cost': cost})}\n\n"
         except Exception as e:
             error_msg = str(e)
             # Provide more helpful error messages
