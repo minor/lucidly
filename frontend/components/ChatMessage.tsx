@@ -63,6 +63,8 @@ interface ChatMessageProps {
   testResults?: boolean[];
   turnNumber?: number;
   tokens?: number;
+  /** Override label for user role (e.g. "Agent" on benchmark watch page) */
+  userLabel?: string;
 }
 
 export function ChatMessage({
@@ -73,6 +75,7 @@ export function ChatMessage({
   testResults,
   turnNumber,
   tokens,
+  userLabel,
 }: ChatMessageProps) {
   const isUser = role === "user";
 
@@ -81,7 +84,7 @@ export function ChatMessage({
       {/* Role label — IDE-style */}
       <div className="flex items-center gap-2 text-xs text-muted mb-1.5">
         {isUser ? (
-          <span>You</span>
+          <span>{userLabel ?? "You"}</span>
         ) : (
           <>
             <span>Assistant</span>

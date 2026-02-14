@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { getLeaderboard } from "@/lib/api";
 import type { LeaderboardEntry } from "@/lib/types";
-import { Loader2, Trophy, Medal } from "lucide-react";
+import { Loader2, Trophy, Medal, Bot } from "lucide-react";
 
 export default function LeaderboardPage() {
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
@@ -92,7 +92,15 @@ export default function LeaderboardPage() {
               } ${i < 3 ? "bg-accent/[0.03]" : ""}`}
             >
               <div className="flex items-center">{getRankIcon(i + 1)}</div>
-              <span className="font-medium truncate">{entry.username}</span>
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="font-medium truncate">{entry.username}</span>
+                {entry.username.startsWith("agent:") && (
+                  <span className="shrink-0 inline-flex items-center gap-1 rounded-full bg-accent/10 px-1.5 py-0.5 text-[10px] font-medium text-accent">
+                    <Bot className="h-2.5 w-2.5" />
+                    Agent
+                  </span>
+                )}
+              </div>
               <span className="text-muted truncate text-xs">
                 {entry.challenge_title}
               </span>

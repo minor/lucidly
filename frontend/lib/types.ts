@@ -76,3 +76,11 @@ export interface LeaderboardEntry {
   total_tokens: number;
   completed_at: number;
 }
+
+export interface Agent {
+  id: string;
+  name: string;
+  strategy: string;
+  description: string;
+  model: string;
+}

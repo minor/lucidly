@@ -4,6 +4,7 @@ import type {
   PromptResponse,
   Scores,
   LeaderboardEntry,
+  Agent,
 } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -77,6 +78,23 @@ export async function completeSession(
 ): Promise<{ session: Session; scores: Scores }> {
   return fetchJSON(`/api/sessions/${sessionId}/complete`, {
     method: "POST",
+  });
+}
+
+// ---- Agents ----
+
+export async function getAgents(): Promise<Agent[]> {
+  return fetchJSON<Agent[]>("/api/agents");
+}
+
+export async function startAgentRun(agentId: string, challengeId: string): Promise<{
+  session_id: string;
+  challenge_id: string;
+  agent_id: string;
+}> {
+  return fetchJSON("/api/agent-runs", {
+    method: "POST",
+    body: JSON.stringify({ agent_id: agentId, challenge_id: challengeId }),
   });
 }
 

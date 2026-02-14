@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     median_tokens: int = 500
     median_turns: int = 4
 
+    # Agent / Modal (for benchmark runs)
+    agent_internal_secret: str = ""
+    modal_app_name: str = "lucidly-agent"
+    backend_public_url: str = "http://localhost:8000"  # URL Modal worker uses to call back
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",

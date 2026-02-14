@@ -6,13 +6,14 @@ import {
   Zap,
   PlusCircle,
   Trophy,
-  Search,
+  Bot,
   ChevronDown,
 } from "lucide-react";
 import { useState } from "react";
 
 const NAV_ITEMS = [
   { href: "/play", label: "New Challenge", icon: PlusCircle },
+  { href: "/agents", label: "Agents", icon: Bot },
   { href: "/leaderboard", label: "Leaderboard", icon: Trophy },
 ];
 
