@@ -28,6 +28,8 @@ from scoring import (
     compute_accuracy_text,
     run_function_tests,
 )
+from test_generator import TestGenerator, GeneratedTestSuite
+from evaluator import ChallengeEvaluator
 
 # ---------------------------------------------------------------------------
 # App setup
@@ -45,6 +47,11 @@ app.add_middleware(
 
 # Default LLM instance (can be overridden per-request)
 llm = LLM()
+
+# Test generator and evaluator instances
+# TestGenerator uses Claude by default (configured in test_generator.py)
+test_generator = TestGenerator()  # Will use Claude via create_claude_llm()
+evaluator = ChallengeEvaluator()
 
 
 # ---------------------------------------------------------------------------
@@ -81,6 +88,8 @@ class PromptResponse(BaseModel):
     response_tokens: int
     accuracy: float
     test_results: list[bool] | None = None
+    evaluation_details: dict | None = None  # Additional evaluation details
+    execution_output: str | None = None  # Output from code execution
 
 
 # ---------------------------------------------------------------------------
@@ -104,6 +113,23 @@ async def get_challenge(challenge_id: str):
     if challenge is None:
         raise HTTPException(status_code=404, detail="Challenge not found")
     return challenge
+
+
+@app.post("/api/challenges/{challenge_id}/generate-tests")
+async def generate_tests_for_challenge(challenge_id: str):
+    """
+    Automatically generate test suite for a challenge.
+    Returns the generated test suite with test cases tailored to the challenge type.
+    """
+    challenge = get_challenge_by_id(challenge_id)
+    if challenge is None:
+        raise HTTPException(status_code=404, detail="Challenge not found")
+    
+    test_suite = await test_generator.generate_tests(challenge)
+    return {
+        "challenge_id": challenge_id,
+        "test_suite": test_suite.model_dump(),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -155,16 +181,24 @@ async def submit_prompt(session_id: str, req: PromptRequest):
         conversation_history=history if history else None,
     )
 
-    # Compute accuracy for this turn
-    accuracy = 0.0
-    test_results = None
-
-    if challenge.category == "function" and challenge.test_suite:
-        test_dicts = [t.model_dump() for t in challenge.test_suite]
-        test_results = run_function_tests(response.generated_code, test_dicts)
-        accuracy = compute_accuracy_function(test_results)
-    elif challenge.target_code:
-        accuracy = compute_accuracy_text(response.generated_code, challenge.target_code)
+    # Generate tests if not already present, then evaluate
+    generated_test_suite = None
+    # Only generate tests if challenge doesn't have a test suite
+    # For function challenges, prefer existing test_suite if available
+    if not challenge.test_suite:
+        # Auto-generate tests for this challenge
+        generated_test_suite = await test_generator.generate_tests(challenge)
+    
+    # Evaluate using the new evaluator system
+    # The evaluator will use challenge.test_suite if available, otherwise generated_test_suite
+    eval_result = await evaluator.evaluate(
+        challenge,
+        response.generated_code,
+        generated_test_suite,
+    )
+    
+    accuracy = eval_result.accuracy
+    test_results = eval_result.test_results
 
     # Record turn
     turn = Turn(
@@ -187,6 +221,8 @@ async def submit_prompt(session_id: str, req: PromptRequest):
         response_tokens=response.response_tokens,
         accuracy=accuracy,
         test_results=test_results,
+        evaluation_details=eval_result.details,
+        execution_output=eval_result.execution_output,
     )
 
 
@@ -294,15 +330,23 @@ async def session_ws(ws: WebSocket, session_id: str):
 
                 generated_code = LLM.extract_code_blocks(full_response)
 
-                # Compute accuracy
+                # Generate tests if needed and evaluate
+                generated_test_suite = None
+                if challenge and not challenge.test_suite:
+                    generated_test_suite = await test_generator.generate_tests(challenge)
+                
+                # Evaluate using the new evaluator system
                 accuracy = 0.0
                 test_results = None
-                if challenge and challenge.category == "function" and challenge.test_suite:
-                    test_dicts = [t.model_dump() for t in challenge.test_suite]
-                    test_results = run_function_tests(generated_code, test_dicts)
-                    accuracy = compute_accuracy_function(test_results)
-                elif challenge and challenge.target_code:
-                    accuracy = compute_accuracy_text(generated_code, challenge.target_code)
+                eval_result = None
+                if challenge:
+                    eval_result = await evaluator.evaluate(
+                        challenge,
+                        generated_code,
+                        generated_test_suite,
+                    )
+                    accuracy = eval_result.accuracy
+                    test_results = eval_result.test_results
 
                 # We don't have token counts in streaming mode (most APIs
                 # don't return them mid-stream), so estimate from text length.
@@ -327,6 +371,8 @@ async def session_ws(ws: WebSocket, session_id: str):
                     "generated_code": generated_code,
                     "accuracy": accuracy,
                     "test_results": test_results,
+                    "evaluation_details": eval_result.details if eval_result else None,
+                    "execution_output": eval_result.execution_output if eval_result else None,
                     "prompt_tokens": est_prompt_tokens,
                     "response_tokens": est_response_tokens,
                 })

@@ -35,7 +35,7 @@ SEED_CHALLENGES: list[Challenge] = [
         ),
         category="ui",
         difficulty="medium",
-        image_url="https://placehold.co/640x400/1a1a2e/eee?text=Landing+Page+Design",
+        image_url="https://dummyimage.com/640x400/1a1a2e/eee.png&text=Landing+Page+Design",
     ),
     Challenge(
         id="build-snake-game",
