@@ -55,6 +55,22 @@ OPENAI_API_KEY=your_openrouter_key_here
 OPENAI_BASE_URL=https://openrouter.ai/api/v1
 ```
 
+### 3.6. Agent benchmark (optional)
+To run **agent benchmark runs** (Agents page: select agent + challenge, Run):
+
+- **In-process (default, no Modal):** Use `USE_INPROCESS_AGENT=true` (default). The agent runs inside the backend process. Open **Agents**, pick an agent and challenge, click **Run**, then watch the same challenge UI update live. No `AGENT_INTERNAL_SECRET` needed for in-process.
+
+- **With Modal (cloud):** To run agents in Modal instead:
+  1. Run `modal token` (or set `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` in env).
+  2. Deploy: `cd modal_agent && modal deploy app.py`.
+  3. In `backend/.env`: set `USE_INPROCESS_AGENT=false`, `BACKEND_PUBLIC_URL=<url-reachable-from-Modal>` (e.g. ngrok URL for local backend), and `AGENT_INTERNAL_SECRET=<same-secret>`.
+
+**Agent types:** The app supports several agents. Two use **real SDKs**:
+- **Claude Agent SDK** (`claude-sdk`): Uses the `claude-agent-sdk` package with a custom `submit_prompt` tool that calls your backend. Set `ANTHROPIC_API_KEY` for the SDK to call Claude.
+- **OpenAI Assistant** (`openai-assistant`): Uses the OpenAI Assistants API with a `submit_prompt` function tool. Uses `OPENAI_API_KEY` and `OPENAI_BASE_URL`.
+
+See `backend/.env.example` for all optional variables (OpenAI, Anthropic, agent secret, Modal).
+
 ### 4. Start the development server
 From the root directory, run:
 

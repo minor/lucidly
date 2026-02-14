@@ -1,17 +1,24 @@
 """
 Modal agent runner: runs a single agent on a challenge by calling the Lucidly backend.
+Supports simple loop (claude-direct, openai-cot), Claude Agent SDK (claude-sdk), and OpenAI Assistant (openai-assistant).
 Deploy: modal deploy app.py
 Run (for testing): modal run app.py --session-id <id> --challenge-id <id> --agent-id claude-direct
 """
 
+import asyncio
 import os
+from typing import Any
 
 import modal
 
 app = modal.App("lucidly-agent")
 
-# Image with httpx for HTTP calls
-image = modal.Image.debian_slim(python_version="3.11").pip_install("httpx")
+# Image: httpx for HTTP; claude-agent-sdk for Claude SDK; openai for Assistants API
+image = modal.Image.debian_slim(python_version="3.11").pip_install(
+    "httpx",
+    "claude-agent-sdk",
+    "openai",
+)
 
 # Max turns per run
 MAX_TURNS = 10
@@ -19,7 +26,7 @@ ACCURACY_THRESHOLD = 0.95
 
 
 @app.function(image=image, timeout=600)
-def run_agent(
+async def run_agent(
     session_id: str,
     challenge_id: str,
     agent_id: str,
@@ -28,8 +35,7 @@ def run_agent(
 ):
     """
     Run the agent loop: fetch challenge, submit prompts to backend, complete session.
-    backend_url: e.g. https://your-api.com or http://host.docker.internal:8000 for local
-    agent_token: X-Agent-Token value for auth (can be empty if not configured)
+    For claude-sdk uses the Claude Agent SDK with a submit_prompt tool that POSTs to the backend.
     """
     import httpx
 
@@ -39,55 +45,73 @@ def run_agent(
         headers["X-Agent-Token"] = agent_token
 
     # 1) Load challenge
-    with httpx.Client(timeout=30.0) as client:
-        r = client.get(f"{base}/api/challenges/{challenge_id}", headers=headers)
+    async with httpx.AsyncClient(timeout=30.0) as http_client:
+        r = await http_client.get(
+            f"{base}/api/challenges/{challenge_id}", headers=headers
+        )
         r.raise_for_status()
         challenge = r.json()
 
     description = challenge.get("description", "")
     title = challenge.get("title", "Challenge")
-    category = challenge.get("category", "ui")
 
+    if agent_id == "claude-sdk":
+        return await _run_claude_sdk(
+            session_id=session_id,
+            challenge_id=challenge_id,
+            base_url=base,
+            headers=headers,
+            title=title,
+            description=description,
+        )
+    if agent_id == "openai-assistant":
+        return await _run_openai_assistant(
+            session_id=session_id,
+            base_url=base,
+            headers=headers,
+            title=title,
+            description=description,
+            challenge=challenge,
+        )
+
+    # Simple loop for claude-direct, openai-cot
     COT_SYSTEM_PROMPT = (
         "You are a careful reasoner. Think step by step: analyze the requirement, "
         "plan the solution, then write the code. Put your reasoning first, then output "
         "the final code in a single markdown code block."
     )
 
-    def first_turn_prompt(strategy: str) -> str:
-        base = f"Challenge: {title}\n\n{description}\n\n"
-        if strategy == "openai_cot":
+    def first_turn_prompt(aid: str) -> str:
+        b = f"Challenge: {title}\n\n{description}\n\n"
+        if aid == "openai-cot":
             return (
-                base
+                b
                 + "Think step by step. First analyze the requirement, then plan the solution, then write the code. "
                 "Put your reasoning first, then output the final code in a single markdown code block."
             )
-        # claude_direct or default
         return (
-            base
+            b
             + "Generate complete, runnable code that fulfills this challenge. "
             "Output only the code, or use a single markdown code block."
         )
 
-    # 2) Agent loop: strategy-specific first prompt, then iterate if needed
     turn = 0
-    while turn < MAX_TURNS:
-        turn += 1
-        if turn == 1:
-            prompt = first_turn_prompt(agent_id)
-            payload: dict = {"prompt": prompt}
-            if agent_id == "openai-cot":
-                payload["system_prompt"] = COT_SYSTEM_PROMPT
-        else:
-            # Next turn: ask to improve (in a real scenario we'd pass last code/accuracy)
-            prompt = (
-                "Review the previous response and improve the code if accuracy was not 100%. "
-                "Otherwise respond with: DONE"
-            )
-            payload = {"prompt": prompt}
+    async with httpx.AsyncClient(timeout=120.0) as http_client:
+        while turn < MAX_TURNS:
+            turn += 1
+            if turn == 1:
+                prompt = first_turn_prompt(agent_id)
+                payload: dict = {"prompt": prompt}
+                if agent_id == "openai-cot":
+                    payload["system_prompt"] = COT_SYSTEM_PROMPT
+            else:
+                prompt = (
+                    "Review the previous response and improve the code if accuracy was not 100%. "
+                    "Otherwise respond with: DONE"
+                )
+                payload = {"prompt": prompt}
 
-        with httpx.Client(timeout=120.0) as client:
-            r = client.post(
+            r = await http_client.post(
                 f"{base}/api/sessions/{session_id}/prompt",
                 headers=headers,
                 json=payload,
@@ -96,22 +120,206 @@ def run_agent(
                 raise RuntimeError(f"Prompt failed: {r.status_code} {r.text}")
             data = r.json()
 
-        accuracy = data.get("accuracy", 0.0)
-        if accuracy >= ACCURACY_THRESHOLD:
-            break
-        # Optional: check if model said DONE
-        if "DONE" in (data.get("response_text") or "").upper():
-            break
+            accuracy = data.get("accuracy", 0.0)
+            if accuracy >= ACCURACY_THRESHOLD:
+                break
+            if "DONE" in (data.get("response_text") or "").upper():
+                break
 
-    # 3) Complete session
-    with httpx.Client(timeout=30.0) as client:
-        r = client.post(
+        r = await http_client.post(
             f"{base}/api/sessions/{session_id}/complete",
             headers=headers,
         )
         r.raise_for_status()
 
     return {"session_id": session_id, "turns": turn, "status": "completed"}
+
+
+async def _run_claude_sdk(
+    session_id: str,
+    challenge_id: str,
+    base_url: str,
+    headers: dict,
+    title: str,
+    description: str,
+) -> dict:
+    """Run Claude Agent SDK with a tool that POSTs prompts to the backend."""
+    import httpx
+    from claude_agent_sdk import (
+        ClaudeAgentOptions,
+        ClaudeSDKClient,
+        create_sdk_mcp_server,
+        tool,
+    )
+
+    @tool(
+        "submit_prompt",
+        "Send a prompt to the code generation API. Returns the model response, generated code snippet, and accuracy (0-1). Use this to generate and refine code for the challenge.",
+        {"prompt": str},
+    )
+    async def submit_prompt_tool(args: dict[str, Any]) -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            r = await client.post(
+                f"{base_url}/api/sessions/{session_id}/prompt",
+                headers=headers,
+                json={"prompt": args["prompt"]},
+            )
+            r.raise_for_status()
+            data = r.json()
+        snippet = (data.get("generated_code") or "")[:2000]
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": f"Response: {(data.get('response_text') or '')[:1500]}\n\nGenerated code (excerpt):\n{snippet}\n\nAccuracy: {data.get('accuracy', 0):.2f}",
+                }
+            ]
+        }
+
+    custom_server = create_sdk_mcp_server(
+        name="lucidly-challenge",
+        version="1.0.0",
+        tools=[submit_prompt_tool],
+    )
+    options = ClaudeAgentOptions(
+        mcp_servers={"lucidly-challenge": custom_server},
+        allowed_tools=["mcp__lucidly-challenge__submit_prompt"],
+        system_prompt=(
+            f"You are completing a coding challenge.\n\n"
+            f"Challenge: {title}\n\n{description}\n\n"
+            "Use the submit_prompt tool to send prompts to the code generation API. "
+            "Each call returns the model's response, generated code, and an accuracy score. "
+            "Iterate until accuracy is 1.0 or you have tried enough. Then reply with DONE."
+        ),
+        max_turns=MAX_TURNS,
+    )
+
+    async with ClaudeSDKClient(options=options) as client:
+        prompt = f"Complete this coding challenge. Use the submit_prompt tool to generate and refine code. Challenge: {title}\n\n{description}"
+        await client.query(prompt)
+        async for _ in client.receive_response():
+            pass
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        r = await client.post(
+            f"{base_url}/api/sessions/{session_id}/complete",
+            headers=headers,
+        )
+        r.raise_for_status()
+
+    return {"session_id": session_id, "status": "completed"}
+
+
+async def _run_openai_assistant(
+    session_id: str,
+    base_url: str,
+    headers: dict,
+    title: str,
+    description: str,
+    challenge: dict,
+) -> dict:
+    """Run OpenAI Assistants API with submit_prompt function that POSTs to backend."""
+    import json
+    from openai import AsyncOpenAI
+
+    # Use OpenAI from env (Modal secret or env)
+    api_key = os.environ.get("OPENAI_API_KEY", "")
+    base_url_openai = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
+    model = os.environ.get("OPENAI_ASSISTANT_MODEL", "gpt-4o")
+    client = AsyncOpenAI(api_key=api_key, base_url=base_url_openai)
+
+    assistant = await client.beta.assistants.create(
+        name="Lucidly Challenge Agent",
+        instructions=(
+            f"You are completing a coding challenge.\n\n"
+            f"Challenge: {title}\n\n{description}\n\n"
+            "Use the submit_prompt tool to send prompts to the code generation API. "
+            "Each call returns the model's response, generated code, and accuracy. "
+            "Iterate until accuracy is 1.0 or you have tried enough. Then reply with DONE."
+        ),
+        model=model,
+        tools=[
+            {
+                "type": "function",
+                "function": {
+                    "name": "submit_prompt",
+                    "description": "Send a prompt to the code generation API. Returns response, generated code excerpt, and accuracy (0-1).",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "prompt": {
+                                "type": "string",
+                                "description": "The prompt to send to the code API",
+                            }
+                        },
+                        "required": ["prompt"],
+                    },
+                },
+            }
+        ],
+    )
+
+    thread = await client.beta.threads.create()
+    await client.beta.threads.messages.create(
+        thread_id=thread.id,
+        role="user",
+        content=f"Complete this coding challenge using the submit_prompt tool. Challenge: {title}\n\n{description}",
+    )
+
+    run = await client.beta.threads.runs.create(
+        thread_id=thread.id,
+        assistant_id=assistant.id,
+    )
+    max_steps = 20
+    step = 0
+    while step < max_steps:
+        step += 1
+        run = await client.beta.threads.runs.retrieve(
+            thread_id=thread.id, run_id=run.id
+        )
+        if run.status == "completed":
+            break
+        if run.status == "failed":
+            break
+        if run.status == "requires_action":
+            tool_calls = run.required_action.submit_tool_outputs.tool_calls
+            outputs = []
+            async with httpx.AsyncClient(timeout=120.0) as http_client:
+                for tc in tool_calls:
+                    name = getattr(tc.function, "name", "") or ""
+                    if name != "submit_prompt":
+                        outputs.append({"tool_call_id": tc.id, "output": "Unknown tool"})
+                        continue
+                    args = json.loads(
+                        getattr(tc.function, "arguments", None) or "{}"
+                    )
+                    prompt = args.get("prompt", "")
+                    r = await http_client.post(
+                        f"{base_url}/api/sessions/{session_id}/prompt",
+                        headers=headers,
+                        json={"prompt": prompt},
+                    )
+                    r.raise_for_status()
+                    data = r.json()
+                    snippet = (data.get("generated_code") or "")[:1500]
+                    output = f"Response: {(data.get('response_text') or '')[:1000]}\n\nGenerated code (excerpt):\n{snippet}\n\nAccuracy: {data.get('accuracy', 0):.2f}"
+                    outputs.append({"tool_call_id": tc.id, "output": output})
+            run = await client.beta.threads.runs.submit_tool_outputs(
+                thread_id=thread.id,
+                run_id=run.id,
+                tool_outputs=outputs,
+            )
+            continue
+        await asyncio.sleep(1)
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        r = await client.post(
+            f"{base_url}/api/sessions/{session_id}/complete",
+            headers=headers,
+        )
+        r.raise_for_status()
+
+    return {"session_id": session_id, "status": "completed"}
 
 
 @app.local_entrypoint()

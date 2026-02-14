@@ -1,10 +1,14 @@
 """Lucidly backend — FastAPI application."""
 
+import asyncio
 import json
+import logging
 import time
 import httpx
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+
+logger = logging.getLogger(__name__)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -13,6 +17,8 @@ from config import settings
 from llm import LLM
 from challenges import get_all_challenges, get_challenge_by_id
 from agents import get_all_agents, get_agent_by_id
+from agent_runner import run_agent_loop
+from agent_turn import execute_prompt_turn
 from sessions import (
     create_session,
     get_session,
@@ -157,55 +163,20 @@ async def submit_prompt(session_id: str, request: Request, req: PromptRequest):
     if session.status != "active":
         raise HTTPException(status_code=400, detail="Session is not active")
 
-    challenge = get_challenge_by_id(session.challenge_id)
-    if challenge is None:
-        raise HTTPException(status_code=404, detail="Challenge not found")
-
-    # Build conversation history from previous turns
-    history: list[dict] = []
-    for turn in session.turns:
-        history.append({"role": "user", "content": turn.prompt_text})
-        history.append({"role": "assistant", "content": turn.response_text})
-
-    # Call LLM
-    model = req.model or session.model_used
-    llm_instance = LLM(model=model) if model != llm.model else llm
-    response = await llm_instance.generate(
+    data = await execute_prompt_turn(
+        session_id,
         req.prompt,
-        conversation_history=history if history else None,
+        model=req.model,
         system_prompt=req.system_prompt,
     )
-
-    # Compute accuracy for this turn
-    accuracy = 0.0
-    test_results = None
-
-    if challenge.target_code:
-        accuracy = compute_accuracy_text(response.generated_code, challenge.target_code)
-    # Note: test-suite accuracy is computed via the /api/run-tests endpoint
-    # which uses the persistent sandbox created by the frontend
-
-    # Record turn
-    turn = Turn(
-        turn_number=len(session.turns) + 1,
-        prompt_text=req.prompt,
-        prompt_tokens=response.prompt_tokens,
-        response_text=response.response_text,
-        response_tokens=response.response_tokens,
-        generated_code=response.generated_code,
-        accuracy_at_turn=accuracy,
-        timestamp=time.time(),
-    )
-    add_turn(session_id, turn)
-
     return PromptResponse(
-        turn_number=turn.turn_number,
-        response_text=response.response_text,
-        generated_code=response.generated_code,
-        prompt_tokens=response.prompt_tokens,
-        response_tokens=response.response_tokens,
-        accuracy=accuracy,
-        test_results=test_results,
+        turn_number=data["turn_number"],
+        response_text=data["response_text"],
+        generated_code=data["generated_code"],
+        prompt_tokens=data["prompt_tokens"],
+        response_tokens=data["response_tokens"],
+        accuracy=data["accuracy"],
+        test_results=None,
     )
 
 
@@ -288,21 +259,38 @@ async def start_agent_run(req: AgentRunRequest):
     if challenge is None:
         raise HTTPException(status_code=404, detail="Challenge not found")
     username = f"agent:{agent.id}"
-    session = create_session(req.challenge_id, agent.model, username)
-    try:
-        import modal
-        fn = modal.Function.lookup(settings.modal_app_name, "run_agent")
-        fn.spawn(
-            session_id=session.id,
-            challenge_id=req.challenge_id,
-            agent_id=req.agent_id,
-            backend_url=settings.backend_public_url,
-            agent_token=settings.agent_internal_secret or "",
+    model_used = agent.model or settings.default_model
+    session = create_session(req.challenge_id, model_used, username)
+    modal_spawned = False
+
+    if not settings.use_inprocess_agent:
+        try:
+            import modal
+            fn = modal.Function.lookup(settings.modal_app_name, "run_agent")
+            fn.spawn(
+                session_id=session.id,
+                challenge_id=req.challenge_id,
+                agent_id=req.agent_id,
+                backend_url=settings.backend_public_url,
+                agent_token=settings.agent_internal_secret or "",
+            )
+            modal_spawned = True
+        except Exception as e:
+            logger.warning("Modal spawn failed, falling back to in-process agent: %s", e)
+            asyncio.create_task(
+                run_agent_loop(session.id, req.challenge_id, req.agent_id)
+            )
+    else:
+        asyncio.create_task(
+            run_agent_loop(session.id, req.challenge_id, req.agent_id)
         )
-    except Exception:
-        # Modal not configured or deploy missing; frontend can still poll session
-        pass
-    return {"session_id": session.id, "challenge_id": req.challenge_id, "agent_id": req.agent_id}
+
+    return {
+        "session_id": session.id,
+        "challenge_id": req.challenge_id,
+        "agent_id": req.agent_id,
+        "modal_spawned": modal_spawned,
+    }
 
 
 # ---------------------------------------------------------------------------
