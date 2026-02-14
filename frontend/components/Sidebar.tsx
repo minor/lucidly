@@ -8,12 +8,10 @@ import {
   Trophy,
   Search,
   ChevronDown,
-  MessageSquare,
 } from "lucide-react";
 import { useState } from "react";
 
 const NAV_ITEMS = [
-  { href: "/chat", label: "New Chat", icon: MessageSquare },
   { href: "/play", label: "New Challenge", icon: PlusCircle },
   { href: "/leaderboard", label: "Leaderboard", icon: Trophy },
 ];

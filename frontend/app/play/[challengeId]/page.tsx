@@ -1,33 +1,17 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
-import {
-  createSession,
-  submitPrompt,
-  completeSession,
-  getChallenge,
-} from "@/lib/api";
+import { getChallenge } from "@/lib/api";
 import { PromptInput } from "@/components/PromptInput";
-import { ChatMessage } from "@/components/ChatMessage";
 import { ScoreBar } from "@/components/ScoreBar";
-import type { Challenge, PromptResponse, Scores } from "@/lib/types";
+import { streamChat, type ChatMessage } from "@/lib/api";
+import type { Challenge, Scores } from "@/lib/types";
 import {
   Loader2,
-  CheckCircle,
   ArrowLeft,
-  Trophy,
+  Sparkles,
 } from "lucide-react";
-
-interface ChatEntry {
-  role: "user" | "assistant";
-  content: string;
-  generatedCode?: string;
-  accuracy?: number;
-  testResults?: boolean[];
-  turnNumber?: number;
-  tokens?: number;
-}
 
 export default function ChallengePage() {
   const params = useParams();
@@ -35,32 +19,17 @@ export default function ChallengePage() {
   const challengeId = params.challengeId as string;
 
   const [challenge, setChallenge] = useState<Challenge | null>(null);
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [chat, setChat] = useState<ChatEntry[]>([]);
-  const [loading, setLoading] = useState(false);
   const [initializing, setInitializing] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [completed, setCompleted] = useState(false);
-  const [scores, setScores] = useState<Scores | null>(null);
 
-  // Metrics
-  const [totalTokens, setTotalTokens] = useState(0);
-  const [totalTurns, setTotalTurns] = useState(0);
-  const [lastAccuracy, setLastAccuracy] = useState(0);
-  const startTimeRef = useRef<number>(Date.now());
-  const [elapsed, setElapsed] = useState(0);
-  const chatEndRef = useRef<HTMLDivElement>(null);
+  // Chat state
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [currentStreamingMessage, setCurrentStreamingMessage] = useState("");
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
 
-  // Timer
-  useEffect(() => {
-    if (completed) return;
-    const interval = setInterval(() => {
-      setElapsed((Date.now() - startTimeRef.current) / 1000);
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [completed]);
-
-  // Initialize session
+  // Initialize challenge
   useEffect(() => {
     let ignore = false;
     async function init() {
@@ -68,11 +37,6 @@ export default function ChallengePage() {
         const challengeData = await getChallenge(challengeId);
         if (ignore) return;
         setChallenge(challengeData);
-
-        const { session_id } = await createSession(challengeId);
-        if (ignore) return;
-        setSessionId(session_id);
-        startTimeRef.current = Date.now();
       } catch (err) {
         if (!ignore) setError((err as Error).message);
       } finally {
@@ -85,66 +49,52 @@ export default function ChallengePage() {
     };
   }, [challengeId]);
 
-  // Scroll to bottom on new messages
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [chat]);
+    scrollToBottom();
+  }, [messages, currentStreamingMessage]);
 
-  const handleSubmit = useCallback(
-    async (prompt: string) => {
-      if (!sessionId || loading || completed) return;
+  const handleSubmit = async (prompt: string) => {
+    if (!prompt.trim() || isStreaming) return;
 
-      setChat((prev) => [...prev, { role: "user", content: prompt }]);
-      setLoading(true);
-      setError(null);
+    // Add user message
+    const userMessage: ChatMessage = { role: "user", content: prompt };
+    const updatedMessages = [...messages, userMessage];
+    setMessages(updatedMessages);
+    setIsStreaming(true);
+    setCurrentStreamingMessage("");
 
-      try {
-        const response: PromptResponse = await submitPrompt(
-          sessionId,
-          prompt
-        );
-
-        setChat((prev) => [
-          ...prev,
-          {
-            role: "assistant",
-            content: response.response_text,
-            generatedCode: response.generated_code,
-            accuracy: response.accuracy,
-            testResults: response.test_results ?? undefined,
-            turnNumber: response.turn_number,
-            tokens: response.prompt_tokens + response.response_tokens,
-          },
-        ]);
-
-        setTotalTokens(
-          (prev) =>
-            prev + response.prompt_tokens + response.response_tokens
-        );
-        setTotalTurns((prev) => prev + 1);
-        setLastAccuracy(response.accuracy);
-      } catch (err) {
-        setError((err as Error).message);
-      } finally {
-        setLoading(false);
+    // Stream response
+    await streamChat(
+      updatedMessages,
+      undefined, // Use default model
+      (chunk) => {
+        setCurrentStreamingMessage((prev) => prev + chunk);
+      },
+      (fullResponse) => {
+        const assistantMessage: ChatMessage = {
+          role: "assistant",
+          content: fullResponse,
+        };
+        setMessages([...updatedMessages, assistantMessage]);
+        setCurrentStreamingMessage("");
+        setIsStreaming(false);
+      },
+      (error) => {
+        console.error("Chat error:", error);
+        const errorMessage: ChatMessage = {
+          role: "assistant",
+          content: `Error: ${error}`,
+        };
+        setMessages([...updatedMessages, errorMessage]);
+        setCurrentStreamingMessage("");
+        setIsStreaming(false);
       }
-    },
-    [sessionId, loading, completed]
-  );
-
-  const handleComplete = useCallback(async () => {
-    if (!sessionId) return;
-    setLoading(true);
-    try {
-      const result = await completeSession(sessionId);
-      setScores(result.scores);
-      setCompleted(true);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }, [sessionId]);
+    );
+  };
 
   if (initializing) {
     return (
@@ -174,43 +124,19 @@ export default function ChallengePage() {
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          {!completed && totalTurns > 0 && (
-            <button
-              onClick={handleComplete}
-              disabled={loading}
-              className="flex items-center gap-1.5 rounded-lg bg-foreground px-4 py-2 text-xs font-medium text-background transition-opacity hover:opacity-80 disabled:opacity-50"
-            >
-              <CheckCircle className="h-3.5 w-3.5" />
-              Complete
-            </button>
-          )}
-        </div>
       </header>
 
-      {/* Efficiency stats at top */}
-      <div className="border-b border-border px-6 py-2">
-        <ScoreBar
-          accuracy={lastAccuracy}
-          turns={totalTurns}
-          tokens={totalTokens}
-          elapsedSec={elapsed}
-          compositeScore={scores?.composite_score}
-        />
-      </div>
-
-      {/* Main content: left = description + output, right = chat */}
+      {/* Main content: left = description, right = chat */}
       <div className="flex flex-1 min-h-0">
-        {/* Left: Challenge description and output */}
-        <div className="flex-1 flex flex-col min-w-0 border-r border-border">
-          {/* Top left: Challenge description and image/visual */}
-          <div className="border-b border-border p-5 overflow-y-auto">
-            <h2 className="text-sm font-semibold mb-2">Challenge</h2>
+        {/* Left: Challenge description */}
+        <div className="flex-1 flex flex-col min-w-0 border-r border-border overflow-y-auto">
+          <div className="p-6">
+            <h2 className="text-sm font-semibold mb-3">Challenge</h2>
             <p className="text-sm text-muted leading-relaxed whitespace-pre-wrap mb-4">
               {challenge?.description}
             </p>
             {challenge?.image_url && (
-              <div className="rounded-lg border border-border overflow-hidden bg-muted/20">
+              <div className="rounded-lg border border-border overflow-hidden bg-muted/20 mb-4">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={challenge.image_url}
@@ -240,73 +166,98 @@ export default function ChallengePage() {
               </div>
             )}
           </div>
-
-          {/* Bottom left: Output (hard-coded for now) */}
-          <div className="flex-1 min-h-0 flex flex-col p-5 overflow-hidden">
-            <h2 className="text-sm font-semibold mb-2">Output</h2>
-            <div className="flex-1 rounded-lg border border-border bg-code-bg p-4 overflow-auto">
-              <pre className="text-xs font-mono text-muted whitespace-pre-wrap">
-                {`// Your generated output will appear here.
-// For now this is a placeholder.
-
-// Example (landing page):
-// <!DOCTYPE html>
-// <html>...</html>
-
-// Example (snake game):
-// Canvas + JS game loop
-
-// Example (NYT scraper):
-// [{"title": "...", "url": "..."}, ...]`}
-              </pre>
-            </div>
-          </div>
         </div>
 
-        {/* Right: Chat panel (IDE-style, no avatars) */}
-        <div className="flex flex-col w-[420px] shrink-0">
-          <div className="flex-1 overflow-y-auto px-4 py-4">
-            {chat.map((entry, i) => (
-              <ChatMessage key={i} {...entry} />
-            ))}
-            {loading && (
-              <div className="flex items-center gap-2 py-4 text-sm text-muted">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Generating...
-              </div>
-            )}
-            {error && (
-              <div className="my-4 rounded-lg border border-error/20 bg-error/5 p-3">
-                <p className="text-sm text-error">{error}</p>
-              </div>
-            )}
-            {completed && scores && (
-              <div className="my-4 rounded-xl border border-accent/30 bg-accent/5 p-4 text-center">
-                <Trophy className="mx-auto h-6 w-6 text-accent mb-2" />
-                <p className="text-lg font-bold font-mono text-accent">
-                  {scores.composite_score}
-                  <span className="text-xs font-normal text-muted"> / 1000</span>
-                </p>
-                <button
-                  onClick={() => router.push("/play")}
-                  className="mt-3 rounded-lg bg-foreground px-4 py-1.5 text-xs font-medium text-background hover:opacity-80"
-                >
-                  Try Another Challenge
-                </button>
-              </div>
-            )}
-            <div ref={chatEndRef} />
+        {/* Right: Chat panel with streaming */}
+        <div className="flex flex-col w-1/2 shrink-0 border-l border-border">
+          {/* Chat Header */}
+          <div className="border-b border-border px-6 py-3 flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-muted" />
+            <h2 className="text-sm font-medium text-foreground">Chat</h2>
           </div>
-          {!completed && (
-            <div className="border-t border-border p-4">
+
+          {/* Messages Container */}
+          <div
+            ref={chatContainerRef}
+            className="flex-1 overflow-y-auto"
+          >
+            <div className="px-6 py-8">
+              {messages.length === 0 && !isStreaming && (
+                <div className="flex flex-col items-center justify-center h-full min-h-[400px]">
+                  <div className="text-center max-w-md">
+                    <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-accent/10 mb-4">
+                      <Sparkles className="h-6 w-6 text-accent" />
+                    </div>
+                    <h3 className="text-lg font-medium text-foreground mb-2">
+                      Start a conversation
+                    </h3>
+                    <p className="text-sm text-muted">
+                      Ask Claude Code for help with this challenge
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Messages */}
+              <div className="space-y-8">
+                {messages.map((message, index) => (
+                  <div
+                    key={index}
+                    className={`flex gap-4 group ${
+                      message.role === "user" ? "flex-row-reverse" : ""
+                    }`}
+                  >
+                    {/* Message Content */}
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm leading-relaxed">
+                        {message.role === "user" ? (
+                          <div className="bg-foreground/5 border border-border rounded-lg px-4 py-3 text-foreground">
+                            <div className="whitespace-pre-wrap break-words">
+                              {message.content}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="text-foreground">
+                            <div className="whitespace-pre-wrap break-words">
+                              {message.content}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+
+                {/* Streaming Message */}
+                {isStreaming && (
+                  <div className="flex gap-4 group">
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm leading-relaxed text-foreground">
+                        <div className="whitespace-pre-wrap break-words">
+                          {currentStreamingMessage}
+                          <span className="inline-block w-0.5 h-4 bg-foreground ml-1 align-middle animate-pulse" />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div ref={messagesEndRef} />
+            </div>
+          </div>
+
+          {/* Input Area */}
+          <div className="border-t border-border bg-background">
+            <div className="px-6 py-4">
               <PromptInput
                 onSubmit={handleSubmit}
-                loading={loading}
-                placeholder="Write your prompt..."
-                disabled={!sessionId}
+                loading={isStreaming}
+                placeholder="Ask anything..."
+                disabled={isStreaming}
               />
             </div>
-          )}
+          </div>
         </div>
       </div>
     </div>
