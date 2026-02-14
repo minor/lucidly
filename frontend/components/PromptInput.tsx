@@ -1,14 +1,17 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { ArrowRight, Loader2, Square } from "lucide-react";
+import { ArrowRight, Loader2, Square, Info } from "lucide-react";
+
+import { MODELS, MODEL_PRICING } from "@/lib/api";
 
 interface PromptInputProps {
-  onSubmit: (prompt: string) => void;
+  onSubmit: (prompt: string, model: string) => void;
   onStop?: () => void;
   loading?: boolean;
   placeholder?: string;
   disabled?: boolean;
+  initialModel?: string;
 }
 
 export function PromptInput({
@@ -17,14 +20,16 @@ export function PromptInput({
   loading = false,
   placeholder = "Ask anything...",
   disabled = false,
+  initialModel = "gpt-5.2",
 }: PromptInputProps) {
   const [value, setValue] = useState("");
+  const [model, setModel] = useState(initialModel);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const handleSubmit = () => {
     const trimmed = value.trim();
     if (!trimmed || loading || disabled) return;
-    onSubmit(trimmed);
+    onSubmit(trimmed, model);
     setValue("");
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
@@ -53,9 +58,35 @@ export function PromptInput({
 
   return (
     <div className="relative w-full">
-      <div className="flex items-end gap-2 rounded-lg border border-input-border bg-input px-3 py-2.5 transition-colors focus-within:border-accent/50">
-        <textarea
-          ref={textareaRef}
+      <div className="flex flex-col gap-2 rounded-lg border border-input-border bg-input px-3 py-2.5 transition-colors focus-within:border-accent/50">
+        {/* Model Picker Header */}
+        <div className="flex items-center justify-between border-b border-input-border/50 pb-2">
+          <select
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            disabled={loading || disabled}
+            className="bg-transparent text-xs font-medium text-muted hover:text-foreground focus:outline-none cursor-pointer"
+          >
+            {MODELS.map((m) => (
+              <option key={m.id} value={m.id} className="bg-popover text-popover-foreground">
+                {m.name}
+              </option>
+            ))}
+          </select>
+
+          {/* Pricing Display */}
+          <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground bg-muted/30 px-2 py-1 rounded">
+            <Info className="h-3 w-3 opacity-70" />
+            <span>
+              In: <span className="font-mono text-foreground">${MODEL_PRICING[model]?.input.toFixed(2)}</span> / 
+              Out: <span className="font-mono text-foreground">${MODEL_PRICING[model]?.output.toFixed(2)}</span> per 1M
+            </span>
+          </div>
+        </div>
+
+        <div className="flex items-end gap-2">
+          <textarea
+            ref={textareaRef}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -87,6 +118,7 @@ export function PromptInput({
             )}
           </button>
         )}
+        </div>
       </div>
     </div>
   );

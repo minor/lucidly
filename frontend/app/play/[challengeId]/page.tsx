@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { getChallenge, runTests, runCode, createSandbox, terminateSandbox, MODEL_PRICING } from "@/lib/api";
+import { getChallenge, runTests, runCode, createSandbox, terminateSandbox, MODEL_PRICING, MODELS } from "@/lib/api";
 import { PromptInput } from "@/components/PromptInput";
 import { ScoreBar } from "@/components/ScoreBar";
 import { streamChat, type ChatMessage, type TestCaseResult, type RunTestsResponse, type StreamDoneData, type RunCodeResponse } from "@/lib/api";
@@ -144,6 +144,9 @@ export default function ChallengePage() {
   const [codeResult, setCodeResult] = useState<RunCodeResponse | null>(null);
   const [runningCode, setRunningCode] = useState(false);
 
+  // Model selection state
+  const [selectedModel, setSelectedModel] = useState("gpt-5.2");
+
   // Sandbox state
   const [sandboxId, setSandboxId] = useState<string | null>(null);
   const [sandboxError, setSandboxError] = useState<string | null>(null);
@@ -203,10 +206,17 @@ export default function ChallengePage() {
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
-
   useEffect(() => {
     scrollToBottom();
   }, [messages, currentStreamingMessage]);
+
+  // Ensure selectedModel is valid (handles removal of old models)
+  useEffect(() => {
+    const isValid = MODELS.some((m) => m.id === selectedModel);
+    if (!isValid) {
+      setSelectedModel(MODELS[0].id);
+    }
+  }, [selectedModel]);
 
   // Create sandbox when challenge loads (for function challenges with tests OR data challenges)
   useEffect(() => {
@@ -327,8 +337,9 @@ export default function ChallengePage() {
     }
   };
 
-  const handleSubmit = async (prompt: string) => {
+  const handleSubmit = async (prompt: string, model: string) => {
     if (!prompt.trim() || isStreaming) return;
+    setSelectedModel(model);
 
     const userMessage: ChatMessage = { role: "user", content: prompt };
     const updatedMessages = [...messages, userMessage];
@@ -342,7 +353,7 @@ export default function ChallengePage() {
 
     await streamChat(
       updatedMessages,
-      undefined,
+      model,
       (chunk) => {
         setCurrentStreamingMessage((prev) => prev + chunk);
         // Estimate tokens: roughly 1 token per 4 chars
@@ -385,8 +396,8 @@ export default function ChallengePage() {
       },
       (usage) => {
         if (usage.input_tokens) {
-          // Opus input cost: dynamic pricing
-          const pricing = MODEL_PRICING["claude-3-opus-20240229"];
+          // Input cost: dynamic pricing based on selected model
+          const pricing = MODEL_PRICING[model] || MODEL_PRICING["claude-3-opus-20240229"];
           setInputCost((usage.input_tokens * pricing.input) / 1_000_000);
           setTotalInputTokens((t) => t + usage.input_tokens);
         }
@@ -461,7 +472,7 @@ export default function ChallengePage() {
           cost={
             totalCost +
             inputCost +
-            ((estimatedTokens * MODEL_PRICING["claude-3-opus-20240229"].output) / 1_000_000)
+            ((estimatedTokens * (MODEL_PRICING[selectedModel]?.output || MODEL_PRICING["gpt-5.2"].output)) / 1_000_000)
           }
         />
         <button
