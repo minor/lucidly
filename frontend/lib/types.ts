@@ -13,6 +13,7 @@ export interface Challenge {
   test_suite: TestCase[] | null;
   starter_code: string | null;
   image_url: string | null;
+  embed_url: string | null;
 }
 
 export interface Turn {

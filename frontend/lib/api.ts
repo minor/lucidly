@@ -171,3 +171,46 @@ export async function streamChat(
     reader.releaseLock();
   }
 }
+
+// ---- Sandbox Lifecycle ----
+
+export async function createSandbox(): Promise<{ sandbox_id: string }> {
+  return fetchJSON<{ sandbox_id: string }>("/api/sandbox/create", {
+    method: "POST",
+  });
+}
+
+export async function terminateSandbox(sandboxId: string): Promise<void> {
+  await fetchJSON(`/api/sandbox/${sandboxId}/terminate`, {
+    method: "POST",
+  });
+}
+
+// ---- Run Tests ----
+
+export interface TestCaseResult {
+  input: string;
+  expected: string;
+  actual: string | null;
+  passed: boolean;
+  error: string | null;
+}
+
+export interface RunTestsResponse {
+  results: TestCaseResult[];
+  all_passed: boolean;
+  passed_count: number;
+  total_count: number;
+}
+
+export async function runTests(
+  code: string,
+  challengeId: string,
+  sandboxId: string
+): Promise<RunTestsResponse> {
+  return fetchJSON<RunTestsResponse>("/api/run-tests", {
+    method: "POST",
+    body: JSON.stringify({ code, challenge_id: challengeId, sandbox_id: sandboxId }),
+  });
+}
+

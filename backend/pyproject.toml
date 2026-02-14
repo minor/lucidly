@@ -12,6 +12,7 @@ dependencies = [
     "python-dotenv",
     "httpx",
     "websockets",
+    "modal>=1.3.3",
 ]
 
 [build-system]
