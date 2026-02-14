@@ -13,7 +13,10 @@ _sandboxes: dict[str, modal.Sandbox] = {}
 # Define the image with necessary dependencies for data challenges
 _sandbox_image = (
     modal.Image.debian_slim()
+    # Install Python dependencies
     .pip_install("pandas", "requests", "beautifulsoup4", "numpy", "lxml")
+    # Install System dependencies (g++ for C++, sanitizers for testing)
+    .apt_install("g++", "libtsan0", "libasan5")
 )
 
 
@@ -38,6 +41,13 @@ async def run_tests_in_sandbox(
 
     Returns list of dicts with: input, expected, actual, passed, error.
     """
+    # Detect Language
+    is_cpp = "#include" in code or "int main" in code
+    
+    if is_cpp:
+        return await _run_cpp_tests(sandbox_id, code, test_suite)
+
+    # Python Execution (default)
     # Build a self-contained test runner script
     runner_script = _build_test_runner(code, test_suite)
 
@@ -73,6 +83,224 @@ async def run_tests_in_sandbox(
             }
             for tc in test_suite
         ]
+
+
+async def _run_cpp_tests(sandbox_id: str, code: str, test_suite: list[dict]) -> list[dict]:
+    """Compile and run C++ code against test suite."""
+    sb = _sandboxes.get(sandbox_id)
+    if not sb:
+        raise RuntimeError(f"Sandbox {sandbox_id} not found.")
+
+    # 1. Write Code to File
+    # We can write via a small python script
+    write_script = f"with open('solution.cpp', 'w') as f: f.write({json.dumps(code)})"
+    await sb.exec.aio("python", "-c", write_script)
+
+    # 2. Compile (only if main exists, otherwise wait for test harness)
+    # If the user code is a library (no main), we skip this step to avoid "undefined reference to main".
+    
+    has_main = "int main" in code
+    if has_main:
+        compile_proc = await sb.exec.aio("g++", "-o", "solution", "solution.cpp", timeout=30)
+        await compile_proc.wait.aio()
+        
+        # If main exists but compilation fails, report it immediately
+        if compile_proc.returncode != 0:
+            stderr = await compile_proc.stderr.read.aio()
+            return [
+                {
+                    "input": tc["input"],
+                    "expected": tc["expected_output"],
+                    "actual": None,
+                    "passed": False,
+                    "error": f"Compilation Error: {stderr.strip()}",
+                }
+                for tc in test_suite
+            ]
+    else:
+        # No main found. Proceed to test harnesses.
+        pass
+
+    # 3. Configure Sanitizers based on inputs
+    # If the input is a special flag like "TEST_CONCURRENT_PUSH_POP", we inject a specific main function wrapper.
+    # Otherwise, we assume standard stdin/stdout.
+
+    results = []
+    
+    for tc in test_suite:
+        inp = tc["input"]
+        expected = tc["expected_output"]
+        
+        # Custom handling for specific C++ concurrency tests
+        if inp.startswith("TEST_"):
+             # We need to compile with the specific test harness appended
+            wrapper_code = code + "\n" + _get_cpp_test_harness(inp)
+            
+            # Write wrapper
+            write_script = f"with open('test_wrapper.cpp', 'w') as f: f.write({json.dumps(wrapper_code)})"
+            await sb.exec.aio("python", "-c", write_script)
+            
+            # Compile with Sanitizers for these tests
+            # -fsanitize=thread for race detection
+            # -fsanitize=address for leaks/use-after-free
+            # We can't run both at once easily. Let's pick based on input or run twice?
+            # TSan is usually incompatible with ASan.
+            
+            compile_cmd = ["g++", "-o", "test_runner", "test_wrapper.cpp", "-pthread", "-O2", "-g"]
+            if "LEAK" in inp or "RECLAMATION" in inp:
+                compile_cmd.append("-fsanitize=address")
+            else:
+                compile_cmd.append("-fsanitize=thread")
+
+            compile_proc = await sb.exec.aio(*compile_cmd, timeout=30)
+            await compile_proc.wait.aio()
+            
+            if compile_proc.returncode != 0:
+                stderr = await compile_proc.stderr.read.aio()
+                results.append({
+                    "input": inp,
+                    "expected": expected,
+                    "actual": "Compilation Failed",
+                    "passed": False,
+                    "error": stderr.strip()
+                })
+                continue
+
+            # Run
+            run_proc = await sb.exec.aio("./test_runner", timeout=10)
+            stdout = await run_proc.stdout.read.aio()
+            stderr = await run_proc.stderr.read.aio()
+            await run_proc.wait.aio()
+            
+            # Check for sanitizer errors in stderr
+            err_output = stderr.strip()
+            actual_out = stdout.strip()
+            
+            # If sanitizer caught something, it prints to stderr
+            passed = (run_proc.returncode == 0) and ("ThreadSanitizer" not in err_output) and ("AddressSanitizer" not in err_output)
+            
+            if passed and actual_out == expected:
+                results.append({
+                    "input": inp,
+                    "expected": expected,
+                    "actual": actual_out,
+                    "passed": True,
+                    "error": None
+                })
+            else:
+                results.append({
+                    "input": inp,
+                    "expected": expected,
+                    "actual": actual_out if not err_output else "Check Error Log",
+                    "passed": False,
+                    "error": err_output or "Runtime Error"
+                })
+
+        else:
+            # Standard Stdin/Stdout flow
+            # If we didn't compile 'solution' yet (because main was missing but this is a standard test?),
+            # that's a user error or mismatch. Assume 'solution' binary exists from step 2.
+            
+            if not has_main:
+                # User tried to run standard test but code has no main
+                 results.append({
+                    "input": inp,
+                    "expected": expected,
+                    "actual": "Missing main function",
+                    "passed": False,
+                    "error": "Standard tests require int main()"
+                })
+                 continue
+
+            # Run existing 'solution' binary
+            run_proc = await sb.exec.aio("./solution", stdin=inp.encode(), timeout=5)
+            stdout = await run_proc.stdout.read.aio()
+            stderr = await run_proc.stderr.read.aio()
+            await run_proc.wait.aio()
+            
+            actual = stdout.strip()
+            # Strict equality check
+            passed = actual == expected.strip()
+            
+            results.append({
+                "input": inp,
+                "expected": expected,
+                "actual": actual,
+                "passed": passed,
+                "error": stderr.strip() if run_proc.returncode != 0 else None
+            })
+             
+    return results
+
+def _get_cpp_test_harness(test_name: str) -> str:
+    """Return the C++ main function wrapper for a specific test case."""
+    if test_name == "TEST_CONCURRENT_PUSH_POP":
+        return """
+#include <vector>
+#include <thread>
+#include <iostream>
+
+void test_concurrent_push_pop() {
+    LockFreeStack stack;
+    std::vector<std::thread> threads;
+    for (int i = 0; i < 10; ++i) {
+        threads.push_back(std::thread([&, i]() {
+            for (int j = 0; j < 100; ++j) {
+                stack.push(j);
+                int val;
+                stack.pop(val, i);
+            }
+        }));
+    }
+    for (auto& t : threads) t.join();
+    std::cout << "PASS" << std::endl;
+}
+
+int main() {
+    try {
+        test_concurrent_push_pop();
+    } catch (...) {
+        return 1;
+    }
+    return 0;
+}
+"""
+    elif test_name == "TEST_RECLAMATION_LEAKS":
+        return """
+#include <vector>
+#include <thread>
+#include <iostream>
+#include <atomic>
+
+void stress_test_reclamation() {
+    LockFreeStack stack;
+    std::atomic<int> pops{0};
+    
+    std::thread w1([&]{ for(int i=0; i<10000; ++i) stack.push(i); });
+    std::thread w2([&]{ for(int i=0; i<10000; ++i) stack.push(i); });
+
+    auto reader = [&](int id) {
+        int val;
+        while(pops < 20000) {
+            if (stack.pop(val, id)) pops++;
+        }
+    };
+
+    std::vector<std::thread> readers;
+    for(int i=0; i<4; ++i) readers.emplace_back(reader, i);
+
+    w1.join(); w2.join();
+    for(auto& t : readers) t.join();
+    
+    std::cout << "PASS" << std::endl;
+}
+
+int main() {
+    stress_test_reclamation();
+    return 0;
+}
+"""
+    return "int main() { return 1; }"
 
 
 async def run_code_in_sandbox(

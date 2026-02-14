@@ -265,8 +265,10 @@ export default function ChallengePage() {
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, []);
 
-  // Extract code and run tests when messages change
+  // Extract code and run tests when messages change (ONLY after streaming is done)
   useEffect(() => {
+    if (isStreaming) return;
+
     const assistantMessages = messages.filter((m) => m.role === "assistant");
     if (assistantMessages.length === 0) return;
 
@@ -346,6 +348,7 @@ export default function ChallengePage() {
     setMessages(updatedMessages);
     setIsStreaming(true);
     setCurrentStreamingMessage("");
+    setTotalTurns((t) => t + 1);
 
     // Create new abort controller
     if (abortControllerRef.current) abortControllerRef.current.abort();
@@ -368,7 +371,6 @@ export default function ChallengePage() {
         setCurrentStreamingMessage("");
         setIsStreaming(false);
         setEstimatedTokens(0);
-        setTotalTurns((t) => t + 1);
         abortControllerRef.current = null;
       },
       (error) => {
