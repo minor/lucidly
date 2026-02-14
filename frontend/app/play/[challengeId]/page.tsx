@@ -4,13 +4,14 @@ import { useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { getChallenge } from "@/lib/api";
 import { PromptInput } from "@/components/PromptInput";
-import { ScoreBar } from "@/components/ScoreBar";
 import { streamChat, type ChatMessage } from "@/lib/api";
-import type { Challenge, Scores } from "@/lib/types";
+import type { Challenge } from "@/lib/types";
 import {
   Loader2,
   ArrowLeft,
   Sparkles,
+  ImageIcon,
+  Code,
 } from "lucide-react";
 
 export default function ChallengePage() {
@@ -22,12 +23,30 @@ export default function ChallengePage() {
   const [initializing, setInitializing] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Your output panel: Preview | Code (v0-style toggle)
+  const [outputView, setOutputView] = useState<"preview" | "code">("preview");
+
   // Chat state
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [currentStreamingMessage, setCurrentStreamingMessage] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
+
+  // Hardcoded placeholder for "Your output" (preview image + source)
+  const OUTPUT_PREVIEW_IMAGE =
+    "https://placehold.co/800x500/f8fafc/64748b?text=Your+rendered+page";
+  const OUTPUT_SOURCE_PLACEHOLDER = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>My Page</title>
+</head>
+<body>
+  <header>...</header>
+  <main>...</main>
+</body>
+</html>`;
 
   // Initialize challenge
   useEffect(() => {
@@ -135,8 +154,18 @@ export default function ChallengePage() {
             <p className="text-sm text-muted leading-relaxed whitespace-pre-wrap mb-4">
               {challenge?.description}
             </p>
-            {challenge?.image_url && (
-              <div className="rounded-lg border border-border overflow-hidden bg-muted/20 mb-4">
+            {challenge?.embed_url && (
+              <div className="rounded-lg border border-border overflow-hidden bg-muted/20">
+                <iframe
+                  src={challenge.embed_url}
+                  title="Challenge reference"
+                  className="w-full h-[320px] border-0 rounded-lg"
+                  sandbox="allow-scripts allow-same-origin"
+                />
+              </div>
+            )}
+            {challenge?.image_url && !challenge?.embed_url && (
+              <div className="rounded-lg border border-border overflow-hidden bg-muted/20">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={challenge.image_url}
@@ -165,6 +194,58 @@ export default function ChallengePage() {
                 </div>
               </div>
             )}
+
+            {/* Your output — v0-style panel with Preview / Code toggle */}
+            <div className="mt-8 pt-6 border-t border-border">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-sm font-semibold">Your output</h2>
+                <div
+                  className="inline-flex rounded-lg border border-border bg-muted/30 p-0.5"
+                  role="tablist"
+                >
+                  <button
+                    type="button"
+                    onClick={() => setOutputView("preview")}
+                    className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                      outputView === "preview"
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted hover:text-foreground"
+                    }`}
+                  >
+                    <ImageIcon className="h-3.5 w-3.5" />
+                    Preview
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setOutputView("code")}
+                    className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                      outputView === "code"
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted hover:text-foreground"
+                    }`}
+                  >
+                    <Code className="h-3.5 w-3.5" />
+                    Code
+                  </button>
+                </div>
+              </div>
+              <div className="rounded-xl border border-border overflow-hidden bg-code-bg">
+                {outputView === "preview" ? (
+                  <div className="min-h-[200px] bg-muted/20 flex items-center justify-center">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={OUTPUT_PREVIEW_IMAGE}
+                      alt="Your rendered output"
+                      className="w-full max-h-[400px] object-contain object-top"
+                    />
+                  </div>
+                ) : (
+                  <pre className="p-4 overflow-auto max-h-[400px] m-0 text-xs font-mono text-foreground/90 whitespace-pre">
+                    <code>{OUTPUT_SOURCE_PLACEHOLDER}</code>
+                  </pre>
+                )}
+              </div>
+            </div>
           </div>
         </div>
 
