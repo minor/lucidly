@@ -71,6 +71,8 @@ To run **agent benchmark runs** (Agents page: select agent + challenge, Run):
 
 See `backend/.env.example` for all optional variables (OpenAI, Anthropic, agent secret, Modal).
 
+**Agent trace logs (in-process):** When running in-process, agent steps are logged to the **backend terminal** (the `[server]` process). You can also tail the debug log: `tail -f .cursor/debug.log` from the project root to see `agent_trace` and session events (NDJSON, one line per event).
+
 ### 4. Start the development server
 From the root directory, run:
 

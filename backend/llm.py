@@ -153,8 +153,8 @@ class LLM:
     def extract_code_blocks(text: str) -> str:
         """
         Extract code from markdown fenced code blocks.
-        Allows optional newline after opening fence. If no fences, try to extract
-        HTML (<!DOCTYPE...> or <html...>...</html>). Otherwise return empty.
+        Allows optional newline after opening fence. If response is truncated
+        (e.g. hit max_tokens) and has no closing ```, treat rest of text as code.
         """
         if not (text or "").strip():
             return ""
@@ -164,6 +164,13 @@ class LLM:
         matches = re.findall(pattern, text, re.DOTALL)
         if matches:
             return "\n\n".join(match.strip() for match in matches if match.strip())
+
+        # Truncated response: opening ``` but no closing ``` (e.g. hit token limit)
+        open_match = re.search(r"```(?:\w+)?\s*\n?(.*)", text, re.DOTALL)
+        if open_match:
+            code = open_match.group(1).strip()
+            if len(code) > 50:  # avoid treating a short stub as code
+                return code
 
         # No fences: try to extract HTML so we don't put refusal text in iframe
         html_match = re.search(

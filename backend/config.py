@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     # Agent / Modal (for benchmark runs)
     agent_internal_secret: str = ""
     modal_app_name: str = "lucidly-agent"
+    max_completion_tokens_agent: int = 16384  # per-turn limit; 16k allows full HTML landing pages without truncation
     backend_public_url: str = "http://localhost:8000"  # URL Modal worker uses to call back
     use_inprocess_agent: bool = True  # If True, run agent in backend (no Modal). Set False and deploy Modal for cloud.
 

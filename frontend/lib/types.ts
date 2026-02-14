@@ -38,6 +38,8 @@ export interface Session {
   total_tokens: number;
   total_turns: number;
   turns: Turn[];
+  /** Prompt for the turn currently in progress (show in chat before response is ready) */
+  current_prompt?: string | null;
   accuracy_score: number | null;
   speed_score: number | null;
   token_score: number | null;

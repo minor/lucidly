@@ -5,6 +5,7 @@ Supports simple loop (claude-direct, openai-cot), Claude Agent SDK (claude-sdk),
 """
 
 import asyncio
+import json
 import logging
 import time
 from typing import Any
@@ -223,35 +224,116 @@ async def _run_agent_loop_openai_assistant(
         logger.info("OpenAI Assistant run finished: session_id=%s", session_id)
 
 
+def _trace(session_id: str, step: str, t0: float, **kwargs: Any) -> None:
+    elapsed_ms = int((time.time() - t0) * 1000)
+    extra = " ".join(f"{k}={v}" for k, v in kwargs.items())
+    logger.info("[agent_trace] session_id=%s %s (+%dms) %s", session_id[:8], step, elapsed_ms, extra or "")
+    # #region agent log
+    try:
+        with open("/Users/helenazhou/Dev/lucidly/.cursor/debug.log", "a") as _f:
+            _f.write(
+                json.dumps(
+                    {
+                        "id": f"trace_{step.replace(' ', '_')[:30]}",
+                        "timestamp": time.time() * 1000,
+                        "location": "agent_runner.py:_trace",
+                        "message": f"agent_trace {step}",
+                        "data": {"session_id": session_id[:8], "elapsed_ms": elapsed_ms, **kwargs},
+                        "hypothesisId": "H1",
+                    }
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # #endregion
+
+
+def _debug_log(message: str, data: dict, hypothesis_id: str = "H1") -> None:
+    # #region agent log
+    try:
+        with open("/Users/helenazhou/Dev/lucidly/.cursor/debug.log", "a") as _f:
+            _f.write(
+                json.dumps(
+                    {
+                        "id": f"agent_{message.replace(' ', '_')[:40]}",
+                        "timestamp": time.time() * 1000,
+                        "location": "agent_runner.py:run_agent_loop",
+                        "message": message,
+                        "data": data,
+                        "hypothesisId": hypothesis_id,
+                    }
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # #endregion
+
+
 async def run_agent_loop(session_id: str, challenge_id: str, agent_id: str) -> None:
     """
     Run the agent loop in-process: load challenge, submit prompts via LLM, record turns, complete.
     Mirrors modal_agent/app.py so behavior is identical.
     """
+    # #region agent log
+    _debug_log(
+        "run_agent_loop entered",
+        {"session_id": session_id[:8], "challenge_id": challenge_id, "agent_id": agent_id},
+        "H1,H2",
+    )
+    # #endregion
+
+    t0 = time.time()
+    _trace(session_id, "run_agent_loop started", t0, challenge_id=challenge_id, agent_id=agent_id)
+
     session = get_session(session_id)
     if session is None:
+        # #region agent log
+        _debug_log("run_agent_loop early exit", {"reason": "session_not_found"}, "H3")
+        # #endregion
         logger.error("Agent run: session %s not found", session_id)
         return
     if session.status != "active":
+        # #region agent log
+        _debug_log("run_agent_loop early exit", {"reason": "session_not_active", "status": session.status}, "H3")
+        # #endregion
         logger.warning("Agent run: session %s not active", session_id)
         return
 
     agent = get_agent_by_id(agent_id)
     challenge = get_challenge_by_id(challenge_id)
     if not agent or not challenge:
+        # #region agent log
+        _debug_log("run_agent_loop early exit", {"reason": "agent_or_challenge_not_found"}, "H3")
+        # #endregion
         logger.error("Agent run: agent or challenge not found")
         return
 
     if agent_id == "claude-sdk":
+        # #region agent log
+        _debug_log("run_agent_loop branch", {"branch": "claude-sdk"}, "H3,H4")
+        # #endregion
+        _trace(session_id, "delegating to claude-sdk", t0)
         await _run_agent_loop_claude_sdk(session_id, challenge_id, agent_id)
         return
     if agent_id == "openai-assistant":
+        # #region agent log
+        _debug_log("run_agent_loop branch", {"branch": "openai-assistant"}, "H3,H4")
+        # #endregion
+        _trace(session_id, "delegating to openai-assistant", t0)
         await _run_agent_loop_openai_assistant(session_id, challenge_id, agent_id)
         return
 
+    # #region agent log
+    _debug_log("run_agent_loop branch", {"branch": "simple_loop"}, "H3,H4")
+    # #endregion
+
     from config import settings
     model_used = agent.model or settings.default_model
+    _trace(session_id, "building brief", t0)
     brief = _challenge_brief(challenge)
+    _trace(session_id, "brief built, creating LLM", t0)
 
     def first_turn_prompt(aid: str) -> str:
         if aid == "openai-cot":
@@ -295,11 +377,22 @@ async def run_agent_loop(session_id: str, challenge_id: str, agent_id: str) -> N
                 history.append({"role": "user", "content": t.prompt_text})
                 history.append({"role": "assistant", "content": t.response_text})
 
+            # Expose current prompt only for first turn (challenge brief); hide internal follow-ups
+            s = get_session(session_id)
+            if s and turn_count == 1:
+                s.current_prompt = prompt
+            elif s and turn_count > 1:
+                s.current_prompt = None
+
+            _trace(session_id, f"turn_{turn_count} llm.generate start", t0, prompt_len=len(prompt))
+            max_tok = getattr(settings, "max_completion_tokens_agent", 4096)
             response = await llm.generate(
                 prompt,
                 conversation_history=history if history else None,
                 system_prompt=system_prompt,
+                max_tokens=max_tok,
             )
+            _trace(session_id, f"turn_{turn_count} llm.generate done", t0, response_tokens=response.response_tokens)
 
             accuracy = 0.0
             if challenge.target_code:
@@ -318,16 +411,26 @@ async def run_agent_loop(session_id: str, challenge_id: str, agent_id: str) -> N
                 timestamp=time.time(),
             )
             add_turn(session_id, turn)
+            _trace(session_id, f"turn_{turn_count} recorded", t0)
             session = get_session(session_id)
+            if session:
+                session.current_prompt = None
             if not session:
                 break
 
+            if agent_id == "claude-direct":
+                break
             if accuracy >= ACCURACY_THRESHOLD:
                 break
             if "DONE" in (response.response_text or "").upper():
                 break
 
         complete_agent_session(session_id)
+        _trace(session_id, "completed", t0, total_turns=turn_count)
         logger.info("Agent run completed: session_id=%s turns=%s", session_id, turn_count)
     except Exception as e:
         logger.exception("Agent run failed: session_id=%s %s", session_id, e)
+    finally:
+        s = get_session(session_id)
+        if s:
+            s.current_prompt = None

@@ -1,14 +1,17 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { getSession, getChallenge } from "@/lib/api";
 import { ChatMessage } from "@/components/ChatMessage";
 import { ScoreBar } from "@/components/ScoreBar";
 import type { Challenge, Session, Turn } from "@/lib/types";
-import { Loader2, ArrowLeft, Trophy, Code, ImageIcon } from "lucide-react";
+import { Loader2, ArrowLeft, Trophy, Code, ImageIcon, GripHorizontal } from "lucide-react";
 import { MODEL_PRICING } from "@/lib/api";
+
+const OUTPUT_PANEL_MIN = 120;
+const OUTPUT_PANEL_INITIAL = 240;
 
 const OUTPUT_PLACEHOLDER_IMAGE =
   "https://placehold.co/800x400/f8fafc/94a3b8?text=Agent+output";
@@ -30,34 +33,64 @@ export default function AgentRunWatchPage() {
   const [error, setError] = useState<string | null>(null);
   const [outputView, setOutputView] = useState<"preview" | "code">("preview");
   const [elapsed, setElapsed] = useState(0);
+  const [outputPanelHeight, setOutputPanelHeight] = useState(OUTPUT_PANEL_INITIAL);
+  const [sessionNotFound, setSessionNotFound] = useState(false);
+  const resizeStartYRef = useRef<number>(0);
+  const resizeStartHeightRef = useRef<number>(OUTPUT_PANEL_INITIAL);
   const turnsEndRef = useRef<HTMLDivElement>(null);
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     let ignore = false;
+    setSessionNotFound(false);
     function poll() {
       getSession(sessionId)
         .then((data) => {
           if (!ignore) setSession(data);
         })
         .catch((err) => {
-          if (!ignore) setError((err as Error).message);
+          if (!ignore) {
+            const msg = (err as Error).message ?? "";
+            if (msg.toLowerCase().includes("session") && msg.toLowerCase().includes("not found")) {
+              setSessionNotFound(true);
+              if (pollIntervalRef.current) {
+                clearInterval(pollIntervalRef.current);
+                pollIntervalRef.current = null;
+              }
+            }
+            setError((err as Error).message);
+          }
         })
         .finally(() => {
           if (!ignore) setLoading(false);
         });
     }
     poll();
-    const interval = setInterval(() => {
+    pollIntervalRef.current = setInterval(() => {
       if (ignore) return;
       getSession(sessionId)
         .then((data) => {
           if (!ignore) setSession(data);
         })
-        .catch(() => {});
+        .catch((err) => {
+          if (!ignore) {
+            const msg = (err as Error).message ?? "";
+            if (msg.toLowerCase().includes("session") && msg.toLowerCase().includes("not found")) {
+              setSessionNotFound(true);
+              if (pollIntervalRef.current) {
+                clearInterval(pollIntervalRef.current);
+                pollIntervalRef.current = null;
+              }
+            }
+          }
+        });
     }, POLL_INTERVAL_MS);
     return () => {
       ignore = true;
-      clearInterval(interval);
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
     };
   }, [sessionId]);
 
@@ -77,19 +110,57 @@ export default function AgentRunWatchPage() {
 
   useEffect(() => {
     turnsEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [session?.turns?.length]);
+  }, [session?.turns?.length, session?.current_prompt]);
 
-  // Calculate elapsed time
+  // Elapsed time: when completed, use final duration and stop; otherwise tick every second
   useEffect(() => {
     if (!session?.started_at) return;
+    if (session.status === "completed" && session.completed_at != null) {
+      setElapsed(Math.max(0, session.completed_at - session.started_at));
+      return;
+    }
     const updateElapsed = () => {
-      const elapsedSec = (Date.now() / 1000 - session.started_at);
-      setElapsed(Math.max(0, elapsedSec));
+      setElapsed(Math.max(0, Date.now() / 1000 - session.started_at));
     };
     updateElapsed();
     const interval = setInterval(updateElapsed, 1000);
     return () => clearInterval(interval);
-  }, [session?.started_at]);
+  }, [session?.started_at, session?.status, session?.completed_at]);
+
+  // Resize handle for "Your output" panel (drag up to expand)
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    resizeStartYRef.current = e.clientY;
+    resizeStartHeightRef.current = outputPanelHeight;
+    const onMove = (moveEvent: MouseEvent) => {
+      const delta = resizeStartYRef.current - moveEvent.clientY;
+      const next = resizeStartHeightRef.current + delta;
+      const max = typeof window !== "undefined" ? Math.max(400, window.innerHeight * 0.7) : 600;
+      setOutputPanelHeight(Math.min(max, Math.max(OUTPUT_PANEL_MIN, next)));
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }, [outputPanelHeight]);
+
+  if (sessionNotFound) {
+    return (
+      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 px-6">
+        <p className="text-center text-sm text-muted">
+          This run is no longer available (e.g. the server was restarted). Sessions are stored in memory and are lost on restart.
+        </p>
+        <Link
+          href="/agents"
+          className="rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium hover:bg-muted/50"
+        >
+          Start a new run
+        </Link>
+      </div>
+    );
+  }
 
   if (loading && !session) {
     return (
@@ -243,8 +314,21 @@ export default function AgentRunWatchPage() {
             </div>
           </div>
 
-          {/* Your output panel (same styling as play page) */}
-          <div className="shrink-0 h-[240px] flex flex-col border-t border-border bg-muted/5">
+          {/* Resize handle (drag up to expand output panel) */}
+          <button
+            type="button"
+            onMouseDown={handleResizeStart}
+            className="flex w-full cursor-n-resize items-center justify-center border-t border-border bg-muted/10 py-1.5 text-muted hover:bg-muted/20 hover:text-foreground focus:outline-none shrink-0"
+            aria-label="Resize output panel"
+          >
+            <GripHorizontal className="h-4 w-4" />
+          </button>
+
+          {/* Your output panel — expandable like play page */}
+          <div
+            className="shrink-0 flex flex-col border-t border-border bg-muted/5 overflow-hidden"
+            style={{ height: outputPanelHeight }}
+          >
             <div className="flex items-center justify-between border-b border-border px-4 py-2.5 shrink-0 bg-background/80">
               <h3 className="text-sm font-semibold text-foreground">
                 Your output
@@ -304,28 +388,54 @@ export default function AgentRunWatchPage() {
           </div>
         </div>
 
-        {/* Right: Agent chat (turns) + final score when completed */}
+        {/* Right: Agent chat (turns) + current prompt + loading/done assistant */}
         <div className="flex flex-col w-[480px] shrink-0 overflow-hidden">
           <div className="flex-1 overflow-y-auto p-6">
-            {session?.turns?.length ? (
+            {(session?.turns?.length ?? 0) > 0 || session?.current_prompt ? (
               <div className="space-y-0">
-                {session.turns.map((turn: Turn) => (
-                  <div key={turn.turn_number} className="space-y-0">
+                {session?.turns?.map((turn: Turn) => {
+                  const isInternalPrompt =
+                    turn.turn_number > 1 &&
+                    (turn.prompt_text.startsWith("Review the previous response") ||
+                      turn.prompt_text.startsWith("Your previous response did not include"));
+                  const userContent = isInternalPrompt ? "Refining…" : turn.prompt_text;
+                  return (
+                    <div key={turn.turn_number} className="space-y-0">
+                      <ChatMessage
+                        role="user"
+                        content={userContent}
+                        userLabel="Agent"
+                      />
+                      <ChatMessage
+                        role="assistant"
+                        content={turn.response_text}
+                        generatedCode={turn.generated_code || undefined}
+                        accuracy={turn.accuracy_at_turn}
+                        turnNumber={turn.turn_number}
+                        tokens={turn.prompt_tokens + turn.response_tokens}
+                        isAssistantLoading={false}
+                        hideGeneratedOutput
+                      />
+                    </div>
+                  );
+                })}
+                {/* Current turn in progress: show prompt immediately, then loading assistant */}
+                {session?.current_prompt && (
+                  <>
                     <ChatMessage
                       role="user"
-                      content={turn.prompt_text}
+                      content={session.current_prompt}
                       userLabel="Agent"
                     />
                     <ChatMessage
                       role="assistant"
-                      content={turn.response_text}
-                      generatedCode={turn.generated_code || undefined}
-                      accuracy={turn.accuracy_at_turn}
-                      turnNumber={turn.turn_number}
-                      tokens={turn.prompt_tokens + turn.response_tokens}
+                      content=""
+                      isAssistantLoading={true}
+                      turnNumber={(session?.turns?.length ?? 0) + 1}
+                      hideGeneratedOutput
                     />
-                  </div>
-                ))}
+                  </>
+                )}
                 <div ref={turnsEndRef} />
               </div>
             ) : (

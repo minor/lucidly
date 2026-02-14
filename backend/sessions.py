@@ -27,6 +27,8 @@ class Session(BaseModel):
     total_tokens: int = 0
     total_turns: int = 0
     turns: list[Turn] = []
+    # Prompt for the turn currently in progress (shown in chat before response is ready)
+    current_prompt: str | None = None
     # Scores (populated on completion)
     accuracy_score: float | None = None
     speed_score: float | None = None

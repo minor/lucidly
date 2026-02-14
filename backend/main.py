@@ -46,6 +46,39 @@ from sandbox import create_sandbox, terminate_sandbox
 
 app = FastAPI(title="Lucidly", version="0.1.0")
 
+
+@app.on_event("startup")
+def _configure_agent_trace_logging():
+    """Run in the worker process so [agent_trace] appears in the console and in the debug log."""
+    import sys
+    _agent_log = logging.getLogger("agent_runner")
+    _agent_log.setLevel(logging.INFO)
+    if not _agent_log.handlers:
+        _h = logging.StreamHandler(sys.stderr)
+        _h.setLevel(logging.INFO)
+        _h.setFormatter(logging.Formatter("%(message)s"))
+        _h.terminator = "\n"
+        _agent_log.addHandler(_h)
+        _agent_log.propagate = False
+    try:
+        with open("/Users/helenazhou/Dev/lucidly/.cursor/debug.log", "a") as _f:
+            _f.write(
+                json.dumps(
+                    {
+                        "id": "main_backend_started",
+                        "timestamp": time.time() * 1000,
+                        "location": "main.py:startup",
+                        "message": "backend started, agent_trace logging enabled",
+                        "data": {},
+                        "hypothesisId": "Hlog",
+                    }
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -166,6 +199,25 @@ async def start_session(req: CreateSessionRequest):
 async def get_session_state(session_id: str):
     session = get_session(session_id)
     if session is None:
+        # #region agent log
+        try:
+            with open("/Users/helenazhou/Dev/lucidly/.cursor/debug.log", "a") as _f:
+                _f.write(
+                    json.dumps(
+                        {
+                            "id": "main_get_session_404",
+                            "timestamp": time.time() * 1000,
+                            "location": "main.py:get_session_state",
+                            "message": "GET session 404",
+                            "data": {"requested_session_id": session_id},
+                            "hypothesisId": "H404",
+                        }
+                    )
+                    + "\n"
+                )
+        except Exception:
+            pass
+        # #endregion
         raise HTTPException(status_code=404, detail="Session not found")
     return session
 
@@ -289,6 +341,30 @@ async def start_agent_run(req: AgentRunRequest):
     model_used = agent.model or settings.default_model
     session = create_session(req.challenge_id, model_used, username)
     modal_spawned = False
+
+    # #region agent log
+    try:
+        with open("/Users/helenazhou/Dev/lucidly/.cursor/debug.log", "a") as _f:
+            _f.write(
+                json.dumps(
+                    {
+                        "id": "main_agent_run_created",
+                        "timestamp": time.time() * 1000,
+                        "location": "main.py:start_agent_run",
+                        "message": "session created, scheduling agent",
+                        "data": {
+                            "session_id": session.id,
+                            "use_inprocess_agent": settings.use_inprocess_agent,
+                            "agent_id": req.agent_id,
+                        },
+                        "hypothesisId": "H404",
+                    }
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # #endregion
 
     if not settings.use_inprocess_agent:
         try:

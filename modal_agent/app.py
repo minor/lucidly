@@ -109,46 +109,20 @@ async def run_agent(
             + "\n\nGenerate complete, runnable code that fulfills this challenge. Output the code in a single markdown code block."
         )
 
-    turn = 0
-    prev_had_code = True
+    # Single turn for claude-direct / openai-cot (no hardcoded follow-up prompts)
     async with httpx.AsyncClient(timeout=120.0) as http_client:
-        while turn < MAX_TURNS:
-            turn += 1
-            if turn == 1:
-                prompt = first_turn_prompt(agent_id)
-                payload: dict = {"prompt": prompt}
-                if agent_id == "openai-cot":
-                    payload["system_prompt"] = COT_SYSTEM_PROMPT
-            else:
-                if not prev_had_code:
-                    prompt = (
-                        "Your previous response did not include runnable code in a markdown code block. "
-                        "Please output a complete HTML document now in a single markdown code block (```html on one line, then your code, then ```). "
-                        "No explanations—just the code block."
-                    )
-                else:
-                    prompt = (
-                        "Review the previous response and improve the code if accuracy was not 100%. "
-                        "Otherwise respond with: DONE"
-                    )
-                payload = {"prompt": prompt}
+        prompt = first_turn_prompt(agent_id)
+        payload: dict = {"prompt": prompt}
+        if agent_id == "openai-cot":
+            payload["system_prompt"] = COT_SYSTEM_PROMPT
 
-            r = await http_client.post(
-                f"{base}/api/sessions/{session_id}/prompt",
-                headers=headers,
-                json=payload,
-            )
-            if r.status_code != 200:
-                raise RuntimeError(f"Prompt failed: {r.status_code} {r.text}")
-            data = r.json()
-
-            prev_had_code = bool((data.get("generated_code") or "").strip())
-
-            accuracy = data.get("accuracy", 0.0)
-            if accuracy >= ACCURACY_THRESHOLD:
-                break
-            if "DONE" in (data.get("response_text") or "").upper():
-                break
+        r = await http_client.post(
+            f"{base}/api/sessions/{session_id}/prompt",
+            headers=headers,
+            json=payload,
+        )
+        if r.status_code != 200:
+            raise RuntimeError(f"Prompt failed: {r.status_code} {r.text}")
 
         r = await http_client.post(
             f"{base}/api/sessions/{session_id}/complete",
@@ -156,7 +130,7 @@ async def run_agent(
         )
         r.raise_for_status()
 
-    return {"session_id": session_id, "turns": turn, "status": "completed"}
+    return {"session_id": session_id, "turns": 1, "status": "completed"}
 
 
 async def _run_claude_sdk(
