@@ -57,7 +57,7 @@ export default function PlayPage() {
             <button
               key={cat}
               onClick={() => setCategory(cat)}
-              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors cursor-pointer ${
                 category === cat
                   ? "bg-foreground text-background"
                   : "bg-card border border-border text-muted hover:text-foreground"
@@ -73,7 +73,7 @@ export default function PlayPage() {
             <button
               key={diff}
               onClick={() => setDifficulty(diff)}
-              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors cursor-pointer ${
                 difficulty === diff
                   ? "bg-foreground text-background"
                   : "bg-card border border-border text-muted hover:text-foreground"

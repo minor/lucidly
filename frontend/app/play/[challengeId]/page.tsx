@@ -19,6 +19,7 @@ import {
   FlaskConical,
   GripHorizontal,
   Trophy,
+  X,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -156,6 +157,7 @@ export default function ChallengePage() {
   const [finalScores, setFinalScores] = useState<Scores | null>(null);
   const [scoreBarFrozen, setScoreBarFrozen] = useState(false);
   const [scoreLoading, setScoreLoading] = useState(false);
+  const [showCompletionModal, setShowCompletionModal] = useState(false);
   
   // Ref to hold stats when frozen (pending/completed)
   const frozenStatsRef = useRef<{
@@ -464,6 +466,7 @@ export default function ChallengePage() {
       setFinalScores(scores);
       setScoreLoading(false);
       setSubmitState("completed");
+      setShowCompletionModal(true);
     } catch (err) {
       console.error("Failed to calculate score:", err);
       setScoreBarFrozen(false);
@@ -491,6 +494,7 @@ export default function ChallengePage() {
     setFinalScores(null);
     setScoreBarFrozen(false);
     setScoreLoading(false);
+    setShowCompletionModal(false);
     frozenStatsRef.current = null;
     startTimeRef.current = Date.now();
     setElapsed(0);
@@ -595,9 +599,22 @@ export default function ChallengePage() {
   return (
     <div className="flex h-screen flex-col relative">
       {/* Score Overlay */}
-      {submitState === "completed" && finalScores && (
+      {submitState === "completed" && finalScores && showCompletionModal && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/95 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="w-full max-w-2xl rounded-2xl border border-border bg-card p-12 shadow-2xl text-center">
+          <div className="w-full max-w-2xl rounded-2xl border border-border bg-card p-12 shadow-2xl text-center relative">
+            {/* Close button */}
+            <button
+              onClick={() => {
+                setShowCompletionModal(false);
+                // Keep submitState as "completed" to maintain frozen state
+                // Timer will stay frozen, chat disabled, button shows "Retry"
+              }}
+              className="absolute top-4 right-4 text-muted hover:text-foreground transition-colors cursor-pointer p-1 rounded-md hover:bg-muted/10"
+              aria-label="Close modal"
+            >
+              <X className="h-5 w-5" />
+            </button>
+            
             <div className="mb-8 flex justify-center">
               <div className="rounded-full bg-accent/10 p-4">
                 <Trophy className="h-12 w-12 text-accent" />
@@ -635,21 +652,34 @@ export default function ChallengePage() {
                   placeholder="Enter your name" 
                   className="flex-1 rounded-lg border border-input-border bg-input px-4 py-2 text-sm focus:border-accent focus:outline-none"
                 />
-                <button className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground hover:bg-accent/90">
+                <button className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground hover:bg-accent/90 cursor-pointer">
                   Submit
+                </button>
+              </div>
+              
+              <div className="flex gap-2 mt-2">
+                <button 
+                  onClick={() => {
+                    setShowCompletionModal(false);
+                    // Keep submitState as "completed" to maintain frozen state
+                    // Timer will stay frozen, chat disabled, button shows "Retry"
+                  }}
+                  className="flex-1 rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium text-foreground hover:bg-accent/10 hover:border-accent/40 transition-colors cursor-pointer"
+                >
+                  View My Response
+                </button>
+                <button 
+                  onClick={handleRetry}
+                  className="flex-1 rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium text-foreground hover:bg-accent/10 hover:border-accent/40 transition-colors cursor-pointer"
+                >
+                  Retry Challenge
                 </button>
               </div>
               <button 
                 onClick={() => router.push("/play")}
-                className="text-sm text-muted hover:text-foreground underline underline-offset-4"
+                className="text-sm text-muted hover:text-foreground underline underline-offset-4 cursor-pointer"
               >
                 Return to All Challenges
-              </button>
-              <button 
-                onClick={handleRetry}
-                className="block w-full text-center text-sm text-muted hover:text-foreground mt-2"
-              >
-                Retry Challenge
               </button>
             </div>
           </div>
@@ -859,7 +889,7 @@ export default function ChallengePage() {
                     <div className="flex items-center gap-1 rounded-lg border border-border bg-muted/30 p-0.5">
                       <button
                         onClick={() => setPreviewTab("preview")}
-                        className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                        className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer ${
                           previewTab === "preview"
                             ? "bg-background text-foreground shadow-sm"
                             : "text-muted hover:text-foreground"
@@ -870,7 +900,7 @@ export default function ChallengePage() {
                       </button>
                       <button
                         onClick={() => setPreviewTab("code")}
-                        className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                        className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer ${
                           previewTab === "code"
                             ? "bg-background text-foreground shadow-sm"
                             : "text-muted hover:text-foreground"
@@ -915,7 +945,7 @@ export default function ChallengePage() {
                     <div className="flex items-center gap-1">
                       <button
                         onClick={() => setTestTab("results")}
-                        className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                        className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer ${
                           testTab === "results"
                             ? "bg-accent/10 text-accent"
                             : "text-muted hover:text-foreground"
@@ -926,7 +956,7 @@ export default function ChallengePage() {
                       </button>
                       <button
                         onClick={() => setTestTab("code")}
-                        className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                        className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer ${
                           testTab === "code"
                             ? "bg-accent/10 text-accent"
                             : "text-muted hover:text-foreground"

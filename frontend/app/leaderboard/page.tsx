@@ -124,7 +124,7 @@ export default function LeaderboardPage() {
       <header className="flex items-center gap-4 border-b border-border px-8 py-4">
         <button
           onClick={() => router.push("/")}
-          className="text-muted hover:text-foreground transition-colors p-2 rounded-full hover:bg-muted/10"
+          className="text-muted hover:text-foreground transition-colors p-2 rounded-full hover:bg-muted/10 cursor-pointer"
         >
           <ArrowLeft className="h-5 w-5" />
         </button>

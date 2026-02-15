@@ -15,7 +15,7 @@ function CodePreviewTabs({ code }: CodePreviewTabsProps) {
       <div className="flex border-b border-border">
         <button
           onClick={() => setActiveTab("preview")}
-          className={`flex items-center gap-2 border-b-2 px-4 py-2 text-xs font-medium transition-colors ${
+          className={`flex items-center gap-2 border-b-2 px-4 py-2 text-xs font-medium transition-colors cursor-pointer ${
             activeTab === "preview"
               ? "border-accent text-accent"
               : "border-transparent text-muted hover:text-foreground"
@@ -26,7 +26,7 @@ function CodePreviewTabs({ code }: CodePreviewTabsProps) {
         </button>
         <button
           onClick={() => setActiveTab("code")}
-          className={`flex items-center gap-2 border-b-2 px-4 py-2 text-xs font-medium transition-colors ${
+          className={`flex items-center gap-2 border-b-2 px-4 py-2 text-xs font-medium transition-colors cursor-pointer ${
             activeTab === "code"
               ? "border-accent text-accent"
               : "border-transparent text-muted hover:text-foreground"

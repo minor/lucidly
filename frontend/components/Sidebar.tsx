@@ -120,7 +120,7 @@ export function Sidebar() {
         </Link>
         <button
           onClick={toggleCollapse}
-          className="ml-auto text-muted hover:text-foreground transition-colors shrink-0"
+          className="ml-auto text-muted hover:text-foreground transition-colors shrink-0 cursor-pointer"
           aria-label="Toggle sidebar"
         >
           <ChevronDown
@@ -134,7 +134,7 @@ export function Sidebar() {
       {/* Mode selector */}
       {!collapsed && (
         <div className="px-4 py-3 border-b border-border shrink-0">
-          <button className="flex items-center gap-1.5 text-sm font-medium text-muted hover:text-foreground transition-colors w-full min-w-0">
+          <button className="flex items-center gap-1.5 text-sm font-medium text-muted hover:text-foreground transition-colors w-full min-w-0 cursor-pointer">
             <Zap className="h-3.5 w-3.5 shrink-0" />
             <span className="whitespace-nowrap overflow-hidden min-w-0 flex-1">Arena Mode</span>
             <ChevronDown className="h-3 w-3 shrink-0" />

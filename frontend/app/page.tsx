@@ -18,7 +18,7 @@ export default function Home() {
       <header className="absolute top-0 right-0 p-6">
         <button
           onClick={() => router.push("/leaderboard")}
-          className="flex items-center gap-2 text-sm font-medium text-muted hover:text-foreground transition-colors"
+          className="flex items-center gap-2 text-sm font-medium text-muted hover:text-foreground transition-colors cursor-pointer"
         >
           <Trophy className="h-4 w-4" />
           Leaderboard
