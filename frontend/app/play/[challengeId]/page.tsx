@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { getChallenge, runTests, runCode, createSandbox, terminateSandbox, MODEL_PRICING, MODELS, calculateScore, evaluateUI, createVercelSandbox, updateVercelSandboxCode, stopVercelSandbox } from "@/lib/api";
+import { getChallenge, runTests, runCode, createSandbox, terminateSandbox, MODEL_PRICING, MODELS, calculateScore, evaluateUI, createVercelSandbox, updateVercelSandboxCode, stopVercelSandbox, streamPromptFeedback } from "@/lib/api";
 import { PromptInput } from "@/components/PromptInput";
 import { ScoreBar } from "@/components/ScoreBar";
 import { SimpleMarkdown } from "@/components/SimpleMarkdown";
@@ -21,6 +21,8 @@ import {
   GripHorizontal,
   Trophy,
   X,
+  MessageCircle,
+  Lightbulb,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -107,6 +109,12 @@ export default function ChallengePage() {
   const [showCompletionModal, setShowCompletionModal] = useState(false);
   const [playerName, setPlayerName] = useState("");
   const [scoreSubmitted, setScoreSubmitted] = useState(false);
+
+  // Prompt feedback state
+  const [workspaceTab, setWorkspaceTab] = useState<"chat" | "feedback">("chat");
+  const [feedbackContent, setFeedbackContent] = useState("");
+  const [feedbackLoading, setFeedbackLoading] = useState(false);
+  const feedbackAbortRef = useRef<AbortController | null>(null);
   
   // Ref to hold stats when frozen (pending/completed)
   const frozenStatsRef = useRef<{
@@ -475,6 +483,9 @@ export default function ChallengePage() {
       setScoreLoading(false);
       setSubmitState("completed");
       setShowCompletionModal(true);
+
+      // Auto-trigger prompt feedback analysis
+      triggerPromptFeedback();
     } catch (err) {
       console.error("Failed to calculate score:", err);
       setScoreBarFrozen(false);
@@ -510,6 +521,10 @@ export default function ChallengePage() {
     pauseStartTimeRef.current = null;
     setPlayerName("");
     setScoreSubmitted(false);
+    setFeedbackContent("");
+    setFeedbackLoading(false);
+    setWorkspaceTab("chat");
+    if (feedbackAbortRef.current) feedbackAbortRef.current.abort();
 
     // Reset Vercel sandbox preview (write empty placeholder back)
     if (vercelSandboxId && vercelSandboxReady) {
@@ -542,10 +557,53 @@ export default function ChallengePage() {
         total_cost: frozenStatsRef.current.cost,
       });
       setScoreSubmitted(true);
+
+      // Auto-trigger prompt feedback after successful submission
+      triggerPromptFeedback();
     } catch (err) {
       console.error("Failed to submit score:", err);
     } finally {
       setScoreLoading(false);
+    }
+  };
+
+  const triggerPromptFeedback = async () => {
+    if (feedbackLoading || !challenge || !frozenStatsRef.current) return;
+
+    setFeedbackLoading(true);
+    setFeedbackContent("");
+    setWorkspaceTab("feedback");
+
+    // Abort any previous feedback stream
+    if (feedbackAbortRef.current) feedbackAbortRef.current.abort();
+    feedbackAbortRef.current = new AbortController();
+
+    try {
+      await streamPromptFeedback(
+        {
+          messages: messages,
+          challenge_id: challengeId,
+          challenge_description: challenge.description || "",
+          challenge_category: challenge.category || "",
+          challenge_difficulty: challenge.difficulty || "",
+          reference_html: challenge.reference_html || "",
+          accuracy: frozenStatsRef.current.accuracy || 0,
+          total_turns: frozenStatsRef.current.turns,
+          total_tokens: frozenStatsRef.current.tokens,
+          elapsed_sec: frozenStatsRef.current.elapsed,
+        },
+        (chunk) => setFeedbackContent((prev) => prev + chunk),
+        () => setFeedbackLoading(false),
+        (error) => {
+          console.error("Prompt feedback error:", error);
+          setFeedbackContent((prev) => prev + `\n\n**Error:** ${error}`);
+          setFeedbackLoading(false);
+        },
+        feedbackAbortRef.current.signal
+      );
+    } catch (err) {
+      console.error("Failed to stream feedback:", err);
+      setFeedbackLoading(false);
     }
   };
 
@@ -612,7 +670,8 @@ export default function ChallengePage() {
           setTotalInputTokens((t) => t + usage.input_tokens);
         }
       },
-      abortControllerRef.current?.signal
+      abortControllerRef.current?.signal,
+      challengeId
     );
   };
 
@@ -722,8 +781,19 @@ export default function ChallengePage() {
                 <button 
                   onClick={() => {
                     setShowCompletionModal(false);
-                    // Keep submitState as "completed" to maintain frozen state
-                    // Timer will stay frozen, chat disabled, button shows "Retry"
+                    setWorkspaceTab("feedback");
+                  }}
+                  className="flex-1 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground hover:bg-accent/90 transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  <Lightbulb className="h-3.5 w-3.5" />
+                  View Prompt Feedback
+                </button>
+              </div>
+              <div className="flex gap-2 mt-2">
+                <button 
+                  onClick={() => {
+                    setShowCompletionModal(false);
+                    setWorkspaceTab("chat");
                   }}
                   className="flex-1 rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium text-foreground hover:bg-accent/10 hover:border-accent/40 transition-colors cursor-pointer"
                 >
@@ -1142,13 +1212,45 @@ export default function ChallengePage() {
           )}
         </div>
 
-        {/* Right: Chat panel */}
+        {/* Right: Chat panel (CRO in Part 1, general assistant in Part 2 for PRD help) */}
         <div className="flex flex-col w-1/2 shrink-0 border-l border-border">
-          <div className="border-b border-border px-6 py-3 flex items-center gap-2">
-            <Sparkles className="h-4 w-4 text-muted" />
-            <h2 className="text-sm font-medium text-foreground">Workspace</h2>
+          <div className="border-b border-border px-6 py-3 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-muted" />
+              <h2 className="text-sm font-medium text-foreground">Workspace</h2>
+            </div>
+            {submitState === "completed" && (
+              <div className="flex items-center gap-1 rounded-lg border border-border bg-muted/30 p-0.5">
+                <button
+                  onClick={() => setWorkspaceTab("chat")}
+                  className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer ${
+                    workspaceTab === "chat"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted hover:text-foreground"
+                  }`}
+                >
+                  <MessageCircle className="h-3 w-3" />
+                  Chat
+                </button>
+                <button
+                  onClick={() => setWorkspaceTab("feedback")}
+                  className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer ${
+                    workspaceTab === "feedback"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted hover:text-foreground"
+                  }`}
+                >
+                  <Lightbulb className="h-3 w-3" />
+                  Feedback
+                  {feedbackLoading && (
+                    <Loader2 className="h-3 w-3 animate-spin ml-0.5" />
+                  )}
+                </button>
+              </div>
+            )}
           </div>
 
+          {workspaceTab === "chat" ? (
           <div
             ref={chatContainerRef}
             className="flex-1 overflow-y-auto"
@@ -1215,6 +1317,41 @@ export default function ChallengePage() {
               <div ref={messagesEndRef} />
             </div>
           </div>
+          ) : (
+            <div className="flex-1 overflow-y-auto">
+              <div className="px-6 py-8">
+                {feedbackLoading && !feedbackContent && (
+                  <div className="flex flex-col items-center justify-center min-h-[400px]">
+                    <Loader2 className="h-6 w-6 animate-spin text-accent mb-3" />
+                    <p className="text-sm text-muted">Analyzing your prompts…</p>
+                  </div>
+                )}
+                {feedbackContent && (
+                  <div className="prose-sm">
+                    <SimpleMarkdown content={feedbackContent} className="text-sm leading-relaxed" />
+                    {feedbackLoading && (
+                      <span className="inline-block w-0.5 h-4 bg-foreground ml-1 align-middle animate-pulse" />
+                    )}
+                  </div>
+                )}
+                {!feedbackLoading && !feedbackContent && (
+                  <div className="flex flex-col items-center justify-center min-h-[400px]">
+                    <div className="text-center max-w-md">
+                      <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-accent/10 mb-4">
+                        <Lightbulb className="h-6 w-6 text-accent" />
+                      </div>
+                      <h3 className="text-lg font-medium text-foreground mb-2">
+                        Prompt Feedback
+                      </h3>
+                      <p className="text-sm text-muted">
+                        Submit your solution to get AI-powered feedback on your prompting strategy.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           <div className="border-t border-border bg-background">
             <div className="px-6 py-4">

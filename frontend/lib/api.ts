@@ -201,14 +201,15 @@ export async function streamChat(
   onError?: (error: string) => void,
   onDone?: (data: StreamDoneData) => void,
   onUsage?: (usage: { input_tokens: number }) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  challengeId?: string
 ): Promise<void> {
   let response: Response;
   try {
     response = await fetch(`${API_BASE}/api/chat/stream`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages, model }),
+      body: JSON.stringify({ messages, model, challenge_id: challengeId ?? undefined }),
       signal,
     });
   } catch (err: unknown) {
@@ -367,11 +368,16 @@ export async function evaluateUI(
 // ---- Score Calculation ----
 
 export interface CalculateScoreRequest {
+  challenge_id: string;
   accuracy: number;
   elapsed_sec: number;
   total_tokens: number;
   total_turns: number;
   difficulty?: string;
+  model?: string;
+  username?: string;
+  messages?: ChatMessage[];
+  total_cost?: number;
 }
 
 export async function calculateScore(
@@ -402,6 +408,106 @@ export const MODELS = [
   { id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5" },
   { id: "claude-haiku-4-5", name: "Claude Haiku 4.5" },
 ];
+
+// ---- Prompt Feedback (AI analysis) ----
+
+export interface PromptFeedbackRequest {
+  messages: ChatMessage[];
+  challenge_id: string;
+  challenge_description: string;
+  challenge_category: string;
+  challenge_difficulty: string;
+  reference_html?: string;
+  accuracy: number;
+  total_turns: number;
+  total_tokens: number;
+  elapsed_sec: number;
+  db_session_id?: string;
+}
+
+/**
+ * Stream AI-powered feedback on the user's prompt engineering.
+ * Uses SSE to progressively deliver the analysis.
+ */
+export async function streamPromptFeedback(
+  req: PromptFeedbackRequest,
+  onChunk?: (chunk: string) => void,
+  onComplete?: (fullResponse: string) => void,
+  onError?: (error: string) => void,
+  signal?: AbortSignal
+): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/api/prompt-feedback`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req),
+      signal,
+    });
+  } catch (err: unknown) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      return;
+    }
+    throw err;
+  }
+
+  if (!response.ok) {
+    const error = await response
+      .json()
+      .catch(() => ({ detail: response.statusText }));
+    onError?.(error.detail || "Failed to get prompt feedback");
+    return;
+  }
+
+  const reader = response.body?.getReader();
+  const decoder = new TextDecoder();
+
+  if (!reader) {
+    onError?.("No response body");
+    return;
+  }
+
+  let buffer = "";
+  let fullResponse = "";
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.type === "chunk") {
+              fullResponse += data.content;
+              onChunk?.(data.content);
+            } else if (data.type === "done") {
+              onComplete?.(data.content || fullResponse);
+            } else if (data.type === "error") {
+              onError?.(data.message || "Unknown error");
+              return;
+            }
+          } catch {
+            // Skip invalid JSON
+          }
+        }
+      }
+    }
+  } catch (err: unknown) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      onComplete?.(fullResponse);
+      return;
+    }
+    throw err;
+  } finally {
+    reader.releaseLock();
+  }
+}
 
 // ---- Vercel Sandbox (UI preview) ----
 
