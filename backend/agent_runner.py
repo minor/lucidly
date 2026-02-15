@@ -16,6 +16,7 @@ from agent_turn import complete_agent_session, execute_prompt_turn
 from llm import LLM
 from evaluation.scoring import compute_accuracy_text
 from sessions import get_session, add_turn, append_trace, Turn
+from session_events import broadcast_session_event
 
 logger = logging.getLogger(__name__)
 
@@ -186,7 +187,28 @@ async def _run_agent_loop_claude_sdk(
         except Exception:
             pass
         # #endregion
-        data = await execute_prompt_turn(session_id, args["prompt"])
+        session_before = get_session(session_id)
+        base_tokens = (session_before.total_tokens if session_before else 0)
+
+        async def on_progress(estimated_response_tokens: int) -> None:
+            total_est = base_tokens + (len(args.get("prompt") or "") // 4) + estimated_response_tokens
+            await broadcast_session_event(
+                session_id,
+                {"type": "token_progress", "total_estimated_tokens": total_est},
+            )
+
+        data = await execute_prompt_turn(
+            session_id,
+            args["prompt"],
+            on_progress=on_progress,
+        )
+        # Push final session so frontend gets real token count
+        sess = get_session(session_id)
+        if sess:
+            await broadcast_session_event(
+                session_id,
+                {"type": "session_update", "session": sess.model_dump()},
+            )
         acc = data.get("accuracy")
         if acc is not None:
             _trace(session_id, "Received code from model", t0, accuracy=round(float(acc), 2))
@@ -419,7 +441,27 @@ async def _run_agent_loop_openai_assistant(
                         continue
                     args = json.loads(getattr(tc.function, "arguments", None) or "{}")
                     prompt = args.get("prompt", "")
-                    data = await execute_prompt_turn(session_id, prompt)
+                    session_before = get_session(session_id)
+                    base_tokens = (session_before.total_tokens if session_before else 0)
+
+                    async def _on_progress(estimated_response_tokens: int) -> None:
+                        total_est = base_tokens + (len(prompt) // 4) + estimated_response_tokens
+                        await broadcast_session_event(
+                            session_id,
+                            {"type": "token_progress", "total_estimated_tokens": total_est},
+                        )
+
+                    data = await execute_prompt_turn(
+                        session_id,
+                        prompt,
+                        on_progress=_on_progress,
+                    )
+                    sess = get_session(session_id)
+                    if sess:
+                        await broadcast_session_event(
+                            session_id,
+                            {"type": "session_update", "session": sess.model_dump()},
+                        )
                     snippet = (data.get("generated_code") or "")[:1500]
                     output = f"Response: {(data.get('response_text') or '')[:1000]}\n\nGenerated code (excerpt):\n{snippet}\n\nAccuracy: {data.get('accuracy', 0):.2f}"
                     outputs.append({"tool_call_id": tc.id, "output": output})
@@ -603,31 +645,48 @@ async def run_agent_loop(session_id: str, challenge_id: str, agent_id: str) -> N
 
             _trace(session_id, "Sending task to model", t0, prompt_len=len(prompt))
             max_tok = getattr(settings, "max_completion_tokens_agent", 4096)
-            response = await llm.generate(
+            base_tokens = session.total_tokens
+            full_response = ""
+            async for chunk in llm.stream(
                 prompt,
                 conversation_history=history if history else None,
                 system_prompt=system_prompt,
                 max_tokens=max_tok,
-            )
-            _trace(session_id, "Model responded", t0, response_tokens=response.response_tokens)
+            ):
+                full_response += chunk
+                est = len(full_response) // 4
+                total_est = base_tokens + (len(prompt) // 4) + est
+                await broadcast_session_event(
+                    session_id,
+                    {"type": "token_progress", "total_estimated_tokens": total_est},
+                )
+
+            generated_code = LLM.extract_code_blocks(full_response)
+            est_prompt_tokens = len(prompt.split()) * 2
+            est_response_tokens = len(full_response.split()) * 2
+            _trace(session_id, "Model responded", t0, response_tokens=est_response_tokens)
 
             accuracy = 0.0
             if challenge.target_code:
-                accuracy = compute_accuracy_text(
-                    response.generated_code, challenge.target_code
-                )
+                accuracy = compute_accuracy_text(generated_code, challenge.target_code)
 
             turn = Turn(
                 turn_number=len(session.turns) + 1,
                 prompt_text=prompt,
-                prompt_tokens=response.prompt_tokens,
-                response_text=response.response_text,
-                response_tokens=response.response_tokens,
-                generated_code=response.generated_code,
+                prompt_tokens=est_prompt_tokens,
+                response_text=full_response,
+                response_tokens=est_response_tokens,
+                generated_code=generated_code,
                 accuracy_at_turn=accuracy,
                 timestamp=time.time(),
             )
             add_turn(session_id, turn)
+            sess = get_session(session_id)
+            if sess:
+                await broadcast_session_event(
+                    session_id,
+                    {"type": "session_update", "session": sess.model_dump()},
+                )
             _trace(session_id, "Saved response", t0)
             session = get_session(session_id)
             if session:
@@ -639,7 +698,7 @@ async def run_agent_loop(session_id: str, challenge_id: str, agent_id: str) -> N
                 break
             if accuracy >= ACCURACY_THRESHOLD:
                 break
-            if "DONE" in (response.response_text or "").upper():
+            if "DONE" in (full_response or "").upper():
                 break
 
         complete_agent_session(session_id)

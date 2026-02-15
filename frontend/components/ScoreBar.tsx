@@ -9,6 +9,8 @@ interface ScoreBarProps {
   elapsedSec: number;
   cost?: number;
   compositeScore?: number;
+  /** When true, hide the Turns stat (e.g. for agent benchmark runs where turns aren't an efficiency metric) */
+  hideTurns?: boolean;
 }
 
 export function ScoreBar({
@@ -18,6 +20,7 @@ export function ScoreBar({
   elapsedSec,
   cost,
   compositeScore,
+  hideTurns = false,
 }: ScoreBarProps) {
   const formatTime = (sec: number) => {
     const m = Math.floor(sec / 60);
@@ -83,16 +86,18 @@ export function ScoreBar({
         </div>
       </div>
 
-      {/* Turns */}
-      <div className="flex items-center gap-2">
-        <RefreshCw className="h-3.5 w-3.5 text-muted" />
-        <div>
-          <p className="text-sm font-semibold font-mono">{turns}</p>
-          <p className="text-[10px] text-muted uppercase tracking-wider">
-            Turns
-          </p>
+      {/* Turns (hidden for agent runs where it's not an efficiency stat) */}
+      {!hideTurns && (
+        <div className="flex items-center gap-2">
+          <RefreshCw className="h-3.5 w-3.5 text-muted" />
+          <div>
+            <p className="text-sm font-semibold font-mono">{turns}</p>
+            <p className="text-[10px] text-muted uppercase tracking-wider">
+              Turns
+            </p>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Tokens Output */}
       <div className="flex items-center gap-2">
