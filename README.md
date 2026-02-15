@@ -1,8 +1,8 @@
-# No Shot
+# NoShot
 
 **Master the art of prompting.** Like Leetcode, but for the age of AI.
 
-No Shot is a competitive learning platform that benchmarks and gamifies your ability to prompt AI models to write code. Solve challenges, climb leaderboards, and sharpen your prompting skills.
+NoShot is a competitive learning platform that benchmarks and gamifies your ability to prompt AI models to write code. Solve challenges, climb leaderboards, and sharpen your prompting skills.
 
 🔗 **Live at [noshot-ai.vercel.app](https://noshot-ai.vercel.app/)**
 
