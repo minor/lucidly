@@ -14,6 +14,7 @@ export interface Challenge {
   starter_code: string | null;
   image_url: string | null;
   embed_url: string | null;
+  html_url: string | null;
 }
 
 export interface Turn {

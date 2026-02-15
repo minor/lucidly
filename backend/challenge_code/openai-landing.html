@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OpenAI</title>
+  <meta name="description" content="Get answers, find inspiration, be more productive. Free to use. Easy to try. Just ask and ChatGPT can help with writing, learning, brainstorming and more." />
+  <style>
+    /* ── Reset & Base ──────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #ffffff;
+      --fg: #0a0a0a;
+      --muted: #737373;
+      --border: #e5e5e5;
+      --card: #ffffff;
+      --accent-bg: #f5f5f5;
+      --accent-fg: #171717;
+      --radius: 9999px;
+    }
+    html { -webkit-text-size-adjust: 100%; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+    a { color: inherit; text-decoration: none; }
+    button { cursor: pointer; border: none; background: none; font: inherit; color: inherit; }
+    input { border: none; outline: none; font: inherit; background: transparent; }
+    ul { list-style: none; }
+
+    /* ── Scrollbar Hide ────────────────────────────────── */
+    .scrollbar-none::-webkit-scrollbar { display: none; }
+    .scrollbar-none { -ms-overflow-style: none; scrollbar-width: none; }
+
+    /* ── Navbar ─────────────────────────────────────────── */
+    .navbar {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 50;
+      background: rgba(255,255,255,.8);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
+    .navbar-inner {
+      max-width: 1400px; margin: 0 auto;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 24px;
+    }
+    .nav-logo {
+      display: flex; align-items: center; gap: 8px;
+    }
+    .nav-logo svg { width: 24px; height: 24px; }
+    .nav-logo span { font-size: 18px; font-weight: 600; letter-spacing: -0.02em; }
+    .nav-links {
+      display: flex; align-items: center; gap: 32px;
+    }
+    .nav-links a {
+      font-size: 14px; color: var(--muted);
+      transition: color .15s;
+    }
+    .nav-links a:hover { color: var(--fg); }
+    .nav-actions {
+      display: flex; align-items: center; gap: 12px;
+    }
+    .nav-actions .login {
+      font-size: 14px; color: var(--muted);
+      transition: color .15s;
+    }
+    .nav-actions .login:hover { color: var(--fg); }
+    .nav-actions .cta {
+      display: inline-flex; align-items: center;
+      background: var(--fg); color: var(--bg);
+      font-size: 14px; font-weight: 500;
+      padding: 8px 16px; border-radius: var(--radius);
+      transition: opacity .15s;
+    }
+    .nav-actions .cta:hover { opacity: .9; }
+    .mobile-toggle {
+      display: none;
+      padding: 4px;
+    }
+    .mobile-toggle svg { width: 24px; height: 24px; }
+    .mobile-menu {
+      display: none;
+      border-top: 1px solid var(--border);
+      background: var(--bg);
+      padding: 16px 24px;
+      flex-direction: column; gap: 16px;
+    }
+    .mobile-menu.open { display: flex; }
+    .mobile-menu a {
+      font-size: 14px; color: var(--muted);
+      transition: color .15s;
+    }
+    .mobile-menu a:hover { color: var(--fg); }
+    .mobile-menu .mobile-cta {
+      display: inline-flex; width: fit-content;
+      background: var(--fg); color: var(--bg);
+      font-size: 14px; font-weight: 500;
+      padding: 8px 16px; border-radius: var(--radius);
+    }
+    .mobile-divider { border-top: 1px solid var(--border); padding-top: 16px; display: flex; flex-direction: column; gap: 12px; }
+
+    @media (max-width: 768px) {
+      .nav-links, .nav-actions { display: none; }
+      .mobile-toggle { display: block; }
+    }
+
+    /* ── Hero ───────────────────────────────────────────── */
+    .hero {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      min-height: 100vh; padding: 0 16px;
+    }
+    .hero-inner {
+      display: flex; flex-direction: column; align-items: center; gap: 32px;
+      width: 100%;
+    }
+    .hero h1 {
+      text-align: center; font-weight: 600;
+      font-size: clamp(28px, 5vw, 48px);
+      letter-spacing: -0.02em;
+      text-wrap: balance;
+    }
+
+    /* ── Prompt Input ──────────────────────────────────── */
+    .prompt-wrap {
+      width: 100%; max-width: 672px;
+    }
+    .prompt-bar {
+      display: flex; align-items: center; gap: 8px;
+      border: 1px solid var(--border); border-radius: var(--radius);
+      background: var(--card); padding: 12px 16px;
+      box-shadow: 0 1px 2px rgba(0,0,0,.04);
+      transition: box-shadow .15s;
+    }
+    .prompt-bar:focus-within {
+      box-shadow: 0 2px 8px rgba(0,0,0,.08);
+    }
+    .prompt-bar .attach-btn {
+      flex-shrink: 0; padding: 6px; border-radius: 50%;
+      color: var(--muted); transition: background .15s, color .15s;
+    }
+    .prompt-bar .attach-btn:hover { background: var(--accent-bg); color: var(--fg); }
+    .prompt-bar .attach-btn svg { width: 20px; height: 20px; }
+    .prompt-bar input {
+      flex: 1; color: var(--fg); font-size: 16px;
+    }
+    .prompt-bar input::placeholder { color: var(--muted); }
+    .prompt-bar .send-btn {
+      flex-shrink: 0; padding: 8px; border-radius: 50%;
+      background: var(--accent-bg); color: var(--muted);
+      transition: background .15s, color .15s;
+    }
+    .prompt-bar .send-btn.active {
+      background: var(--fg); color: var(--bg);
+    }
+    .prompt-bar .send-btn svg { width: 16px; height: 16px; }
+
+    /* ── Suggestion Pills ──────────────────────────────── */
+    .pills-wrap {
+      position: relative; width: 100%; max-width: 768px;
+    }
+    .pills-scroll {
+      display: flex; gap: 8px;
+      overflow-x: auto;
+      padding: 4px;
+    }
+    .pill {
+      display: flex; align-items: center; gap: 8px;
+      flex-shrink: 0;
+      border: 1px solid var(--border); border-radius: var(--radius);
+      background: var(--card); padding: 10px 16px;
+      font-size: 14px; color: var(--muted);
+      transition: background .15s, color .15s;
+      white-space: nowrap;
+    }
+    .pill:hover { background: var(--accent-bg); color: var(--fg); }
+    .pill svg { width: 16px; height: 16px; flex-shrink: 0; }
+    .fade-left, .fade-right {
+      position: absolute; top: 0; z-index: 10; height: 100%; width: 64px;
+      pointer-events: none;
+    }
+    .fade-left {
+      left: 0;
+      background: linear-gradient(to right, var(--bg), transparent);
+      opacity: 0; transition: opacity .2s;
+    }
+    .fade-right {
+      right: 0;
+      background: linear-gradient(to left, var(--bg), transparent);
+      opacity: 1; transition: opacity .2s;
+    }
+    .fade-left.visible { opacity: 1; }
+    .fade-right.hidden { opacity: 0; }
+
+    /* ── Bottom Bar ─────────────────────────────────────── */
+    .bottom-bar {
+      position: fixed; bottom: 0; left: 0; right: 0; z-index: 50;
+      background: rgba(255,255,255,.8);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
+    .bottom-inner {
+      max-width: 1400px; margin: 0 auto;
+      display: flex; align-items: center; justify-content: center;
+      gap: 8px; padding: 12px 16px; flex-wrap: wrap;
+    }
+    .bottom-chip {
+      display: flex; align-items: center; gap: 6px;
+      border: 1px solid var(--border); border-radius: var(--radius);
+      background: var(--card); padding: 8px 16px;
+      font-size: 14px; color: var(--muted);
+      transition: background .15s, color .15s;
+      white-space: nowrap;
+    }
+    .bottom-chip:hover { background: var(--accent-bg); color: var(--fg); }
+    .bottom-chip svg { width: 16px; height: 16px; flex-shrink: 0; }
+    .bottom-chip .chip-label { display: inline; }
+
+    @media (max-width: 640px) {
+      .bottom-inner { gap: 6px; }
+      .bottom-chip { padding: 8px 12px; font-size: 12px; }
+      .bottom-chip .chip-label { display: none; }
+      .bottom-chip svg { width: 14px; height: 14px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ════════ NAVBAR ════════ -->
+  <header class="navbar">
+    <nav class="navbar-inner">
+      <a href="#" class="nav-logo" aria-label="OpenAI Home">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M22.282 9.821a5.985 5.985 0 0 0-.516-4.91 6.046 6.046 0 0 0-6.51-2.9A6.065 6.065 0 0 0 4.981 4.18a5.985 5.985 0 0 0-3.998 2.9 6.046 6.046 0 0 0 .743 7.097 5.98 5.98 0 0 0 .51 4.911 6.051 6.051 0 0 0 6.515 2.9A5.985 5.985 0 0 0 13.26 24a6.056 6.056 0 0 0 5.772-4.206 5.99 5.99 0 0 0 3.997-2.9 6.056 6.056 0 0 0-.747-7.073zM13.26 22.43a4.476 4.476 0 0 1-2.876-1.04l.141-.081 4.779-2.758a.795.795 0 0 0 .392-.681v-6.737l2.02 1.168a.071.071 0 0 1 .038.052v5.583a4.504 4.504 0 0 1-4.494 4.494zM3.6 18.304a4.47 4.47 0 0 1-.535-3.014l.142.085 4.783 2.759a.771.771 0 0 0 .78 0l5.843-3.369v2.332a.08.08 0 0 1-.033.062L9.74 19.95a4.5 4.5 0 0 1-6.14-1.646zM2.34 7.896a4.485 4.485 0 0 1 2.366-1.973V11.6a.766.766 0 0 0 .388.676l5.815 3.355-2.02 1.168a.076.076 0 0 1-.071 0l-4.83-2.786A4.504 4.504 0 0 1 2.34 7.872zm16.597 3.855l-5.833-3.387L15.119 7.2a.076.076 0 0 1 .071 0l4.83 2.791a4.494 4.494 0 0 1-.676 8.105v-5.678a.79.79 0 0 0-.407-.667zm2.01-3.023l-.141-.085-4.774-2.782a.776.776 0 0 0-.785 0L9.409 9.23V6.897a.066.066 0 0 1 .028-.061l4.83-2.787a4.5 4.5 0 0 1 6.68 4.66zm-12.64 4.135l-2.02-1.164a.08.08 0 0 1-.038-.057V6.075a4.5 4.5 0 0 1 7.375-3.453l-.142.08L8.704 5.46a.795.795 0 0 0-.393.681zm1.097-2.365l2.602-1.5 2.607 1.5v2.999l-2.597 1.5-2.607-1.5z"/>
+        </svg>
+        <span>OpenAI</span>
+      </a>
+
+      <ul class="nav-links">
+        <li><a href="#">Research</a></li>
+        <li><a href="#">Products</a></li>
+        <li><a href="#">Safety</a></li>
+        <li><a href="#">News</a></li>
+        <li><a href="#">Company</a></li>
+      </ul>
+
+      <div class="nav-actions">
+        <a href="#" class="login">Log in</a>
+        <a href="#" class="cta">Get started</a>
+      </div>
+
+      <button class="mobile-toggle" aria-label="Open menu" onclick="toggleMenu()">
+        <!-- Hamburger icon -->
+        <svg id="menu-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></svg>
+        <!-- X icon (hidden) -->
+        <svg id="close-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+      </button>
+    </nav>
+
+    <div class="mobile-menu" id="mobile-menu">
+      <a href="#">Research</a>
+      <a href="#">Products</a>
+      <a href="#">Safety</a>
+      <a href="#">News</a>
+      <a href="#">Company</a>
+      <div class="mobile-divider">
+        <a href="#">Log in</a>
+        <a href="#" class="mobile-cta">Get started</a>
+      </div>
+    </div>
+  </header>
+
+  <!-- ════════ HERO ════════ -->
+  <main class="hero">
+    <div class="hero-inner">
+      <h1>What can I help with?</h1>
+
+      <!-- Prompt bar -->
+      <div class="prompt-wrap">
+        <div class="prompt-bar">
+          <button class="attach-btn" aria-label="Attach file">
+            <!-- Paperclip -->
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+          </button>
+          <input id="prompt-input" type="text" placeholder="Ask anything" autocomplete="off" />
+          <button id="send-btn" class="send-btn" aria-label="Send message" disabled>
+            <!-- Arrow Up -->
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Suggestion pills -->
+      <div class="pills-wrap">
+        <div class="fade-left" id="fade-left"></div>
+        <div class="pills-scroll scrollbar-none" id="pills-scroll">
+
+          <button class="pill">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.42 10.922a1 1 0 0 0-.019-1.838L12.83 5.18a2 2 0 0 0-1.66 0L2.6 9.08a1 1 0 0 0 0 1.832l8.57 3.908a2 2 0 0 0 1.66 0z"/><path d="M22 10v6"/><path d="M6 12.5V16a6 3 0 0 0 12 0v-3.5"/></svg>
+            <span>Quiz me on vocabulary</span>
+          </button>
+
+          <button class="pill">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/></svg>
+            <span>Plan a surf trip to Costa Rica</span>
+          </button>
+
+          <button class="pill">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+            <span>India stock market today</span>
+          </button>
+
+          <button class="pill">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="10" y1="12" y2="12"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="15" x2="15.01" y1="13" y2="13"/><line x1="18" x2="18.01" y1="11" y2="11"/><rect width="20" height="12" x="2" y="6" rx="2"/></svg>
+            <span>Teach me Mahjong for beginners</span>
+          </button>
+
+          <button class="pill">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8 3 4 8 5-5 5 15H2L8 3z"/><path d="M4.14 15.08c2.62-1.57 5.24-1.43 7.86.42 2.74 1.94 5.49 2 8.23.19"/></svg>
+            <span>Find hiking boots for wide feet</span>
+          </button>
+
+          <button class="pill">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+            <span>Explain this code</span>
+          </button>
+
+          <button class="pill">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/></svg>
+            <span>Recommend an easy potluck dish</span>
+          </button>
+
+          <button class="pill">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 20V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/><rect width="20" height="14" x="2" y="6" rx="2"/></svg>
+            <span>Help me improve this job description</span>
+          </button>
+
+          <button class="pill">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+            <span>Write a Python script</span>
+          </button>
+
+          <button class="pill">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+            <span>Draw a picture of a mini aussie</span>
+          </button>
+
+          <button class="pill">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></svg>
+            <span>Translate this recipe into Greek</span>
+          </button>
+
+          <button class="pill">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+            <span>Help me build a budget</span>
+          </button>
+
+          <button class="pill">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.4 14.4 9.6 9.6"/><path d="M18.657 21.485a2 2 0 1 1-2.829-2.828l-1.767 1.768a2 2 0 1 1-2.829-2.829l6.364-6.364a2 2 0 1 1 2.829 2.829l-1.768 1.767a2 2 0 1 1 2.828 2.829z"/><path d="m21.5 21.5-1.4-1.4"/><path d="M3.9 3.9 2.5 2.5"/><path d="M6.404 12.768a2 2 0 1 1-2.829-2.829l1.768-1.767a2 2 0 1 1-2.828-2.829l2.828-2.828a2 2 0 1 1 2.829 2.828l1.767-1.768a2 2 0 1 1 2.829 2.829z"/></svg>
+            <span>Find gentle lower back stretches</span>
+          </button>
+
+          <button class="pill">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/></svg>
+            <span>Write a polite rejection email</span>
+          </button>
+
+          <button class="pill">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/></svg>
+            <span>Brainstorm domain names</span>
+          </button>
+
+        </div>
+        <div class="fade-right" id="fade-right"></div>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- ════════ BOTTOM BAR ════════ -->
+  <footer class="bottom-bar">
+    <div class="bottom-inner">
+
+      <a href="#" class="bottom-chip">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>
+        <span class="chip-label">Learn about ChatGPT Business</span>
+      </a>
+
+      <a href="#" class="bottom-chip">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <span class="chip-label">Search with ChatGPT</span>
+      </a>
+
+      <a href="#" class="bottom-chip">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+        <span class="chip-label">Talk with ChatGPT</span>
+      </a>
+
+      <a href="#" class="bottom-chip">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2v7.527a2 2 0 0 1-.211.896L4.72 20.55a1 1 0 0 0 .9 1.45h12.76a1 1 0 0 0 .9-1.45l-5.069-10.127A2 2 0 0 1 14 9.527V2"/><path d="M8.5 2h7"/><path d="M7 16.5h10"/></svg>
+        <span class="chip-label">Research</span>
+      </a>
+
+      <button class="bottom-chip" aria-label="More options">
+        <span class="chip-label">More</span>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+
+    </div>
+  </footer>
+
+  <!-- ════════ SCRIPTS ════════ -->
+  <script>
+    // Mobile menu toggle
+    function toggleMenu() {
+      const menu = document.getElementById('mobile-menu');
+      const menuIcon = document.getElementById('menu-icon');
+      const closeIcon = document.getElementById('close-icon');
+      const isOpen = menu.classList.toggle('open');
+      menuIcon.style.display = isOpen ? 'none' : 'block';
+      closeIcon.style.display = isOpen ? 'block' : 'none';
+    }
+
+    // Prompt input send button activation
+    const promptInput = document.getElementById('prompt-input');
+    const sendBtn = document.getElementById('send-btn');
+    promptInput.addEventListener('input', () => {
+      const hasValue = promptInput.value.trim().length > 0;
+      sendBtn.classList.toggle('active', hasValue);
+      sendBtn.disabled = !hasValue;
+    });
+
+    // Suggestion pills scroll fading
+    const pillsScroll = document.getElementById('pills-scroll');
+    const fadeLeft = document.getElementById('fade-left');
+    const fadeRight = document.getElementById('fade-right');
+
+    function updateFades() {
+      const sl = pillsScroll.scrollLeft;
+      const maxScroll = pillsScroll.scrollWidth - pillsScroll.clientWidth;
+      fadeLeft.classList.toggle('visible', sl > 8);
+      fadeRight.classList.toggle('hidden', sl >= maxScroll - 8);
+    }
+
+    updateFades();
+    pillsScroll.addEventListener('scroll', updateFades, { passive: true });
+    window.addEventListener('resize', updateFades);
+  </script>
+
+</body>
+</html>

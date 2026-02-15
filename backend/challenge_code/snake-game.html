@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Snake Game</title>
+
+<style>
+body {
+  text-align: center;
+  font-family: Arial, sans-serif;
+  background: #f5f5f5;
+}
+
+canvas {
+  background: #fff;
+  border: 2px solid #333;
+  margin-top: 20px;
+}
+</style>
+</head>
+
+<body>
+
+<h1>Snake Game</h1>
+<canvas id="mycanvas"></canvas>
+
+<script>
+let canvas, pen, W, H, cs, score, game_over, drawgame;
+let food, snake;
+
+// ---- INIT ----
+function init() {
+  canvas = document.getElementById('mycanvas');
+  cs = 50; // Cell size
+  // Calculate canvas size to fit whole squares
+  let cols = 16;
+  let rows = 16;
+  W = H = canvas.width = canvas.height = cols * cs;
+  pen = canvas.getContext('2d');
+
+  score = 0;
+  game_over = false;
+  drawgame = 1;
+
+  food = getRandomFood();
+
+  snake = {
+    init_len: 5,
+    color: "#337AFF",
+    cells: [],
+    direction: "right",
+
+    createSnake: function () {
+      for (let i = this.init_len; i > 0; i--) {
+        this.cells.push({ x: i, y: 0 });
+      }
+    },
+
+    drawSnake: function () {
+      pen.fillStyle = this.color;
+      for (let i = 0; i < this.cells.length; i++) {
+        pen.fillRect(
+          this.cells[i].x * cs,
+          this.cells[i].y * cs,
+          cs - 2,
+          cs - 2
+        );
+      }
+    },
+
+    updateSnake: function () {
+      // Random movement that avoids walls
+      let headX = this.cells[0].x;
+      let headY = this.cells[0].y;
+      let maxX = Math.floor(W / cs) - 1;
+      let maxY = Math.floor(H / cs) - 1;
+      
+      // Randomly change direction sometimes (30% chance)
+      if (Math.random() < 0.3) {
+        let possibleDirections = [];
+        
+        // Check which directions are safe (won't hit walls)
+        if (headX < maxX) possibleDirections.push("right");
+        if (headX > 0) possibleDirections.push("left");
+        if (headY < maxY) possibleDirections.push("down");
+        if (headY > 0) possibleDirections.push("up");
+        
+        // Don't reverse direction
+        let opposite = {
+          "right": "left",
+          "left": "right",
+          "down": "up",
+          "up": "down"
+        };
+        possibleDirections = possibleDirections.filter(d => d !== opposite[this.direction]);
+        
+        if (possibleDirections.length > 0) {
+          this.direction = possibleDirections[Math.floor(Math.random() * possibleDirections.length)];
+        }
+      }
+
+      if (this.direction === "right") headX++;
+      else if (this.direction === "left") headX--;
+      else if (this.direction === "down") headY++;
+      else headY--;
+
+      // food eaten
+      if (headX === food.x && headY === food.y) {
+        score++;
+        food = getRandomFood();
+      } else {
+        this.cells.pop();
+      }
+
+      this.cells.unshift({ x: headX, y: headY });
+
+      // Check bounds
+      if (headX < 0 || headY < 0 || headX > maxX || headY > maxY) {
+        game_over = true;
+      }
+    }
+  };
+
+  snake.createSnake();
+
+  document.addEventListener("keydown", keyPressed);
+}
+
+// ---- CONTROLS ----
+function keyPressed(e) {
+  if (e.key === "ArrowLeft") snake.direction = "left";
+  else if (e.key === "ArrowRight") snake.direction = "right";
+  else if (e.key === "ArrowDown") snake.direction = "down";
+  else if (e.key === "ArrowUp") snake.direction = "up";
+}
+
+// ---- DRAW HELPERS ----
+
+// alternating green grid background
+function drawGrid() {
+  let cols = Math.floor(W / cs);
+  let rows = Math.floor(H / cs);
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      pen.fillStyle = (x + y) % 2 === 0 ? "#a8d949" : "#8ecc39";
+      pen.fillRect(x * cs, y * cs, cs, cs);
+    }
+  }
+}
+
+// red circle for apple
+function drawFood(x, y) {
+  pen.beginPath();
+  pen.fillStyle = "red";
+  pen.arc(
+    x * cs + cs / 2,
+    y * cs + cs / 2,
+    cs / 2.5,
+    0,
+    Math.PI * 2
+  );
+  pen.fill();
+}
+
+// yellow square for trophy
+function drawTrophy() {
+  pen.fillStyle = "gold";
+  pen.fillRect(18, 20, 40, 40);
+}
+
+// ---- DRAW ----
+function draw() {
+  pen.clearRect(0, 0, W, H);
+
+  drawGrid();
+  snake.drawSnake();
+  drawFood(food.x, food.y);
+  drawTrophy();
+
+  pen.fillStyle = "blue";
+  pen.font = "20px Consolas";
+  pen.fillText(score, 70, 50);
+}
+
+// ---- UPDATE ----
+function update() {
+  snake.updateSnake();
+}
+
+// ---- FOOD ----
+function getRandomFood() {
+  let maxX = Math.floor(W / cs) - 1;
+  let maxY = Math.floor(H / cs) - 1;
+  let foodX = Math.floor(Math.random() * (maxX + 1));
+  let foodY = Math.floor(Math.random() * (maxY + 1));
+  return { x: foodX, y: foodY };
+}
+
+// ---- GAME LOOP ----
+function gameloop() {
+  if (game_over) {
+    clearInterval(f);
+    let r = window.confirm("GAME OVER!!\nPlay Again?");
+    if (r) location.reload();
+  }
+
+  if (drawgame === 1) {
+    alert("USE ARROW KEYS TO PLAY\nPRESS ENTER TO START");
+    drawgame++;
+  }
+
+  draw();
+  update();
+}
+
+init();
+let f = setInterval(gameloop, 150);
+</script>
+
+</body>
+</html>

@@ -23,7 +23,8 @@
         "description": "Recreate this landing page UI.",
         "category": "ui",
         "difficulty": "medium",
-        "embed_url": "https://openai.com/"
+        "embed_url": "https://openai.com/",
+        "html_url": "backend/challenge_code/openai-landing.html"
     },
     {
         "id": "build-snake-game",
@@ -31,7 +32,8 @@
         "description": "Recreate this snake game. Match the look and behavior shown in the reference animation: grid-based movement, growing when eating, and game-over on collision. Use HTML, CSS, and JavaScript.",
         "category": "ui",
         "difficulty": "medium",
-        "image_url": "https://media.giphy.com/media/13GIgrGdslD9o0/giphy.gif"
+        "image_url": "https://media.giphy.com/media/13GIgrGdslD9o0/giphy.gif",
+        "html_url": "backend/challenge_code/snake-game.html"
     },
     {
         "id": "fizzbuzz",

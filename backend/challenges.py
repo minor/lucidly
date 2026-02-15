@@ -19,6 +19,7 @@ class Challenge(BaseModel):
     starter_code: str | None = None
     image_url: str | None = None  # URL or path to challenge visual (image/gif)
     embed_url: str | None = None  # URL to embed as live page (e.g. for animated UIs)
+    html_url: str | None = None  # Path to HTML file to render as reference
 
 
 # ---------------------------------------------------------------------------

@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconn
 
 logger = logging.getLogger(__name__)
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel
 
 from config import settings
@@ -174,6 +174,33 @@ async def get_challenge(challenge_id: str):
     if challenge is None:
         raise HTTPException(status_code=404, detail="Challenge not found")
     return challenge
+
+
+@app.get("/api/challenges/{challenge_id}/html")
+async def get_challenge_html(challenge_id: str):
+    """Serve the HTML file content for a challenge's html_url."""
+    challenge = get_challenge_by_id(challenge_id)
+    if challenge is None:
+        raise HTTPException(status_code=404, detail="Challenge not found")
+    
+    if not challenge.html_url:
+        raise HTTPException(status_code=404, detail="Challenge has no html_url")
+    
+    from pathlib import Path
+    # html_url is a path like "backend/challenge_code/openai-landing.html"
+    # We need to resolve it relative to the project root
+    project_root = Path(__file__).parent.parent
+    html_path = project_root / challenge.html_url
+    
+    if not html_path.exists():
+        raise HTTPException(status_code=404, detail=f"HTML file not found: {challenge.html_url}")
+    
+    try:
+        with open(html_path, "r", encoding="utf-8") as f:
+            html_content = f.read()
+        return Response(content=html_content, media_type="text/html")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read HTML file: {str(e)}")
 
 
 @app.post("/api/challenges/{challenge_id}/generate-tests")
