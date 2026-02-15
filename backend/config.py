@@ -32,13 +32,18 @@ class Settings(BaseSettings):
         "hard": {"time": 300.0, "tokens": 1000, "turns": 8},
     }
 
+    # Supabase (database)
+    supabase_url: str = ""
+    supabase_service_key: str = ""
+
     # Browserbase / Stagehand (optional: for agent view_reference_page tool)
     browserbase_api_key: str = ""
     browserbase_project_id: str = ""
 
-    # Supabase (Leaderboard & Logs)
-    supabase_url: str = ""
-    supabase_service_key: str = ""
+    # Lucidly app URL (optional: for agent to screenshot the run page as reference)
+    # When set, generate_landing_page screenshots /agents/run/{session_id} (the page you watch the run on).
+    # e.g. https://app.lucidly.com or http://localhost:3000 (Browserbase must be able to reach it).
+    lucidly_app_url: str = ""
 
     # Agent / Modal (for benchmark runs)
     agent_internal_secret: str = ""

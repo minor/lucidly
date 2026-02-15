@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { getChallenge, runTests, runCode, createSandbox, terminateSandbox, MODEL_PRICING, MODELS, calculateScore, evaluateUI, createVercelSandbox, updateVercelSandboxCode, stopVercelSandbox, streamPromptFeedback } from "@/lib/api";
+import { getChallenge, runTests, runCode, createSandbox, terminateSandbox, MODEL_PRICING, MODELS, calculateScore, evaluateUI, createVercelSandbox, updateVercelSandboxCode, stopVercelSandbox } from "@/lib/api";
 import { PromptInput } from "@/components/PromptInput";
 import { ScoreBar } from "@/components/ScoreBar";
 import { SimpleMarkdown } from "@/components/SimpleMarkdown";
@@ -21,9 +21,6 @@ import {
   GripHorizontal,
   Trophy,
   X,
-  MessageCircle,
-  Lightbulb,
-  FileText,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -55,13 +52,6 @@ export default function ChallengePage() {
   const [outputPanelHeight, setOutputPanelHeight] = useState(OUTPUT_PANEL_INITIAL);
   const resizeStartYRef = useRef<number>(0);
   const resizeStartHeightRef = useRef<number>(OUTPUT_PANEL_INITIAL);
-
-  // Product challenge: resizable Notepad/PRD panel (like coding output panel)
-  const PRODUCT_PANEL_MIN = 120;
-  const PRODUCT_PANEL_INITIAL = 220;
-  const [productPanelHeight, setProductPanelHeight] = useState(PRODUCT_PANEL_INITIAL);
-  const productResizeStartYRef = useRef<number>(0);
-  const productResizeStartHeightRef = useRef<number>(PRODUCT_PANEL_INITIAL);
 
   // Chat state
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -115,6 +105,8 @@ export default function ChallengePage() {
   const [scoreBarFrozen, setScoreBarFrozen] = useState(false);
   const [scoreLoading, setScoreLoading] = useState(false);
   const [showCompletionModal, setShowCompletionModal] = useState(false);
+  const [playerName, setPlayerName] = useState("");
+  const [scoreSubmitted, setScoreSubmitted] = useState(false);
   
   // Ref to hold stats when frozen (pending/completed)
   const frozenStatsRef = useRef<{
@@ -132,19 +124,6 @@ export default function ChallengePage() {
   
   // Execution state (from Leaderboard - allows pausing during tests)
   const [isExecuting, setIsExecuting] = useState(false);
-
-  // Workspace tab & prompt feedback state
-  const [workspaceTab, setWorkspaceTab] = useState<"chat" | "feedback">("chat");
-  const [feedbackContent, setFeedbackContent] = useState("");
-  const [feedbackLoading, setFeedbackLoading] = useState(false);
-  const feedbackAbortRef = useRef<AbortController | null>(null);
-  // Product challenge state (Part 1: discovery chat, Part 2: PRD)
-  const [productPart, setProductPart] = useState<1 | 2>(1);
-  const [notes, setNotes] = useState("");
-  const [prdContent, setPrdContent] = useState("");
-  const [productBottomTab, setProductBottomTab] = useState<"notepad" | "prd">("notepad");
-  const [playerName, setPlayerName] = useState("");
-  const [scoreSubmitted, setScoreSubmitted] = useState(false);
 
   // Initialize challenge
   useEffect(() => {
@@ -237,25 +216,6 @@ export default function ChallengePage() {
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
   }, [outputPanelHeight]);
-
-  // Product panel resize (Notepad/PRD)
-  const handleProductPanelResizeStart = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    productResizeStartYRef.current = e.clientY;
-    productResizeStartHeightRef.current = productPanelHeight;
-    const onMove = (moveEvent: MouseEvent) => {
-      const delta = productResizeStartYRef.current - moveEvent.clientY;
-      const next = productResizeStartHeightRef.current + delta;
-      const max = typeof window !== "undefined" ? Math.max(400, window.innerHeight * 0.7) : 600;
-      setProductPanelHeight(Math.min(max, Math.max(PRODUCT_PANEL_MIN, next)));
-    };
-    const onUp = () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-  }, [productPanelHeight]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -455,43 +415,6 @@ export default function ChallengePage() {
   const isUiChallenge = challenge?.category === "ui";
   const hasFunctionTests = challenge?.test_suite && challenge.test_suite.length > 0;
   const isDataChallenge = challenge?.category === "data";
-  const isProductChallenge = challenge?.category === "product";
-  const productParts = challenge?.product_parts ?? [];
-
-  const triggerPromptFeedback = (accuracy: number, elapsedSec: number, tokens: number, turns: number, dbSessionId?: string) => {
-    if (feedbackAbortRef.current) feedbackAbortRef.current.abort();
-    feedbackAbortRef.current = new AbortController();
-
-    setFeedbackContent("");
-    setFeedbackLoading(true);
-
-    streamPromptFeedback(
-      {
-        messages,
-        challenge_id: challengeId,
-        challenge_description: challenge?.description || "",
-        challenge_category: challenge?.category || "",
-        challenge_difficulty: challenge?.difficulty || "",
-        reference_html: referenceHtml || undefined,
-        accuracy,
-        total_turns: turns,
-        total_tokens: tokens,
-        elapsed_sec: elapsedSec,
-        db_session_id: dbSessionId,
-      },
-      (chunk) => {
-        setFeedbackContent((prev) => prev + chunk);
-      },
-      () => {
-        setFeedbackLoading(false);
-      },
-      (error) => {
-        console.error("Prompt feedback error:", error);
-        setFeedbackLoading(false);
-      },
-      feedbackAbortRef.current.signal
-    );
-  };
 
   const handleSubmitSolution = async () => {
     if (submitState !== "idle") return;
@@ -499,26 +422,19 @@ export default function ChallengePage() {
     // Calculate accuracy based on challenge type
     let accuracy = 0.0;
     let evaluatedUiScore: number | undefined = undefined;
-    let messagesForScore = messages;
-
+    
     // Freeze the score bar stats first
     const currentElapsed = elapsed;
     const currentTurns = totalTurns;
     const currentTokens = Math.round(totalTokens + totalInputTokens + estimatedTokens);
     const currentCost = totalCost + inputCost + ((estimatedTokens * (MODEL_PRICING[selectedModel]?.output || MODEL_PRICING["gpt-5.2"].output)) / 1_000_000);
-
+    
     setScoreBarFrozen(true);
     setSubmitState("pending");
     setScoreLoading(true);
-
+    
     try {
-      if (isProductChallenge) {
-        accuracy = 1.0; // No automated grading for PRD; completion counts
-        messagesForScore = [
-          ...messages,
-          { role: "assistant" as const, content: `## PRD\n\n${prdContent}` },
-        ];
-      } else if (isUiChallenge) {
+      if (isUiChallenge) {
         if (renderedCode) {
           const result = await evaluateUI(challengeId, renderedCode);
           accuracy = result.score / 100;
@@ -550,7 +466,8 @@ export default function ChallengePage() {
         total_turns: currentTurns,
         difficulty: challenge?.difficulty || "medium",
         model: selectedModel,
-        messages: messagesForScore,
+        // Don't save yet - wait for user to enter name
+        messages: undefined,
         total_cost: currentCost,
       });
       
@@ -558,9 +475,6 @@ export default function ChallengePage() {
       setScoreLoading(false);
       setSubmitState("completed");
       setShowCompletionModal(true);
-
-      // Auto-trigger prompt feedback analysis
-      triggerPromptFeedback(accuracy, currentElapsed, currentTokens, currentTurns, scores?.db_session_id);
     } catch (err) {
       console.error("Failed to calculate score:", err);
       setScoreBarFrozen(false);
@@ -594,18 +508,6 @@ export default function ChallengePage() {
     setElapsed(0);
     totalPausedTimeRef.current = 0;
     pauseStartTimeRef.current = null;
-    setWorkspaceTab("chat");
-    setFeedbackContent("");
-    setFeedbackLoading(false);
-    if (feedbackAbortRef.current) {
-      feedbackAbortRef.current.abort();
-      feedbackAbortRef.current = null;
-    }
-    setProductPart(1);
-    setNotes("");
-    setPrdContent("");
-    setProductBottomTab("notepad");
-    setProductPanelHeight(PRODUCT_PANEL_INITIAL);
     setPlayerName("");
     setScoreSubmitted(false);
 
@@ -636,13 +538,12 @@ export default function ChallengePage() {
         difficulty: challenge?.difficulty || "medium",
         model: selectedModel,
         username: playerName,
-        messages: isProductChallenge ? [...messages, { role: "assistant" as const, content: `## PRD\n\n${prdContent}` }] : messages,
+        messages: messages,
         total_cost: frozenStatsRef.current.cost,
       });
       setScoreSubmitted(true);
     } catch (err) {
       console.error("Failed to submit score:", err);
-      // Maybe show error toast?
     } finally {
       setScoreLoading(false);
     }
@@ -711,16 +612,14 @@ export default function ChallengePage() {
           setTotalInputTokens((t) => t + usage.input_tokens);
         }
       },
-      abortControllerRef.current?.signal,
-      isProductChallenge && productPart === 1 ? challengeId : undefined
+      abortControllerRef.current?.signal
     );
   };
 
   const hasBottomPanel =
-    !isProductChallenge &&
-    (isUiChallenge ||
-      (hasFunctionTests && (testResults || runningTests)) ||
-      (isDataChallenge && (codeResult || runningCode)));
+    isUiChallenge ||
+    (hasFunctionTests && (testResults || runningTests)) ||
+    (isDataChallenge && (codeResult || runningCode));
 
   const OUTPUT_PLACEHOLDER_IMAGE =
     "https://placehold.co/800x400/f8fafc/94a3b8?text=Your+rendered+page";
@@ -794,34 +693,37 @@ export default function ChallengePage() {
             </div>
 
             <div className="mx-auto max-w-sm space-y-4">
-              <div className="flex gap-2">
-                <input 
-                  type="text" 
-                  placeholder="Enter your name" 
-                  className="flex-1 rounded-lg border border-input-border bg-input px-4 py-2 text-sm focus:border-accent focus:outline-none"
-                />
-                <button className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground hover:bg-accent/90 cursor-pointer">
-                  Submit
-                </button>
-              </div>
+              {!scoreSubmitted ? (
+                <div className="flex gap-2">
+                  <input 
+                    type="text" 
+                    value={playerName}
+                    onChange={(e) => setPlayerName(e.target.value)}
+                    placeholder="Enter your name" 
+                    className="flex-1 rounded-lg border border-input-border bg-input px-4 py-2 text-sm focus:border-accent focus:outline-none"
+                    disabled={scoreLoading}
+                  />
+                  <button 
+                    onClick={handleFinalSubmit}
+                    disabled={scoreLoading || !playerName.trim()}
+                    className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground hover:bg-accent/90 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    {scoreLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Submit"}
+                  </button>
+                </div>
+              ) : (
+                <div className="rounded-lg bg-green-500/10 border border-green-500/20 p-4 text-green-500 flex items-center justify-center gap-2 animate-in fade-in duration-300">
+                  <CheckCircle2 className="h-5 w-5" />
+                  <span className="font-medium">Score submitted successfully!</span>
+                </div>
+              )}
               
               <div className="flex gap-2 mt-2">
                 <button 
                   onClick={() => {
                     setShowCompletionModal(false);
-                    setWorkspaceTab("feedback");
-                  }}
-                  className="flex-1 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground hover:bg-accent/90 transition-colors cursor-pointer flex items-center justify-center gap-1.5"
-                >
-                  <Lightbulb className="h-3.5 w-3.5" />
-                  View Prompt Feedback
-                </button>
-              </div>
-              <div className="flex gap-2 mt-2">
-                <button 
-                  onClick={() => {
-                    setShowCompletionModal(false);
-                    setWorkspaceTab("chat");
+                    // Keep submitState as "completed" to maintain frozen state
+                    // Timer will stay frozen, chat disabled, button shows "Retry"
                   }}
                   className="flex-1 rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium text-foreground hover:bg-accent/10 hover:border-accent/40 transition-colors cursor-pointer"
                 >
@@ -895,69 +797,35 @@ export default function ChallengePage() {
             type="button"
             onClick={submitState === 'completed' ? handleRetry : handleSubmitSolution}
             disabled={
-                submitState === "pending" ||
-                isExecuting ||
-                isStreaming ||
-                (isProductChallenge
-                  ? productPart !== 2 || !prdContent.trim()
-                  : !testResults && !codeResult && !renderedCode)
+                submitState === 'pending' || 
+                isExecuting || 
+                isStreaming || 
+                (!testResults && !codeResult && !renderedCode)
             }
             className={`shrink-0 rounded-lg bg-foreground text-background px-4 py-2 text-xs font-medium transition-opacity ${
-                submitState === "pending" ||
-                (submitState === "idle" &&
-                  (isExecuting ||
-                    isStreaming ||
-                    (isProductChallenge ? productPart !== 2 || !prdContent.trim() : !testResults && !codeResult && !renderedCode)))
+                submitState === 'pending' || (submitState === 'idle' && (isExecuting || isStreaming || (!testResults && !codeResult && !renderedCode)))
                 ? "opacity-50 cursor-not-allowed"
                 : "hover:opacity-90 cursor-pointer"
             }`}
         >
-            {submitState === "pending" ? "Pending" : submitState === "completed" ? "Retry" : isProductChallenge && productPart === 2 ? "Submit PRD" : "Submit solution"}
+            {submitState === "pending" ? "Pending" : submitState === "completed" ? "Retry" : "Submit solution"}
         </button>
       </div>
 
       {/* Main content */}
       <div className="flex flex-1 min-h-0">
         <div className="flex-1 flex flex-col min-w-0 border-r border-border">
-          {/* Top: Challenge description (or product Part 1/2 + notepad) */}
+          {/* Top: Challenge description */}
           <div
             className={`${
               hasBottomPanel ? "min-h-0 flex-1" : "flex-1"
-            } overflow-y-auto border-b border-border flex flex-col min-h-0`}
+            } overflow-y-auto border-b border-border`}
           >
-            <div className="p-6 flex-1 min-h-0">
+            <div className="p-6">
               <h2 className="text-sm font-semibold mb-3">Challenge</h2>
               <SimpleMarkdown content={challenge?.description || ""} className="text-sm leading-relaxed mb-4" />
-
-              {isProductChallenge && productParts.length > 0 && (
-                <div className="mb-10 pb-4 space-y-3">
-                  <div className="rounded-lg border border-border bg-muted/10 p-4 pb-5 flex flex-col">
-                    <span className="text-sm font-semibold text-foreground mb-2">
-                      {productParts[productPart - 1]?.title ?? `Part ${productPart}`}
-                    </span>
-                    <SimpleMarkdown
-                      content={productParts[productPart - 1]?.description ?? ""}
-                      className="text-sm leading-relaxed text-muted-foreground"
-                    />
-                    {productPart === 1 && (
-                      <div className="mt-2 flex justify-start">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setProductPart(2);
-                            setMessages([]);
-                          }}
-                          className="rounded-lg bg-foreground text-background px-3 py-1.5 text-xs font-medium hover:opacity-90 cursor-pointer"
-                        >
-                          Next → Part 2
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {!isProductChallenge && challenge?.starter_code && (
+              
+              {challenge?.starter_code && (
                 <div className="rounded-lg border border-border bg-code-bg overflow-hidden mb-4">
                   <div className="px-3 py-1.5 border-b border-border">
                     <span className="text-xs font-medium text-muted">
@@ -971,7 +839,7 @@ export default function ChallengePage() {
                   </pre>
                 </div>
               )}
-              {!isProductChallenge && challenge?.html_url && referenceHtml && (
+              {challenge?.html_url && referenceHtml && (
                 <div className="rounded-lg border border-border overflow-hidden bg-muted/20 mb-4 h-[680px]">
                   <iframe
                     srcDoc={referenceHtml}
@@ -981,7 +849,7 @@ export default function ChallengePage() {
                   />
                 </div>
               )}
-              {!isProductChallenge && challenge?.image_url && !challenge?.html_url && (
+              {challenge?.image_url && !challenge?.html_url && (
                 <div className="rounded-lg border border-border overflow-hidden bg-muted/20 mb-4">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
@@ -991,7 +859,7 @@ export default function ChallengePage() {
                   />
                 </div>
               )}
-              {!isProductChallenge && challenge?.test_suite && challenge.test_suite.length > 0 && (
+              {challenge?.test_suite && challenge.test_suite.length > 0 && (
                 <div className="mt-4">
                   <h3 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">
                     Test Cases
@@ -1013,72 +881,6 @@ export default function ChallengePage() {
               )}
             </div>
           </div>
-
-          {/* Product challenge: resizable Notepad | PRD panel */}
-          {isProductChallenge && (
-            <>
-              <button
-                type="button"
-                onMouseDown={handleProductPanelResizeStart}
-                className="flex w-full cursor-n-resize items-center justify-center border-t border-border bg-muted/10 py-1.5 text-muted hover:bg-muted/20 hover:text-foreground focus:outline-none shrink-0"
-                aria-label="Resize notepad panel"
-              >
-                <GripHorizontal className="h-4 w-4" />
-              </button>
-              <div
-                className="flex shrink-0 flex-col border-t border-border overflow-hidden"
-                style={{ height: productPanelHeight }}
-              >
-                <div className="flex items-center justify-between border-b border-border px-4 py-2.5 shrink-0 bg-background/80">
-                <span className="text-sm font-semibold text-foreground">
-                  {productBottomTab === "notepad" ? "Notepad" : "PRD"}
-                </span>
-                <div className="flex items-center gap-1 rounded-lg border border-border bg-muted/30 p-0.5">
-                  <button
-                    type="button"
-                    onClick={() => setProductBottomTab("notepad")}
-                    className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer ${
-                      productBottomTab === "notepad"
-                        ? "bg-background text-foreground shadow-sm"
-                        : "text-muted hover:text-foreground"
-                    }`}
-                  >
-                    Notepad
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setProductBottomTab("prd")}
-                    className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer ${
-                      productBottomTab === "prd"
-                        ? "bg-background text-foreground shadow-sm"
-                        : "text-muted hover:text-foreground"
-                    }`}
-                  >
-                    <FileText className="h-3 w-3" />
-                    PRD
-                  </button>
-                </div>
-              </div>
-              <div className="flex-1 min-h-0 overflow-hidden rounded-b-lg border-x border-b border-border bg-code-bg/50 flex flex-col">
-                {productBottomTab === "notepad" ? (
-                  <textarea
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    placeholder="Take notes from your conversation with the CRO..."
-                    className="flex-1 min-h-0 w-full resize-none p-4 text-sm font-mono text-foreground bg-transparent border-0 focus:outline-none focus:ring-0 placeholder:text-muted"
-                  />
-                ) : (
-                  <textarea
-                    value={prdContent}
-                    onChange={(e) => setPrdContent(e.target.value)}
-                    placeholder="Write your PRD here. Use the right panel to chat with the assistant as you draft..."
-                    className="flex-1 min-h-0 w-full resize-none p-4 text-sm leading-relaxed text-foreground bg-transparent border-0 focus:outline-none focus:ring-0 placeholder:text-muted"
-                  />
-                )}
-              </div>
-              </div>
-            </>
-          )}
 
           {/* Resize handle */}
           {hasBottomPanel && (
@@ -1340,152 +1142,79 @@ export default function ChallengePage() {
           )}
         </div>
 
-        {/* Right: Chat panel (CRO in Part 1, general assistant in Part 2 for PRD help) */}
+        {/* Right: Chat panel */}
         <div className="flex flex-col w-1/2 shrink-0 border-l border-border">
-          <div className="border-b border-border px-6 py-3 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Sparkles className="h-4 w-4 text-muted" />
-              <h2 className="text-sm font-medium text-foreground">
-                {isProductChallenge && productPart === 1 ? "Chat with the CRO" : isProductChallenge && productPart === 2 ? "General AI" : "Workspace"}
-              </h2>
-            </div>
-            {submitState === "completed" && (
-              <div className="flex items-center gap-1 rounded-lg border border-border bg-muted/30 p-0.5">
-                <button
-                  onClick={() => setWorkspaceTab("chat")}
-                  className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer ${
-                    workspaceTab === "chat"
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-muted hover:text-foreground"
-                  }`}
-                >
-                  <MessageCircle className="h-3 w-3" />
-                  Chat
-                </button>
-                <button
-                  onClick={() => setWorkspaceTab("feedback")}
-                  className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer ${
-                    workspaceTab === "feedback"
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-muted hover:text-foreground"
-                  }`}
-                >
-                  <Lightbulb className="h-3 w-3" />
-                  Feedback
-                  {feedbackLoading && (
-                    <Loader2 className="h-3 w-3 animate-spin ml-0.5" />
-                  )}
-                </button>
-              </div>
-            )}
+          <div className="border-b border-border px-6 py-3 flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-muted" />
+            <h2 className="text-sm font-medium text-foreground">Workspace</h2>
           </div>
 
-          {workspaceTab === "chat" ? (
-            <div
-              ref={chatContainerRef}
-              className="flex-1 overflow-y-auto"
-            >
-              <div className="px-6 py-8">
-                {messages.length === 0 && !isStreaming && (
-                  <div className="flex flex-col items-center justify-center h-full min-h-[400px]">
-                    <div className="text-center max-w-md">
-                      <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-accent/10 mb-4">
-                        <Sparkles className="h-6 w-6 text-accent" />
-                      </div>
-                      <h3 className="text-lg font-medium text-foreground mb-2">
-                        {isProductChallenge && productPart === 1 ? "Ask the CRO questions" : "Start a conversation"}
-                      </h3>
-                      <p className="text-sm text-muted">
-                        {isProductChallenge && productPart === 1
-                          ? "Ask clarifying questions to understand the problem, pain points, and constraints. Take notes in the notepad."
-                          : isProductChallenge && productPart === 2
-                            ? "Chat with the assistant to draft your PRD. Use the Notepad / PRD tabs on the left to write."
-                            : "Describe what you want built for this challenge"}
-                      </p>
+          <div
+            ref={chatContainerRef}
+            className="flex-1 overflow-y-auto"
+          >
+            <div className="px-6 py-8">
+              {messages.length === 0 && !isStreaming && (
+                <div className="flex flex-col items-center justify-center h-full min-h-[400px]">
+                  <div className="text-center max-w-md">
+                    <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-accent/10 mb-4">
+                      <Sparkles className="h-6 w-6 text-accent" />
                     </div>
+                    <h3 className="text-lg font-medium text-foreground mb-2">
+                      Start a conversation
+                    </h3>
+                    <p className="text-sm text-muted">
+                      Describe what you want built for this challenge
+                    </p>
                   </div>
-                )}
-
-                <div className="space-y-8">
-                  {messages.map((message, index) => (
-                    <div
-                      key={index}
-                      className={`flex gap-4 group ${
-                        message.role === "user" ? "flex-row-reverse" : ""
-                      }`}
-                    >
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm leading-relaxed">
-                          {message.role === "user" ? (
-                            <div className="bg-foreground/5 border border-border rounded-lg px-4 py-3 text-foreground">
-                              <div className="whitespace-pre-wrap break-words">
-                                {message.content}
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="text-foreground">
-                              <div className="whitespace-pre-wrap break-words">
-                                {message.content}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-
-                  {isStreaming && (
-                    <div className="flex gap-4 group">
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm leading-relaxed text-foreground">
-                          <div className="whitespace-pre-wrap break-words">
-                            {currentStreamingMessage}
-                            <span className="inline-block w-0.5 h-4 bg-foreground ml-1 align-middle animate-pulse" />
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
                 </div>
+              )}
 
-                <div ref={messagesEndRef} />
-              </div>
-            </div>
-          ) : (
-            <div className="flex-1 overflow-y-auto">
-              <div className="px-6 py-8">
-                {feedbackLoading && !feedbackContent && (
-                  <div className="flex flex-col items-center justify-center min-h-[400px]">
-                    <Loader2 className="h-6 w-6 animate-spin text-accent mb-3" />
-                    <p className="text-sm text-muted">Analyzing your prompts…</p>
-                  </div>
-                )}
-                {feedbackContent && (
-                  <div className="prose-sm">
-                    <SimpleMarkdown content={feedbackContent} className="text-sm leading-relaxed" />
-                    {feedbackLoading && (
-                      <span className="inline-block w-0.5 h-4 bg-foreground ml-1 align-middle animate-pulse" />
-                    )}
-                  </div>
-                )}
-                {!feedbackLoading && !feedbackContent && (
-                  <div className="flex flex-col items-center justify-center min-h-[400px]">
-                    <div className="text-center max-w-md">
-                      <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-accent/10 mb-4">
-                        <Lightbulb className="h-6 w-6 text-accent" />
+              <div className="space-y-8">
+                {messages.map((message, index) => (
+                  <div
+                    key={index}
+                    className={`flex gap-4 group ${
+                      message.role === "user" ? "flex-row-reverse" : ""
+                    }`}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm leading-relaxed">
+                        {message.role === "user" ? (
+                          <div className="bg-foreground/5 border border-border rounded-lg px-4 py-3 text-foreground">
+                            <div className="whitespace-pre-wrap break-words">
+                              {message.content}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="text-foreground">
+                            <div className="whitespace-pre-wrap break-words">
+                              {message.content}
+                            </div>
+                          </div>
+                        )}
                       </div>
-                      <h3 className="text-lg font-medium text-foreground mb-2">
-                        Prompt Feedback
-                      </h3>
-                      <p className="text-sm text-muted">
-                        Submit your solution to get AI-powered feedback on your prompting strategy.
-                      </p>
+                    </div>
+                  </div>
+                ))}
+
+                {isStreaming && (
+                  <div className="flex gap-4 group">
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm leading-relaxed text-foreground">
+                        <div className="whitespace-pre-wrap break-words">
+                          {currentStreamingMessage}
+                          <span className="inline-block w-0.5 h-4 bg-foreground ml-1 align-middle animate-pulse" />
+                        </div>
+                      </div>
                     </div>
                   </div>
                 )}
               </div>
+
+              <div ref={messagesEndRef} />
             </div>
-          )}
+          </div>
 
           <div className="border-t border-border bg-background">
             <div className="px-6 py-4">
@@ -1498,7 +1227,7 @@ export default function ChallengePage() {
                 isStreaming={isStreaming}
                 selectedModel={selectedModel}
                 onModelChange={setSelectedModel}
-                placeholder={isProductChallenge && productPart === 1 ? "Ask the CRO..." : "Ask anything..."}
+                placeholder="Ask anything..."
                 disabled={isStreaming || isExecuting || submitState === "pending" || submitState === "completed"}
               />
             </div>

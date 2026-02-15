@@ -14,3 +14,4 @@ package-lock.json
 
 # Screenshots (saved during evaluation)
 screenshots/
+.cursor/
