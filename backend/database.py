@@ -119,6 +119,66 @@ async def save_prompt_feedback(session_id: str, feedback: str) -> bool:
         return False
 
 
+async def get_username_by_auth0_id(auth0_id: str) -> str | None:
+    """Fetch the chosen username for an Auth0 user. Returns None if not set."""
+    supabase = get_supabase_client()
+    if not supabase:
+        return None
+    try:
+        response = (
+            supabase.table("usernames")
+            .select("username")
+            .eq("auth0_id", auth0_id)
+            .limit(1)
+            .execute()
+        )
+        if response.data and len(response.data) > 0:
+            return response.data[0]["username"]
+        return None
+    except Exception as e:
+        logger.error(f"Error fetching username: {e}")
+        return None
+
+
+async def is_username_taken(username: str) -> bool:
+    """Check if a username is already in use (case-insensitive)."""
+    supabase = get_supabase_client()
+    if not supabase:
+        return False
+    try:
+        response = (
+            supabase.table("usernames")
+            .select("id")
+            .ilike("username", username)
+            .limit(1)
+            .execute()
+        )
+        return bool(response.data and len(response.data) > 0)
+    except Exception as e:
+        logger.error(f"Error checking username: {e}")
+        return False
+
+
+async def set_username(auth0_id: str, username: str) -> bool:
+    """
+    Store a username for an Auth0 user.
+    Uses upsert keyed on auth0_id so calling it again updates the name.
+    Returns True on success.
+    """
+    supabase = get_supabase_client()
+    if not supabase:
+        return False
+    try:
+        supabase.table("usernames").upsert(
+            {"auth0_id": auth0_id, "username": username},
+            on_conflict="auth0_id",
+        ).execute()
+        return True
+    except Exception as e:
+        logger.error(f"Error setting username: {e}")
+        return False
+
+
 async def get_leaderboard(
     challenge_id: str = None, 
     limit: int = 50,

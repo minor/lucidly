@@ -321,15 +321,6 @@ export default function AgentRunWatchPage() {
             </p>
           </div>
         </div>
-        {session?.status === "completed" && (
-          <Link
-            href="/leaderboard"
-            className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs font-medium hover:bg-accent-bg"
-          >
-            <Trophy className="h-3.5 w-3.5" />
-            View leaderboard
-          </Link>
-        )}
       </header>
 
       {/* Stats bar — same as play page (read-only) */}

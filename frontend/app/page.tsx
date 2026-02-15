@@ -2,7 +2,6 @@
 
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { Trophy } from "lucide-react";
 import { PromptInput } from "@/components/PromptInput";
 
 export default function Home() {
@@ -15,17 +14,6 @@ export default function Home() {
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center px-4 relative">
-      {/* Header */}
-      <header className="absolute top-0 right-0 p-6">
-        <button
-          onClick={() => router.push("/leaderboard")}
-          className="flex items-center gap-2 text-sm font-medium text-muted hover:text-foreground transition-colors cursor-pointer"
-        >
-          <Trophy className="h-4 w-4" />
-          Leaderboard
-        </button>
-      </header>
-
       {/* Hero */}
       <div className="mb-12 text-center">
         {/* Brand icon */}

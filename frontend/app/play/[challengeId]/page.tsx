@@ -24,7 +24,11 @@ import {
   MessageCircle,
   Lightbulb,
   FileText,
+  LogIn,
+  UserPlus,
 } from "lucide-react";
+import { useAuth0 } from "@auth0/auth0-react";
+import { useUsername } from "@/hooks/useUsername";
 
 // ---------------------------------------------------------------------------
 // Component
@@ -33,6 +37,9 @@ import {
 export default function ChallengePage() {
   const params = useParams();
   const router = useRouter();
+  const { user, isAuthenticated, loginWithRedirect } = useAuth0();
+  const { username, loading: usernameLoading } = useUsername(user);
+  const [showAuthOverlay, setShowAuthOverlay] = useState(false);
   const challengeId = params.challengeId as string;
 
   const [challenge, setChallenge] = useState<Challenge | null>(null);
@@ -115,8 +122,6 @@ export default function ChallengePage() {
   const [scoreBarFrozen, setScoreBarFrozen] = useState(false);
   const [scoreLoading, setScoreLoading] = useState(false);
   const [showCompletionModal, setShowCompletionModal] = useState(false);
-  const [playerName, setPlayerName] = useState("");
-  const [scoreSubmitted, setScoreSubmitted] = useState(false);
 
   // Prompt feedback state
   const [workspaceTab, setWorkspaceTab] = useState<"chat" | "feedback">("chat");
@@ -512,7 +517,8 @@ export default function ChallengePage() {
         cost: currentCost,
       };
       
-      // Calculate composite score (product = PRD dimension total 0–100 when prd_content sent)
+      // Calculate composite score AND auto-submit to leaderboard with chosen username
+      const authUsername = username || user?.nickname || user?.name || "anonymous";
       const scores = await calculateScore({
         challenge_id: challengeId,
         accuracy: isProductChallenge ? 0 : accuracy,
@@ -522,7 +528,11 @@ export default function ChallengePage() {
         difficulty: challenge?.difficulty || "medium",
         model: selectedModel,
         ...(challenge?.category ? { category: challenge.category } : {}),
-        ...(isProductChallenge && prdContent.trim() ? { prd_content: prdContent, messages } : {}),
+        ...(isProductChallenge && prdContent.trim() ? { prd_content: prdContent } : {}),
+        username: authUsername,
+        messages: isProductChallenge
+          ? [...messages, { role: "assistant" as const, content: `## PRD\n\n${prdContent}` }]
+          : messages,
         total_cost: currentCost,
       });
       
@@ -572,8 +582,6 @@ export default function ChallengePage() {
     setPrdContent("");
     setProductBottomTab("notepad");
     setProductPanelHeight(PRODUCT_PANEL_INITIAL);
-    setPlayerName("");
-    setScoreSubmitted(false);
     setFeedbackContent("");
     setFeedbackLoading(false);
     setWorkspaceTab("chat");
@@ -587,38 +595,6 @@ export default function ChallengePage() {
       ).then(() => {
         setIframeKey((k) => k + 1);
       }).catch(() => {});
-    }
-  };
-
-  const handleFinalSubmit = async () => {
-    if (!playerName.trim() || scoreSubmitted || !finalScores || !frozenStatsRef.current) return;
-    
-    setScoreLoading(true);
-    try {
-      // Calculate again WITH username/messages to persist
-      // Since accuracy/etc didn't change, scores will be identical but saved
-      await calculateScore({
-        challenge_id: challengeId,
-        accuracy: isProductChallenge ? 0 : (frozenStatsRef.current.accuracy ?? 0),
-        elapsed_sec: frozenStatsRef.current.elapsed,
-        total_tokens: frozenStatsRef.current.tokens,
-        total_turns: frozenStatsRef.current.turns,
-        difficulty: challenge?.difficulty || "medium",
-        model: selectedModel,
-        ...(challenge?.category ? { category: challenge.category } : {}),
-        ...(isProductChallenge && prdContent.trim() ? { prd_content: prdContent } : {}),
-        username: playerName,
-        messages: isProductChallenge ? [...messages, { role: "assistant" as const, content: `## PRD\n\n${prdContent}` }] : messages,
-        total_cost: frozenStatsRef.current.cost,
-      });
-      setScoreSubmitted(true);
-
-      // Auto-trigger prompt feedback after successful submission
-      triggerPromptFeedback();
-    } catch (err) {
-      console.error("Failed to submit score:", err);
-    } finally {
-      setScoreLoading(false);
     }
   };
 
@@ -665,6 +641,13 @@ export default function ChallengePage() {
 
   const handleSubmit = async (prompt: string, model: string) => {
     if (!prompt.trim() || isStreaming || isExecuting || submitState !== "idle") return;
+
+    // Require auth before prompting
+    if (!isAuthenticated) {
+      setShowAuthOverlay(true);
+      return;
+    }
+
     setSelectedModel(model);
 
     const userMessage: ChatMessage = { role: "user", content: prompt };
@@ -760,7 +743,7 @@ export default function ChallengePage() {
 </body>
 </html>`;
 
-  if (initializing) {
+  if (initializing || (isAuthenticated && usernameLoading)) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <Loader2 className="h-6 w-6 animate-spin text-muted" />
@@ -770,6 +753,32 @@ export default function ChallengePage() {
 
   return (
     <div className="flex h-screen flex-col relative">
+      {/* Auth overlay — shown when unauthenticated user tries to prompt */}
+      {showAuthOverlay && (
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-background/80 backdrop-blur-md animate-in fade-in duration-200">
+          <h2 className="text-xl font-semibold tracking-tight mb-2">Sign in to start prompting</h2>
+          <p className="text-sm text-muted mb-6">Create an account to interact with challenges</p>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => loginWithRedirect({ appState: { returnTo: window.location.pathname } })}
+              className="flex items-center gap-1.5 rounded-lg border border-border bg-card/80 backdrop-blur-sm px-3 py-2 text-xs font-medium text-muted hover:text-foreground hover:border-foreground/20 shadow-sm transition-colors cursor-pointer"
+            >
+              <LogIn className="h-3.5 w-3.5" />
+              Log in
+            </button>
+            <button
+              type="button"
+              onClick={() => loginWithRedirect({ authorizationParams: { screen_hint: "signup" }, appState: { returnTo: window.location.pathname } })}
+              className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-xs font-medium text-accent-foreground hover:bg-accent/90 shadow-sm transition-colors cursor-pointer"
+            >
+              <UserPlus className="h-3.5 w-3.5" />
+              Sign up
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Score Overlay */}
       {submitState === "completed" && finalScores && showCompletionModal && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/95 backdrop-blur-sm animate-in fade-in duration-200">
@@ -820,30 +829,10 @@ export default function ChallengePage() {
             </div>
 
             <div className="mx-auto max-w-sm space-y-4">
-              {!scoreSubmitted ? (
-                <div className="flex gap-2">
-                  <input 
-                    type="text" 
-                    value={playerName}
-                    onChange={(e) => setPlayerName(e.target.value)}
-                    placeholder="Enter your name" 
-                    className="flex-1 rounded-lg border border-input-border bg-input px-4 py-2 text-sm focus:border-accent focus:outline-none"
-                    disabled={scoreLoading}
-                  />
-                  <button 
-                    onClick={handleFinalSubmit}
-                    disabled={scoreLoading || !playerName.trim()}
-                    className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground hover:bg-accent/90 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-                  >
-                    {scoreLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Submit"}
-                  </button>
-                </div>
-              ) : (
-                <div className="rounded-lg bg-green-500/10 border border-green-500/20 p-4 text-green-500 flex items-center justify-center gap-2 animate-in fade-in duration-300">
-                  <CheckCircle2 className="h-5 w-5" />
-                  <span className="font-medium">Score submitted successfully!</span>
-                </div>
-              )}
+              <div className="rounded-lg bg-green-500/10 border border-green-500/20 p-3 text-green-500 flex items-center justify-center gap-2 animate-in fade-in duration-300">
+                <CheckCircle2 className="h-4 w-4" />
+                <span className="text-sm font-medium">Score submitted as {username || user?.nickname || user?.name || "anonymous"}</span>
+              </div>
               
               <div className="flex gap-2 mt-2">
                 <button 

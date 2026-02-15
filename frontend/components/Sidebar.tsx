@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth0 } from "@auth0/auth0-react";
+import { useUsername } from "@/hooks/useUsername";
 
 const MODES = [
   { id: "arena", label: "Arena Mode", icon: Zap, href: "/play" },
@@ -34,18 +35,12 @@ const MAX_WIDTH = 400;
 const DEFAULT_WIDTH = 240; // 60 * 4 = 240px (w-60)
 const COLLAPSED_WIDTH = 64;
 
-const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const {
-    isLoading: authLoading,
-    isAuthenticated,
-    user,
-    loginWithRedirect,
-    logout,
-  } = useAuth0();
+  const { isAuthenticated, user } = useAuth0();
+  const { username } = useUsername(user);
   const [width, setWidth] = useState(DEFAULT_WIDTH);
   const [isResizing, setIsResizing] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -153,9 +148,7 @@ export function Sidebar() {
           aria-label="Toggle sidebar"
         >
           <ChevronDown
-            className={`h-4 w-4 transition-transform ${
-              collapsed ? "-rotate-90" : ""
-            }`}
+            className={`h-4 w-4 transition-transform ${collapsed ? "-rotate-90" : ""}`}
           />
         </button>
       </div>
@@ -236,49 +229,22 @@ export function Sidebar() {
         );
       })()}
 
-      {/* Auth */}
-      {!collapsed && (
-        <div className="border-t border-border px-4 py-3 shrink-0 space-y-2">
-          {authLoading ? (
-            <div className="text-xs text-muted">Loading...</div>
-          ) : isAuthenticated && user ? (
-            <div className="min-w-0">
-              <p className="text-xs text-muted truncate" title={user.email ?? undefined}>
+      {/* User info — bottom-left */}
+      {!collapsed && isAuthenticated && user && (
+        <div className="px-3 py-3 shrink-0 min-w-0">
+          <div className="flex items-center gap-2.5 rounded-xl bg-background px-3 py-2.5 min-w-0">
+            {/* Avatar circle */}
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent/20 text-sm font-semibold text-accent">
+              {(username || user.nickname || user.name || "U").charAt(0).toUpperCase()}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium text-foreground truncate leading-tight" title={username || user.nickname || user.name || undefined}>
+                {username || user.nickname || user.name || "User"}
+              </p>
+              <p className="text-[11px] text-muted truncate leading-tight mt-0.5" title={user.email ?? undefined}>
                 {user.email}
               </p>
-              <button
-                type="button"
-                onClick={() => logout({ logoutParams: { returnTo: appUrl } })}
-                className="text-xs text-muted hover:text-foreground transition-colors cursor-pointer"
-              >
-                Logout
-              </button>
             </div>
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => loginWithRedirect({ authorizationParams: { screen_hint: "signup" } })}
-                className="text-xs text-muted hover:text-foreground transition-colors cursor-pointer"
-              >
-                Signup
-              </button>
-              <button
-                type="button"
-                onClick={() => loginWithRedirect()}
-                className="text-xs text-muted hover:text-foreground transition-colors cursor-pointer"
-              >
-                Login
-              </button>
-            </div>
-          )}
-          <div className="flex items-center gap-3 text-xs text-muted min-w-0 pt-2 border-t border-border">
-            <Link href="#" className="hover:text-foreground transition-colors whitespace-nowrap overflow-hidden">
-              Terms
-            </Link>
-            <Link href="#" className="hover:text-foreground transition-colors whitespace-nowrap overflow-hidden">
-              Privacy
-            </Link>
           </div>
         </div>
       )}

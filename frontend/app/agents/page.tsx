@@ -4,10 +4,12 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getAgents, getChallenges, startAgentRun } from "@/lib/api";
 import type { Agent as AgentType, Challenge } from "@/lib/types";
-import { Loader2, Play } from "lucide-react";
+import { Loader2, Play, LogIn, UserPlus } from "lucide-react";
+import { useAuth0 } from "@auth0/auth0-react";
 
 export default function AgentsPage() {
   const router = useRouter();
+  const { isAuthenticated, loginWithRedirect } = useAuth0();
   const [agents, setAgents] = useState<AgentType[]>([]);
   const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [loading, setLoading] = useState(true);
@@ -15,6 +17,7 @@ export default function AgentsPage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedAgentId, setSelectedAgentId] = useState<string>("");
   const [selectedChallengeId, setSelectedChallengeId] = useState<string>("");
+  const [showAuthOverlay, setShowAuthOverlay] = useState(false);
 
   useEffect(() => {
     let ignore = false;
@@ -42,6 +45,13 @@ export default function AgentsPage() {
 
   const handleRun = async () => {
     if (!selectedAgentId || !selectedChallengeId || running) return;
+
+    // Require login before starting a run
+    if (!isAuthenticated) {
+      setShowAuthOverlay(true);
+      return;
+    }
+
     setRunning(true);
     setError(null);
     try {
@@ -63,15 +73,41 @@ export default function AgentsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl px-6 py-10">
-      <div className="mb-8">
-        <h1 className="font-serif text-3xl font-semibold tracking-tight">
-          Agent Benchmark
-        </h1>
-        <p className="mt-2 text-sm text-muted">
-          Select an agent and a challenge, then run to watch the agent complete the task. Results appear on the leaderboard.
-        </p>
-      </div>
+    <div className="relative min-h-full">
+      {showAuthOverlay && (
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-background/80 backdrop-blur-md animate-in fade-in duration-200">
+          <h2 className="text-xl font-semibold tracking-tight mb-2">Sign in to run an agent</h2>
+          <p className="text-sm text-muted mb-6">Create an account to start agent runs</p>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => loginWithRedirect({ appState: { returnTo: "/agents" } })}
+              className="flex items-center gap-1.5 rounded-lg border border-border bg-card/80 backdrop-blur-sm px-3 py-2 text-xs font-medium text-muted hover:text-foreground hover:border-foreground/20 shadow-sm transition-colors cursor-pointer"
+            >
+              <LogIn className="h-3.5 w-3.5" />
+              Log in
+            </button>
+            <button
+              type="button"
+              onClick={() => loginWithRedirect({ authorizationParams: { screen_hint: "signup" }, appState: { returnTo: "/agents" } })}
+              className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-xs font-medium text-accent-foreground hover:bg-accent/90 shadow-sm transition-colors cursor-pointer"
+            >
+              <UserPlus className="h-3.5 w-3.5" />
+              Sign up
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="mx-auto max-w-2xl px-6 py-10">
+        <div className="mb-8">
+          <h1 className="font-serif text-3xl font-semibold tracking-tight">
+            Agent Benchmark
+          </h1>
+          <p className="mt-2 text-sm text-muted">
+            Select an agent and a challenge, then run to watch the agent complete the task. Results appear on the leaderboard.
+          </p>
+        </div>
 
       {error && (
         <div className="mb-6 rounded-xl border border-error/20 bg-error/5 p-4 text-sm text-error">
@@ -125,6 +161,7 @@ export default function AgentsPage() {
           )}
           {running ? "Starting…" : "Run"}
         </button>
+      </div>
       </div>
     </div>
   );
