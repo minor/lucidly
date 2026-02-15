@@ -41,7 +41,6 @@ from sessions import (
 )
 from evaluation import (
     compute_composite_score,
-    compute_composite_score_efficiency_only,
     compute_accuracy_function,
     compute_accuracy_text,
     run_function_tests_detailed,
@@ -404,12 +403,14 @@ async def calculate_score(req: CalculateScoreRequest):
     challenge = get_challenge_by_id(req.challenge_id)
     is_product = req.category == "product" or (challenge and getattr(challenge, "category", None) == "product")
     if is_product:
-        # Product/PRD: base scores from efficiency; composite = PRD dimension total (0–100) if we have prd_content
-        scores = compute_composite_score_efficiency_only(
+        # Product/PRD: base ELO scores with accuracy=0; composite overridden by PRD grading if available
+        scores = compute_composite_score(
+            accuracy=0.0,
             elapsed_sec=req.elapsed_sec,
             total_tokens=req.total_tokens,
             total_turns=req.total_turns,
             difficulty=req.difficulty,
+            total_cost=req.total_cost or 0.0,
         )
         if (req.prd_content or "").strip():
             # Grade PRD with LLM; total = (sum of four dimension scores 0–10 each) * 10 / 4 = sum*2.5 → 0–100
@@ -444,6 +445,7 @@ async def calculate_score(req: CalculateScoreRequest):
             total_tokens=req.total_tokens,
             total_turns=req.total_turns,
             difficulty=req.difficulty,
+            total_cost=req.total_cost or 0.0,
         )
 
     # Persist to Supabase if credentials exist and username/messages are provided
