@@ -111,3 +111,88 @@ export interface Agent {
   description: string;
   model: string;
 }
+
+// ---------------------------------------------------------------------------
+// Interview Mode types
+// ---------------------------------------------------------------------------
+
+export interface InterviewTestCase {
+  input: string;
+  expected_output: string;
+}
+
+export interface InterviewChallenge {
+  id: string;
+  title: string;
+  description: string;
+  category: string; // coding, frontend, system_design
+  starter_code: string | null;
+  solution_code: string | null;
+  test_cases: InterviewTestCase[] | null;
+  reference_html: string | null;
+  sort_order: number;
+}
+
+export interface InterviewConfig {
+  time_limit_minutes: number;
+  allowed_models: string[] | null;
+  max_token_budget: number | null;
+  show_test_results_to_candidate: boolean;
+}
+
+export interface InterviewRoom {
+  id: string;
+  created_by: string;
+  title: string;
+  company_name: string;
+  invite_code: string;
+  config: InterviewConfig;
+  challenges: InterviewChallenge[];
+  status: string; // pending, active, completed
+  created_at: number;
+}
+
+export interface InterviewTurn {
+  turn_number: number;
+  prompt_text: string;
+  response_text: string;
+  generated_code: string;
+  prompt_tokens: number;
+  response_tokens: number;
+  timestamp: number;
+}
+
+export interface InterviewSession {
+  id: string;
+  room_id: string;
+  challenge_id: string;
+  candidate_name: string;
+  status: string; // active, completed
+  started_at: number;
+  completed_at: number | null;
+  total_tokens: number;
+  total_turns: number;
+  accuracy: number;
+  composite_score: number;
+  turns: InterviewTurn[];
+  final_code: string;
+}
+
+export interface InterviewSessionReport {
+  session: InterviewSession;
+  challenge_title: string;
+  challenge_category: string;
+  elapsed_sec: number;
+  metrics: {
+    total_turns: number;
+    total_tokens: number;
+    accuracy: number;
+    composite_score: number;
+  };
+  turns: InterviewTurn[];
+}
+
+export interface InterviewReport {
+  room: InterviewRoom;
+  sessions: InterviewSessionReport[];
+}

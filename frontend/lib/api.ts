@@ -5,6 +5,11 @@ import type {
   Scores,
   LeaderboardEntry,
   Agent,
+  InterviewRoom,
+  InterviewChallenge,
+  InterviewConfig,
+  InterviewSession,
+  InterviewReport,
 } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -511,6 +516,286 @@ export async function streamPromptFeedback(
   } finally {
     reader.releaseLock();
   }
+}
+
+// ---- Interview Mode ----
+
+export async function createInterviewRoom(params: {
+  created_by: string;
+  title: string;
+  company_name?: string;
+  config?: Partial<InterviewConfig>;
+}): Promise<InterviewRoom> {
+  return fetchJSON<InterviewRoom>("/api/interviews", {
+    method: "POST",
+    body: JSON.stringify(params),
+  });
+}
+
+export async function listInterviewRooms(
+  created_by?: string
+): Promise<InterviewRoom[]> {
+  const query = created_by ? `?created_by=${encodeURIComponent(created_by)}` : "";
+  return fetchJSON<InterviewRoom[]>(`/api/interviews${query}`);
+}
+
+export async function getInterviewRoom(roomId: string): Promise<InterviewRoom> {
+  return fetchJSON<InterviewRoom>(`/api/interviews/${roomId}`);
+}
+
+export async function getInterviewRoomByInvite(
+  inviteCode: string
+): Promise<InterviewRoom> {
+  return fetchJSON<InterviewRoom>(`/api/interviews/invite/${inviteCode}`);
+}
+
+export async function updateInterviewRoom(
+  roomId: string,
+  params: { title?: string; company_name?: string; config?: InterviewConfig }
+): Promise<InterviewRoom> {
+  return fetchJSON<InterviewRoom>(`/api/interviews/${roomId}`, {
+    method: "PATCH",
+    body: JSON.stringify(params),
+  });
+}
+
+export async function addInterviewChallenge(
+  roomId: string,
+  params: {
+    title: string;
+    description: string;
+    category: string;
+    starter_code?: string;
+    solution_code?: string;
+    test_cases?: { input: string; expected_output: string }[];
+    reference_html?: string;
+  }
+): Promise<InterviewChallenge> {
+  return fetchJSON<InterviewChallenge>(
+    `/api/interviews/${roomId}/challenges`,
+    {
+      method: "POST",
+      body: JSON.stringify(params),
+    }
+  );
+}
+
+export async function removeInterviewChallenge(
+  roomId: string,
+  challengeId: string
+): Promise<void> {
+  await fetchJSON(`/api/interviews/${roomId}/challenges/${challengeId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function startInterviewSession(
+  roomId: string,
+  params: { candidate_name: string; challenge_id: string }
+): Promise<InterviewSession> {
+  return fetchJSON<InterviewSession>(
+    `/api/interviews/${roomId}/sessions`,
+    {
+      method: "POST",
+      body: JSON.stringify(params),
+    }
+  );
+}
+
+export async function getInterviewSession(
+  roomId: string,
+  sessionId: string
+): Promise<InterviewSession> {
+  return fetchJSON<InterviewSession>(
+    `/api/interviews/${roomId}/sessions/${sessionId}`
+  );
+}
+
+export async function listInterviewSessions(
+  roomId: string
+): Promise<InterviewSession[]> {
+  return fetchJSON<InterviewSession[]>(
+    `/api/interviews/${roomId}/sessions`
+  );
+}
+
+export async function completeInterviewSession(
+  roomId: string,
+  sessionId: string
+): Promise<{ session: InterviewSession; scores: Scores }> {
+  return fetchJSON(`/api/interviews/${roomId}/sessions/${sessionId}/complete`, {
+    method: "POST",
+  });
+}
+
+export async function getInterviewReport(
+  roomId: string
+): Promise<InterviewReport> {
+  return fetchJSON<InterviewReport>(`/api/interviews/${roomId}/report`);
+}
+
+/**
+ * Stream a prompt to an interview session. Uses SSE like the chat endpoint.
+ */
+export async function streamInterviewPrompt(
+  roomId: string,
+  sessionId: string,
+  prompt: string,
+  model?: string,
+  onChunk?: (chunk: string) => void,
+  onComplete?: (data: {
+    content: string;
+    generated_code: string;
+    input_tokens: number;
+    output_tokens: number;
+    cost: number;
+    total_tokens: number;
+    total_turns: number;
+  }) => void,
+  onError?: (error: string) => void,
+  signal?: AbortSignal
+): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(
+      `${API_BASE}/api/interviews/${roomId}/sessions/${sessionId}/prompt`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt, model }),
+        signal,
+      }
+    );
+  } catch (err: unknown) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      onError?.("AbortError");
+      return;
+    }
+    throw err;
+  }
+
+  if (!response.ok) {
+    const error = await response
+      .json()
+      .catch(() => ({ detail: response.statusText }));
+    onError?.(error.detail || "Failed to stream prompt");
+    return;
+  }
+
+  const reader = response.body?.getReader();
+  const decoder = new TextDecoder();
+
+  if (!reader) {
+    onError?.("No response body");
+    return;
+  }
+
+  let buffer = "";
+  let fullResponse = "";
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.type === "chunk") {
+              fullResponse += data.content;
+              onChunk?.(data.content);
+            } else if (data.type === "done") {
+              onComplete?.({
+                content: data.content || fullResponse,
+                generated_code: data.generated_code || "",
+                input_tokens: data.input_tokens || 0,
+                output_tokens: data.output_tokens || 0,
+                cost: data.cost || 0,
+                total_tokens: data.total_tokens || 0,
+                total_turns: data.total_turns || 0,
+              });
+            } else if (data.type === "error") {
+              onError?.(data.message || "Unknown error");
+              return;
+            }
+          } catch {
+            // Skip invalid JSON
+          }
+        }
+      }
+    }
+  } catch (err: unknown) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      onComplete?.({
+        content: fullResponse,
+        generated_code: "",
+        input_tokens: 0,
+        output_tokens: 0,
+        cost: 0,
+        total_tokens: 0,
+        total_turns: 0,
+      });
+      return;
+    }
+    throw err;
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+/**
+ * Subscribe to interview room observation events (SSE).
+ */
+export function subscribeInterviewObserver(
+  roomId: string,
+  onMessage: (event: Record<string, unknown>) => void,
+  signal?: AbortSignal
+): () => void {
+  const url = `${API_BASE}/api/interviews/${roomId}/observe`;
+  const controller = new AbortController();
+  if (signal) {
+    signal.addEventListener("abort", () => controller.abort());
+  }
+
+  const abort = () => controller.abort();
+
+  fetch(url, { signal: controller.signal })
+    .then((res) => {
+      if (!res.ok || !res.body) return;
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      const process = (): Promise<void> =>
+        reader.read().then(({ done, value }) => {
+          if (done) return;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+          for (const line of lines) {
+            if (line.startsWith("data: ")) {
+              try {
+                const data = JSON.parse(line.slice(6));
+                onMessage(data);
+              } catch {
+                // ignore parse errors
+              }
+            }
+          }
+          return process();
+        });
+      return process();
+    })
+    .catch((err) => {
+      if (err?.name === "AbortError") return;
+      console.warn("Interview observer stream error:", err);
+    });
+
+  return abort;
 }
 
 // ---- Vercel Sandbox (UI preview) ----
