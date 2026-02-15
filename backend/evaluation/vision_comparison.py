@@ -295,7 +295,18 @@ Overall match should be true if similarity_score >= 0.7."""
                 error_text = response.text
                 raise Exception(f"Claude Vision API error ({response.status_code}): {error_text}")
             
-            return response.json()
+            api_response = response.json()
+            
+            # Log the full Claude Vision API response
+            import json
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info("=" * 80)
+            logger.info("[Claude Vision] Full API Response:")
+            logger.info(json.dumps(api_response, indent=2))
+            logger.info("=" * 80)
+            
+            return api_response
     
     def _parse_vision_response(self, api_response: dict[str, Any]) -> VisionComparisonResult:
         """Parse Claude's response to extract comparison results."""
