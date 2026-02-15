@@ -1,4 +1,4 @@
-"""In-memory session management for Lucidly MVP."""
+"""In-memory session management for No Shot MVP."""
 
 import time
 import uuid

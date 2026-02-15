@@ -16,8 +16,8 @@ if (!domain || !clientId) {
 export function Auth0Provider({ children }: { children: ReactNode }) {
   return (
     <Auth0ProviderSDK
-      domain={domain}
-      clientId={clientId}
+      domain={domain!}
+      clientId={clientId!}
       authorizationParams={{
         redirect_uri: appUrl,
       }}

@@ -1,5 +1,5 @@
 """
-Modal agent runner: runs a single agent on a challenge by calling the Lucidly backend.
+Modal agent runner: runs a single agent on a challenge by calling the No Shot backend.
 Supports simple loop (claude-direct, openai-cot) and Claude Agent SDK (claude-sdk).
 Deploy: modal deploy app.py
 Run (for testing): modal run app.py --session-id <id> --challenge-id <id> --agent-id claude-direct

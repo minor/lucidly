@@ -1,21 +1,32 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   Zap,
   PlusCircle,
   Trophy,
   Bot,
   ChevronDown,
+  ClipboardList,
 } from "lucide-react";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth0 } from "@auth0/auth0-react";
 
-const NAV_ITEMS = [
+const MODES = [
+  { id: "arena", label: "Arena Mode", icon: Zap, href: "/play" },
+  { id: "interview", label: "Interview Mode", icon: ClipboardList, href: "/interview/create" },
+] as const;
+
+const ARENA_NAV = [
   { href: "/play", label: "New Challenge", icon: PlusCircle },
   { href: "/agents", label: "Agents", icon: Bot },
   { href: "/leaderboard", label: "Leaderboard", icon: Trophy },
+];
+
+const INTERVIEW_NAV = [
+  { href: "/interview/create", label: "Create Interview", icon: PlusCircle },
 ];
 
 const MIN_WIDTH = 64; // 16 * 4 = 64px (w-16)
@@ -27,6 +38,7 @@ const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const {
     isLoading: authLoading,
     isAuthenticated,
@@ -37,6 +49,7 @@ export function Sidebar() {
   const [width, setWidth] = useState(DEFAULT_WIDTH);
   const [isResizing, setIsResizing] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [modeOpen, setModeOpen] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
   const startXRef = useRef<number>(0);
   const startWidthRef = useRef<number>(0);
@@ -121,10 +134,16 @@ export function Sidebar() {
       {/* Brand */}
       <div className="flex items-center gap-2 border-b border-border px-4 py-4 shrink-0">
         <Link href="/" className="flex items-center gap-2 min-w-0">
-          <Zap className="h-5 w-5 text-accent shrink-0" />
+          <Image
+            src="/logo.svg"
+            alt="No Shot"
+            width={28}
+            height={28}
+            className="h-7 w-7 shrink-0"
+          />
           {!collapsed && (
             <span className="font-serif text-lg font-semibold tracking-tight whitespace-nowrap overflow-hidden">
-              Lucidly
+              No Shot
             </span>
           )}
         </Link>
@@ -142,41 +161,80 @@ export function Sidebar() {
       </div>
 
       {/* Mode selector */}
-      {!collapsed && (
-        <div className="px-4 py-3 border-b border-border shrink-0">
-          <button className="flex items-center gap-1.5 text-sm font-medium text-muted hover:text-foreground transition-colors w-full min-w-0 cursor-pointer">
-            <Zap className="h-3.5 w-3.5 shrink-0" />
-            <span className="whitespace-nowrap overflow-hidden min-w-0 flex-1">Arena Mode</span>
-            <ChevronDown className="h-3 w-3 shrink-0" />
-          </button>
-        </div>
-      )}
+      {!collapsed && (() => {
+        const isInterviewMode = pathname.startsWith("/interview");
+        const currentMode = isInterviewMode ? MODES[1] : MODES[0];
+        const CurrentIcon = currentMode.icon;
+        return (
+          <div className="px-4 py-3 border-b border-border shrink-0 relative">
+            <button
+              onClick={() => setModeOpen(!modeOpen)}
+              className="flex items-center gap-1.5 text-sm font-medium text-muted hover:text-foreground transition-colors w-full min-w-0 cursor-pointer"
+            >
+              <CurrentIcon className="h-3.5 w-3.5 shrink-0" />
+              <span className="whitespace-nowrap overflow-hidden min-w-0 flex-1 text-left">{currentMode.label}</span>
+              <ChevronDown className={`h-3 w-3 shrink-0 transition-transform ${modeOpen ? "rotate-180" : ""}`} />
+            </button>
+            {modeOpen && (
+              <div className="absolute left-3 right-3 top-full mt-1 rounded-lg border border-border bg-card shadow-lg z-20 overflow-hidden">
+                {MODES.map((mode) => {
+                  const Icon = mode.icon;
+                  const isActive = mode.id === currentMode.id;
+                  return (
+                    <button
+                      key={mode.id}
+                      onClick={() => {
+                        setModeOpen(false);
+                        if (!isActive) router.push(mode.href);
+                      }}
+                      className={`flex items-center gap-2 w-full px-3 py-2.5 text-sm transition-colors cursor-pointer ${
+                        isActive
+                          ? "bg-accent/10 text-foreground font-medium"
+                          : "text-muted hover:text-foreground hover:bg-muted/10"
+                      }`}
+                    >
+                      <Icon className="h-3.5 w-3.5 shrink-0" />
+                      {mode.label}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Navigation */}
-      <nav className="flex-1 px-2 py-3 space-y-1 min-w-0 overflow-y-auto">
-        {NAV_ITEMS.map((item) => {
-          const isActive = pathname.startsWith(item.href);
-          const Icon = item.icon;
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors min-w-0 ${
-                isActive
-                  ? "bg-accent-bg text-foreground font-medium"
-                  : "text-muted hover:text-foreground hover:bg-accent-bg/50"
-              }`}
-            >
-              <Icon className="h-4 w-4 shrink-0" />
-              {!collapsed && (
-                <span className="whitespace-nowrap overflow-hidden">
-                  {item.label}
-                </span>
-              )}
-            </Link>
-          );
-        })}
-      </nav>
+      {(() => {
+        const isInterviewMode = pathname.startsWith("/interview");
+        const navItems = isInterviewMode ? INTERVIEW_NAV : ARENA_NAV;
+        return (
+          <nav className="flex-1 px-2 py-3 space-y-1 min-w-0 overflow-y-auto">
+            {navItems.map((item) => {
+              const isActive = pathname === item.href || (item.href !== "/play" && pathname.startsWith(item.href));
+              const Icon = item.icon;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors min-w-0 ${
+                    isActive
+                      ? "bg-accent-bg text-foreground font-medium"
+                      : "text-muted hover:text-foreground hover:bg-accent-bg/50"
+                  }`}
+                >
+                  <Icon className="h-4 w-4 shrink-0" />
+                  {!collapsed && (
+                    <span className="whitespace-nowrap overflow-hidden">
+                      {item.label}
+                    </span>
+                  )}
+                </Link>
+              );
+            })}
+          </nav>
+        );
+      })()}
 
       {/* Auth */}
       {!collapsed && (

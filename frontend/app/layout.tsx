@@ -22,9 +22,12 @@ const lora = Lora({
 });
 
 export const metadata: Metadata = {
-  title: "Lucidly — Competitive AI Prompting",
+  title: "No Shot — Competitive AI Prompting",
   description:
     "The competitive platform that benchmarks and gamifies your ability to prompt AI to write code. Monkeytype for the AI era.",
+  icons: {
+    icon: "/logo.svg",
+  },
 };
 
 export default function RootLayout({
