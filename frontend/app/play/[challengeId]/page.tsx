@@ -191,11 +191,11 @@ export default function ChallengePage() {
     };
   }, [challengeId]);
 
-  // Timer for efficiency stats (freeze when pending)
+  // Timer for efficiency stats (freeze when pending or completed)
   useEffect(() => {
     const interval = setInterval(() => {
-      // Don't update timer when pending (frozen)
-      if (submitState !== "pending") {
+      // Don't update timer when pending or completed (frozen)
+      if (submitState === "idle") {
         setElapsed((Date.now() - startTimeRef.current) / 1000);
       }
     }, 1000);
@@ -1026,7 +1026,7 @@ export default function ChallengePage() {
                 onStop={handleStop}
                 loading={isStreaming}
                 placeholder="Ask anything..."
-                disabled={isStreaming || submitState === "pending"}
+                disabled={isStreaming || submitState === "pending" || submitState === "completed"}
               />
             </div>
           </div>
