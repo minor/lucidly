@@ -1,21 +1,73 @@
-## Setup Steps
+# No Shot
+
+**Master the art of prompting.** Like Leetcode, but for the age of AI.
+
+No Shot is a competitive learning platform that benchmarks and gamifies your ability to prompt AI models to write code. Solve challenges, climb leaderboards, and sharpen your prompting skills.
+
+🔗 **Live at [noshot-ai.vercel.app](https://noshot-ai.vercel.app/)**
+
+---
+
+## Features
+
+### ⚡ Arena Mode
+- **10 challenges** across 5 categories (UI, function, debug, data, system) and 3 difficulty levels
+- **Multi-model support** — GPT-5.2, GPT-5 Mini, GPT-5 Nano, Claude Opus 4.6, Claude Sonnet 4.5, Claude Haiku 4.5, Grok 4.1 Fast Reasoning, Grok Code Fast
+- **Streaming chat** — Real-time LLM responses with live code generation
+- **Live sandboxed preview** — UI challenges render in a Vercel Sandbox; function challenges run automated tests
+- **ELO-style scoring** (0–1000) — Composite score based on accuracy (70%), speed (15%), and cost efficiency (15%)
+- **Prompt feedback** — AI-generated tips to improve your prompting technique
+- **Leaderboards** — Per-challenge rankings with sortable metrics
+
+### 🤖 Agent Benchmarks
+- Run autonomous AI agents (Claude Agent SDK, OpenAI Assistant, and more) against any challenge
+- Watch agent thinking traces update live in the UI
+
+### 📋 Interview Mode
+- Create custom interview rooms with coding, frontend, and system design challenges
+- Share invite codes with candidates
+- Observe candidates solving challenges in real time
+- View detailed post-interview reports with turn-by-turn transcripts and metrics
+
+---
+
+## Tech Stack
+
+| Layer | Technologies |
+| --- | --- |
+| **Frontend** | Next.js 16, React 19, TypeScript, Tailwind CSS 4, Zustand, Auth0 |
+| **Backend** | Python 3.11+, FastAPI, Uvicorn, Pydantic |
+| **LLM Providers** | OpenAI, Anthropic, xAI (Grok) |
+| **Database** | Supabase (PostgreSQL) |
+| **Sandboxing** | Vercel Sandbox (UI), Modal (agents) |
+| **Testing** | Playwright (E2E) |
+
+---
+
+## Prerequisites
+
+- **[Bun](https://bun.sh)** (recommended) or Node.js 18+
+- **Python 3.11+**
+- **[uv](https://docs.astral.sh/uv/)** — Python package manager
+  ```bash
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  ```
+
+---
+
+## Getting Started
 
 ### 1. Install root dependencies
-From the root directory (`/`), install the root dependency:
+
+From the project root:
 
 ```bash
 bun install
 ```
 
-Or if you prefer npm:
-```bash
-npm install
-```
-
-This installs `concurrently` to run both the backend and frontend.
+This installs `concurrently` to run both servers with a single command.
 
 ### 2. Install frontend dependencies
-Navigate to the frontend directory and install dependencies:
 
 ```bash
 cd frontend
@@ -23,103 +75,146 @@ bun install
 ```
 
 ### 3. Install backend dependencies
-The backend uses Python with `uv`. From the backend directory:
 
 ```bash
 cd backend
 uv sync
 ```
 
-This installs Python dependencies (FastAPI, uvicorn, OpenAI, etc.).
+### 4. Configure API keys
 
-### 3.5. Configure API keys
-Create a `.env` file in the `backend` directory with your API keys:
-
-```bash
-cd backend
-touch .env
-```
-
-Add your Anthropic API key to the `.env` file:
+Create a `backend/.env` file with your LLM provider keys. **At minimum, you need one provider:**
 
 ```env
-ANTHROPIC_API_KEY=your_anthropic_api_key_here
+# ── Required (at least one) ────────────────────────────────────────
+
+# OpenAI (powers GPT models)
+OPENAI_API_KEY=sk-...
+# OPENAI_BASE_URL=https://api.openai.com/v1        # default; change for OpenRouter etc.
+
+# Anthropic (powers Claude models)
+ANTHROPIC_API_KEY=sk-ant-...
+
+# xAI (powers Grok models)
+XAI_API_KEY=xai-...
 ```
 
-You can get your Anthropic API key from: https://console.anthropic.com/
+**Where to get keys:**
+- OpenAI → [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+- Anthropic → [console.anthropic.com](https://console.anthropic.com/)
+- xAI → [console.x.ai](https://console.x.ai/)
 
-**Note:** If you prefer to use OpenRouter or another OpenAI-compatible API instead, you can set:
+<details>
+<summary><strong>Optional environment variables</strong></summary>
 
 ```env
-OPENAI_API_KEY=your_openrouter_key_here
-OPENAI_BASE_URL=https://openrouter.ai/api/v1
+# ── Database ───────────────────────────────────────────────────────
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_KEY=eyJ...
+
+# ── Auth ───────────────────────────────────────────────────────────
+# Set these in frontend/.env.local
+# NEXT_PUBLIC_AUTH0_DOMAIN=your-tenant.auth0.com
+# NEXT_PUBLIC_AUTH0_CLIENT_ID=...
+
+# ── Agent benchmarks ──────────────────────────────────────────────
+USE_INPROCESS_AGENT=true               # default; runs agent inside backend process
+AGENT_INTERNAL_SECRET=                  # only needed for Modal-based agents
+BACKEND_PUBLIC_URL=http://localhost:8000
+
+# ── Modal (cloud agent execution) ─────────────────────────────────
+# MODAL_TOKEN_ID=...
+# MODAL_TOKEN_SECRET=...
+
+# ── Browserbase / Stagehand (agent web scraping) ──────────────────
+# BROWSERBASE_API_KEY=...
+# BROWSERBASE_PROJECT_ID=...
+
+# ── Server ────────────────────────────────────────────────────────
+# HOST=0.0.0.0
+# PORT=8000
+# CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
 ```
 
-### 3.6. Agent benchmark (optional)
-To run **agent benchmark runs** (Agents page: select agent + challenge, Run):
+</details>
 
-- **In-process (default, no Modal):** Use `USE_INPROCESS_AGENT=true` (default). The agent runs inside the backend process. Open **Agents**, pick an agent and challenge, click **Run**, then watch the same challenge UI update live. No `AGENT_INTERNAL_SECRET` needed for in-process.
+### 5. Start the dev server
 
-- **With Modal (cloud):** To run agents in Modal instead:
-  1. Run `modal token` (or set `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` in env).
-  2. Deploy: `cd modal_agent && modal deploy app.py`.
-  3. In `backend/.env`: set `USE_INPROCESS_AGENT=false`, `BACKEND_PUBLIC_URL=<url-reachable-from-Modal>` (e.g. ngrok URL for local backend), and `AGENT_INTERNAL_SECRET=<same-secret>`.
-
-**Agent types:** The app supports several agents. Two use **real SDKs**:
-- **Claude Agent SDK** (`claude-sdk`): Uses the `claude-agent-sdk` package with a custom `submit_prompt` tool that calls your backend. Set `ANTHROPIC_API_KEY` for the SDK to call Claude. For challenges with a reference URL (e.g. “Build this UI: Landing Page” with openai.com), you can optionally enable **view_reference_page**: the agent can open the URL in a browser and scrape structure/content (via [Browserbase Stagehand](https://www.browserbase.com/stagehand)). Set `BROWSERBASE_API_KEY` and `BROWSERBASE_PROJECT_ID` in `backend/.env` to enable it; the agent will then get a `view_reference_page` tool for those challenges.
-- **OpenAI Assistant** (`openai-assistant`): Uses the OpenAI Assistants API with a `submit_prompt` function tool. Uses `OPENAI_API_KEY` and `OPENAI_BASE_URL`.
-
-See `backend/.env.example` for all optional variables (OpenAI, Anthropic, agent secret, Modal, Browserbase).
-
-**Agent trace logs (in-process):** When running in-process, agent steps are logged to the **backend terminal** (the `[server]` process). You can also tail the debug log: `tail -f .cursor/debug.log` from the project root to see `agent_trace` and session events (NDJSON, one line per event).
-
-### 4. Start the development server
-From the root directory, run:
+From the project root:
 
 ```bash
 bun run dev
 ```
 
-Or:
-```bash
-npm run dev
+This starts both servers concurrently:
+
+| Service | URL |
+| --- | --- |
+| Backend (FastAPI) | `http://localhost:8000` |
+| Frontend (Next.js) | `http://localhost:3000` |
+
+---
+
+## Project Structure
+
+```
+lucidly/
+├── frontend/               # Next.js app (see frontend/README.md)
+│   ├── app/                # App Router pages & API routes
+│   ├── components/         # Shared React components
+│   ├── lib/                # API client, types, utilities
+│   └── hooks/              # Custom React hooks
+├── backend/                # FastAPI server
+│   ├── main.py             # App entry point & API routes
+│   ├── config.py           # Settings & model pricing
+│   ├── llm.py              # LLM client (OpenAI-compatible + Anthropic + xAI)
+│   ├── challenges.py       # Challenge loader
+│   ├── challenges.json     # Challenge definitions
+│   ├── sessions.py         # Session & leaderboard management
+│   ├── agents.py           # Agent definitions
+│   ├── agent_runner.py     # Agent execution loop
+│   ├── sandbox.py          # Code sandbox execution
+│   ├── evaluation/         # Scoring engine, test runner, evaluator
+│   └── interviews/         # Interview mode (rooms, sessions, realtime)
+├── modal_agent/            # Modal cloud agent deployment
+│   └── app.py
+└── package.json            # Root scripts (concurrently)
 ```
 
-This starts:
-- Backend server on `http://0.0.0.0:8000` (FastAPI/uvicorn)
-- Frontend server (Next.js) on `http://localhost:3000` (default)
+---
 
-### Prerequisites
-- Bun (for frontend and root scripts)
-- Python 3.11+ (for backend)
-- `uv` (Python package manager) — install with: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+## Agent Benchmarks (Optional)
 
-If you don't have `uv` installed, install it first, then run `uv sync` in the backend directory.
+The **Agents** page lets you run autonomous AI agents against challenges and watch them work.
 
-The server should be running after these steps.
+### In-process (default)
 
-```shellscript
-bun install
-```
+No extra setup needed. The agent runs inside the backend process. Just open **Agents**, pick an agent and challenge, and click **Run**.
 
-```shellscript
-npm install
-```
+### With Modal (cloud)
 
-```shellscript
-cd frontend
-bun install
-```
+For cloud-based agent execution:
 
-```shellscript
-cd backend
-uv sync
-```
+1. Authenticate: `modal token set`
+2. Deploy: `cd modal_agent && modal deploy app.py`
+3. In `backend/.env`:
+   ```env
+   USE_INPROCESS_AGENT=false
+   BACKEND_PUBLIC_URL=<url-reachable-from-Modal>   # e.g. ngrok URL
+   AGENT_INTERNAL_SECRET=<shared-secret>
+   ```
 
-```shellscript
-bun run dev
-```
+### Supported agents
 
-```shellscript
-npm run dev
-```
+| Agent | SDK | Required Key |
+| --- | --- | --- |
+| Claude Agent SDK | `claude-agent-sdk` | `ANTHROPIC_API_KEY` |
+| OpenAI Assistant | OpenAI Assistants API | `OPENAI_API_KEY` |
+
+> **Tip:** Tail the debug log for agent traces: `tail -f .cursor/debug.log`
+
+---
+
+## License
+
+Private — all rights reserved.
