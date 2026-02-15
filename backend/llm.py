@@ -15,6 +15,14 @@ CODING_SYSTEM_PROMPT = (
     "Before writing code, you should briefly think step-by-step about how to solve the problem."
 )
 
+REPLICATE_UI_SYSTEM_PROMPT = (
+    "You are an expert at replicating landing pages and UIs from a reference screenshot. "
+    "You will receive an image of a reference page. Your job is to produce one complete HTML document (with inline CSS and minimal JS if needed) that recreates it as closely as possible. "
+    "Match: layout and structure, typography (font families and sizes), colors (backgrounds, text, buttons, links), spacing, borders, and all visible copy. "
+    "Output only the HTML inside a single markdown code block (e.g. ```html then newline then your code then ```). "
+    "Do not add placeholder content—use the exact text and structure you see. One complete pass; no explanations outside the code block."
+)
+
 
 @dataclass
 class LLMResponse:
@@ -69,15 +77,18 @@ class LLM:
         max_tokens: int | None = None,
         temperature: float | None = None,
         conversation_history: list[dict] | None = None,
+        image_data_url: str | None = None,
     ) -> LLMResponse:
         """
         Non-streaming generation. Returns the full response with token counts
-        and extracted code blocks.
+        and extracted code blocks. If image_data_url is provided (e.g. reference screenshot),
+        the message includes the image for vision models.
         """
         messages = self._build_messages(
             prompt,
             system_prompt=system_prompt,
             conversation_history=conversation_history,
+            image_data_url=image_data_url,
         )
 
         response = await self.client.chat.completions.create(
@@ -108,15 +119,17 @@ class LLM:
         max_tokens: int | None = None,
         temperature: float | None = None,
         conversation_history: list[dict] | None = None,
+        image_data_url: str | None = None,
     ) -> AsyncGenerator[str, None]:
         """
         Streaming generation. Yields text chunks as they arrive.
-        Useful for WebSocket-based real-time updates.
+        If image_data_url is provided, the message includes the image for vision models.
         """
         messages = self._build_messages(
             prompt,
             system_prompt=system_prompt,
             conversation_history=conversation_history,
+            image_data_url=image_data_url,
         )
 
         stream = await self.client.chat.completions.create(
@@ -137,8 +150,9 @@ class LLM:
         *,
         system_prompt: str | None = None,
         conversation_history: list[dict] | None = None,
+        image_data_url: str | None = None,
     ) -> list[dict]:
-        """Build the messages array for the API call."""
+        """Build the messages array for the API call. Supports vision via image_data_url (data URL)."""
         messages: list[dict] = [
             {"role": "system", "content": system_prompt or self.system_prompt}
         ]
@@ -146,7 +160,14 @@ class LLM:
         if conversation_history:
             messages.extend(conversation_history)
 
-        messages.append({"role": "user", "content": prompt})
+        if image_data_url:
+            user_content: list[dict] = [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": image_data_url}},
+            ]
+            messages.append({"role": "user", "content": user_content})
+        else:
+            messages.append({"role": "user", "content": prompt})
         return messages
 
     @staticmethod
