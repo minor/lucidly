@@ -10,10 +10,13 @@ import {
   Bot,
   ChevronDown,
   ClipboardList,
+  LogOut,
 } from "lucide-react";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth0 } from "@auth0/auth0-react";
 import { useUsername } from "@/hooks/useUsername";
+
+const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
 const MODES = [
   { id: "arena", label: "Arena Mode", icon: Zap, href: "/play" },
@@ -39,13 +42,15 @@ const COLLAPSED_WIDTH = 64;
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const { isAuthenticated, user } = useAuth0();
+  const { isAuthenticated, user, logout } = useAuth0();
   const { username } = useUsername(user);
   const [width, setWidth] = useState(DEFAULT_WIDTH);
   const [isResizing, setIsResizing] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [modeOpen, setModeOpen] = useState(false);
+  const [logoutOpen, setLogoutOpen] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
+  const userBlockRef = useRef<HTMLDivElement>(null);
   const startXRef = useRef<number>(0);
   const startWidthRef = useRef<number>(0);
 
@@ -102,6 +107,17 @@ export function Sidebar() {
       };
     }
   }, [isResizing, handleMouseMove, handleMouseUp]);
+
+  useEffect(() => {
+    if (!logoutOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (userBlockRef.current && !userBlockRef.current.contains(e.target as Node)) {
+        setLogoutOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [logoutOpen]);
 
   const toggleCollapse = () => {
     if (isCollapsed) {
@@ -229,11 +245,27 @@ export function Sidebar() {
         );
       })()}
 
-      {/* User info — bottom-left */}
+      {/* User info — bottom-left (click to show Log out) */}
       {!collapsed && isAuthenticated && user && (
-        <div className="px-3 py-3 shrink-0 min-w-0">
-          <div className="flex items-center gap-2.5 rounded-xl bg-background px-3 py-2.5 min-w-0">
-            {/* Avatar circle */}
+        <div className="px-3 py-3 shrink-0 min-w-0 relative" ref={userBlockRef}>
+          {logoutOpen && (
+            <button
+              type="button"
+              onClick={() => {
+                logout({ logoutParams: { returnTo: appUrl } });
+                setLogoutOpen(false);
+              }}
+              className="flex items-center gap-1.5 rounded-lg border border-border bg-card shadow-lg w-full justify-center px-3 py-2 text-xs font-medium text-muted hover:text-foreground hover:border-foreground/20 transition-colors cursor-pointer mb-1.5"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+              Log out
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setLogoutOpen((o) => !o)}
+            className="flex items-center gap-2.5 rounded-xl bg-background px-3 py-2.5 min-w-0 w-full text-left hover:bg-muted/30 transition-colors cursor-pointer"
+          >
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent/20 text-sm font-semibold text-accent">
               {(username || user.nickname || user.name || "U").charAt(0).toUpperCase()}
             </div>
@@ -245,7 +277,7 @@ export function Sidebar() {
                 {user.email}
               </p>
             </div>
-          </div>
+          </button>
         </div>
       )}
       </aside>
