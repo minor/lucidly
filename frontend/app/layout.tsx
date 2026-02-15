@@ -31,7 +31,7 @@ const dmSans = DM_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "No Shot — Competitive AI Prompting",
+  title: "NoShot (You're Still LeetCoding)",
   description:
     "The competitive platform that benchmarks and gamifies your ability to prompt AI to write code. Monkeytype for the AI era.",
   icons: {

@@ -21,13 +21,13 @@ export default function Home() {
         <div className="flex items-center gap-2">
           <Image
             src="/logo.svg"
-            alt="No Shot"
+            alt="NoShot"
             width={28}
             height={28}
             className="h-7 w-7"
           />
           <span className="font-heading text-lg font-semibold tracking-tight">
-            No Shot
+            NoShot
           </span>
         </div>
         <button

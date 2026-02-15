@@ -84,13 +84,13 @@ export function UsernameModal({
       <div className="flex items-center gap-1.5 mb-4">
         <Image
           src="/logo.svg"
-          alt="No Shot"
+          alt="NoShot"
           width={64}
           height={64}
           className="h-16 w-16"
         />
         <span className="font-serif text-5xl font-semibold tracking-tight">
-          No Shot
+          NoShot
         </span>
       </div>
 
