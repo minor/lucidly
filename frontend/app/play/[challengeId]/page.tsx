@@ -502,27 +502,27 @@ export default function ChallengePage() {
         accuracy = codeResult.returncode === 0 ? 1.0 : 0.0;
       }
       
-      // Update frozen stats with calculated values
+      // Update frozen stats (product has no accuracy/score — composite = efficiency only)
       frozenStatsRef.current = {
         elapsed: currentElapsed,
         turns: currentTurns,
         tokens: currentTokens,
-        accuracy: isUiChallenge ? accuracy : (testResults ? testResults.passed_count / testResults.total_count : undefined),
-        score: isUiChallenge ? evaluatedUiScore : (testResults ? (testResults.passed_count / testResults.total_count) * 100 : undefined),
+        accuracy: isProductChallenge ? undefined : (isUiChallenge ? accuracy : (testResults ? testResults.passed_count / testResults.total_count : undefined)),
+        score: isProductChallenge ? undefined : (isUiChallenge ? evaluatedUiScore : (testResults ? (testResults.passed_count / testResults.total_count) * 100 : undefined)),
         cost: currentCost,
       };
       
-      // Calculate composite score using backend API with difficulty
+      // Calculate composite score (product = PRD dimension total 0–100 when prd_content sent)
       const scores = await calculateScore({
         challenge_id: challengeId,
-        accuracy,
+        accuracy: isProductChallenge ? 0 : accuracy,
         elapsed_sec: currentElapsed,
         total_tokens: currentTokens,
         total_turns: currentTurns,
         difficulty: challenge?.difficulty || "medium",
         model: selectedModel,
-        // Don't save yet - wait for user to enter name
-        messages: undefined,
+        ...(challenge?.category ? { category: challenge.category } : {}),
+        ...(isProductChallenge && prdContent.trim() ? { prd_content: prdContent, messages } : {}),
         total_cost: currentCost,
       });
       
@@ -599,12 +599,14 @@ export default function ChallengePage() {
       // Since accuracy/etc didn't change, scores will be identical but saved
       await calculateScore({
         challenge_id: challengeId,
-        accuracy: frozenStatsRef.current.accuracy || 0,
+        accuracy: isProductChallenge ? 0 : (frozenStatsRef.current.accuracy ?? 0),
         elapsed_sec: frozenStatsRef.current.elapsed,
         total_tokens: frozenStatsRef.current.tokens,
         total_turns: frozenStatsRef.current.turns,
         difficulty: challenge?.difficulty || "medium",
         model: selectedModel,
+        ...(challenge?.category ? { category: challenge.category } : {}),
+        ...(isProductChallenge && prdContent.trim() ? { prd_content: prdContent } : {}),
         username: playerName,
         messages: isProductChallenge ? [...messages, { role: "assistant" as const, content: `## PRD\n\n${prdContent}` }] : messages,
         total_cost: frozenStatsRef.current.cost,
@@ -640,6 +642,7 @@ export default function ChallengePage() {
           challenge_category: challenge.category || "",
           challenge_difficulty: challenge.difficulty || "",
           reference_html: referenceHtml || "",
+          ...(isProductChallenge && prdContent.trim() ? { prd_content: prdContent } : {}),
           accuracy: frozenStatsRef.current.accuracy || 0,
           total_turns: frozenStatsRef.current.turns,
           total_tokens: frozenStatsRef.current.tokens,
@@ -806,7 +809,9 @@ export default function ChallengePage() {
 
             <div className="mb-10 flex justify-center">
               <ScoreBar 
-                accuracy={finalScores.accuracy_score / 1000} // Convert back to 0-1 for display
+                accuracy={isProductChallenge ? undefined : finalScores.accuracy_score / 1000}
+                score={isProductChallenge ? undefined : (frozenStatsRef.current?.score)}
+                compositeScore={finalScores.composite_score}
                 turns={frozenStatsRef.current?.turns || 0}
                 tokens={frozenStatsRef.current?.tokens || 0}
                 elapsedSec={frozenStatsRef.current?.elapsed || 0}
@@ -849,7 +854,7 @@ export default function ChallengePage() {
                   className="flex-1 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground hover:bg-accent/90 transition-colors cursor-pointer flex items-center justify-center gap-1.5"
                 >
                   <Lightbulb className="h-3.5 w-3.5" />
-                  View Prompt Feedback
+                  {isProductChallenge ? "View PRD Feedback" : "View Prompt Feedback"}
                 </button>
               </div>
               <div className="flex gap-2 mt-2">
@@ -1510,10 +1515,12 @@ export default function ChallengePage() {
                         <Lightbulb className="h-6 w-6 text-accent" />
                       </div>
                       <h3 className="text-lg font-medium text-foreground mb-2">
-                        Prompt Feedback
+                        {isProductChallenge ? "PRD Feedback" : "Prompt Feedback"}
                       </h3>
                       <p className="text-sm text-muted">
-                        Submit your solution to get AI-powered feedback on your prompting strategy.
+                        {isProductChallenge
+                          ? "Submit your PRD to get AI-powered feedback on feasibility, expertise, clarity, and alignment with discovery."
+                          : "Submit your solution to get AI-powered feedback on your prompting strategy."}
                       </p>
                     </div>
                   </div>

@@ -41,8 +41,7 @@ export default function Home() {
           <span className="highlight font-italic">prompting</span>
         </h1>
         <p className="mt-4 text-base text-muted max-w-md mx-auto leading-relaxed">
-          The competitive platform that benchmarks your ability to direct AI.
-          Like monkeytype, but for the age of AI.
+          Like Leetcode, but for the age of AI.
         </p>
       </div>
 

@@ -41,6 +41,7 @@ from sessions import (
 )
 from evaluation import (
     compute_composite_score,
+    compute_composite_score_efficiency_only,
     compute_accuracy_function,
     compute_accuracy_text,
     run_function_tests_detailed,
@@ -147,9 +148,10 @@ class CalculateScoreRequest(BaseModel):
     total_turns: int
     difficulty: str = "medium"
     model: str = "unknown"
-    # Optional fields for persistence
-    username: str | None = None
+    category: str | None = None  # e.g. "product" — backend uses this to pick scoring formula
+    prd_content: str | None = None  # for product: PRD text to grade via LLM; score = sum(dimension scores)*10/4
     messages: list[dict] | None = None
+    username: str | None = None
     total_cost: float | None = 0.0
 
 # ---------------------------------------------------------------------------
@@ -395,21 +397,56 @@ async def leaderboard(limit: int = 50, category: str | None = None, challenge_id
 @app.post("/api/calculate-score")
 async def calculate_score(req: CalculateScoreRequest):
     """Calculate composite score from challenge stats and persist to DB."""
-    scores = compute_composite_score(
-        accuracy=req.accuracy,
-        elapsed_sec=req.elapsed_sec,
-        total_tokens=req.total_tokens,
-        total_turns=req.total_turns,
-        difficulty=req.difficulty,
-    )
-    
-    
+    challenge = get_challenge_by_id(req.challenge_id)
+    is_product = req.category == "product" or (challenge and getattr(challenge, "category", None) == "product")
+    if is_product:
+        # Product/PRD: base scores from efficiency; composite = PRD dimension total (0–100) if we have prd_content
+        scores = compute_composite_score_efficiency_only(
+            elapsed_sec=req.elapsed_sec,
+            total_tokens=req.total_tokens,
+            total_turns=req.total_turns,
+            difficulty=req.difficulty,
+        )
+        if (req.prd_content or "").strip():
+            # Grade PRD with LLM; total = (sum of four dimension scores 0–10 each) * 10 / 4 = sum*2.5 → 0–100
+            try:
+                prd_req = PromptFeedbackRequest(
+                    messages=[ChatMessage(role=m.get("role", "user"), content=m.get("content", "")) for m in (req.messages or [])],
+                    challenge_id=req.challenge_id,
+                    challenge_description=getattr(challenge, "description", "") or req.challenge_id,
+                    challenge_category="product",
+                    challenge_difficulty=req.difficulty,
+                    prd_content=req.prd_content or "",
+                    total_turns=req.total_turns,
+                    total_tokens=req.total_tokens,
+                    elapsed_sec=req.elapsed_sec,
+                )
+                prompt = _build_prd_feedback_prompt(prd_req)
+                feedback_llm = LLM(
+                    base_url=settings.openai_base_url,
+                    api_key=settings.openai_api_key,
+                    model=settings.default_model,
+                    system_prompt=PROMPT_FEEDBACK_PRD_SYSTEM_PROMPT,
+                )
+                llm_response = await feedback_llm.generate(prompt, temperature=0.4)
+                _, total_100 = _parse_prd_section_scores(llm_response.response_text)
+                scores["composite_score"] = min(100, max(0, total_100))
+            except Exception as e:
+                logger.warning("PRD grading failed, using efficiency score: %s", e)
+    else:
+        scores = compute_composite_score(
+            accuracy=req.accuracy,
+            elapsed_sec=req.elapsed_sec,
+            total_tokens=req.total_tokens,
+            total_turns=req.total_turns,
+            difficulty=req.difficulty,
+        )
+
     # Persist to Supabase if credentials exist and username/messages are provided
     if req.username and req.messages:
         try:
             from database import save_challenge_session
-            
-            challenge = get_challenge_by_id(req.challenge_id)
+
             if challenge:
                  db_session_id = await save_challenge_session(
                     challenge_id=req.challenge_id,
@@ -1197,6 +1234,7 @@ class PromptFeedbackRequest(BaseModel):
     challenge_category: str = ""
     challenge_difficulty: str = ""
     reference_html: str = ""  # Original HTML the user was trying to recreate
+    prd_content: str | None = None  # For product challenges: the submitted PRD text
     accuracy: float = 0.0
     total_turns: int = 0
     total_tokens: int = 0
@@ -1210,9 +1248,106 @@ PROMPT_FEEDBACK_SYSTEM_PROMPT = (
     "intelligence — don't over-explain obvious things. Quote the user's actual prompts when relevant."
 )
 
+PROMPT_FEEDBACK_PRD_SYSTEM_PROMPT = (
+    "You are a concise, supportive product and PRD reviewer. You evaluate Product Requirements "
+    "Documents along clear dimensions (feasibility, expertise, clarity, etc.) and give direct, "
+    "actionable feedback. Be warm but specific. Quote the PRD when relevant. No letter grades — "
+    "use dimension labels and short narrative instead."
+)
+
+
+def _build_prd_feedback_prompt(req: PromptFeedbackRequest) -> str:
+    """Build the analysis prompt for product/PRD challenges: grade PRD on feasibility, expertise, etc."""
+    prd_text = (req.prd_content or "")[:8000]
+    if len(req.prd_content or "") > 8000:
+        prd_text += "\n\n... (truncated)"
+
+    conversation_text = ""
+    if req.messages:
+        conversation_text = "\n\n".join(
+            f"**{msg.role.upper()}:** {msg.content[:2000]}{'...' if len(msg.content) > 2000 else ''}"
+            for msg in req.messages
+        )
+    else:
+        conversation_text = "(No discovery conversation provided.)"
+
+    return f"""Evaluate this Product Requirements Document (PRD) and the discovery conversation that preceded it.
+
+## Challenge Context
+- **Category:** {req.challenge_category}
+- **Difficulty:** {req.challenge_difficulty}
+- **Description:** {req.challenge_description}
+
+## Stats
+- **Turns:** {req.total_turns} · **Tokens:** {req.total_tokens:,} · **Time:** {req.elapsed_sec:.0f}s
+
+## Discovery Conversation (Part 1)
+The user chatted with a stakeholder (e.g. CRO) to gather requirements before writing the PRD.
+
+{conversation_text}
+
+## Submitted PRD (Part 2)
+
+{prd_text}
+
+---
+
+Reply in **markdown**. For each dimension, give a score 0–10 in parentheses in the heading, then one sentence. Use ONLY these section headers (with score in the heading):
+
+### Summary
+(No score here — one sentence only.)
+
+### Feasibility (N)
+(One sentence. N = 0–10.)
+
+### Expertise (N)
+(One sentence. N = 0–10.)
+
+### Clarity & Actionability (N)
+(One sentence. N = 0–10.)
+
+### Alignment with Discovery (N)
+(One sentence. N = 0–10.)
+
+### One improvement
+(No score — one sentence.)
+
+Total score = (sum of the four dimension scores) × 10 ÷ 4, so total is out of 100. Use strict 0–10 for each.
+"""
+
+
+def _parse_prd_section_scores(text: str) -> tuple[list[tuple[str, int]], int]:
+    """Parse ### Dimension (N) lines; total = sum × 10 ÷ 4 (0–100)."""
+    pattern = re.compile(r"^###\s+(Feasibility|Expertise|Clarity\s*&\s*Actionability|Alignment with Discovery)\s*\((\d+)\)", re.IGNORECASE | re.MULTILINE)
+    matches = pattern.findall(text)
+    scores: list[tuple[str, int]] = []
+    for name, num_str in matches:
+        n = min(10, max(0, int(num_str)))
+        scores.append((name.strip(), n))
+    total_raw = sum(s for _, s in scores)
+    # Total = (sum of four scores) × 10 ÷ 4 → 0–100
+    total_100 = round(total_raw * 10 / 4) if scores else 0
+    total_100 = min(100, max(0, total_100))
+    return scores, total_100
+
+
+def _append_prd_score_block(feedback_text: str) -> str:
+    """Parse dimension scores from PRD feedback and append a 'PRD Score: X/100' block."""
+    scores, total_100 = _parse_prd_section_scores(feedback_text)
+    if not scores:
+        return feedback_text
+    lines = ["\n\n---\n\n### PRD Score: **{} / 100**\n".format(total_100)]
+    for name, score in scores:
+        lines.append("- {}: {}/10\n".format(name, score))
+    lines.append("\n(Sum of four dimensions × 10 ÷ 4 = total out of 100.)")
+    return feedback_text + "".join(lines)
+
 
 def _build_feedback_analysis_prompt(req: PromptFeedbackRequest) -> str:
-    """Build the analysis prompt that evaluates the user's prompting strategy."""
+    """Build the analysis prompt that evaluates the user's prompting strategy (coding) or PRD (product)."""
+    if req.challenge_category == "product" and (req.prd_content or "").strip():
+        return _build_prd_feedback_prompt(req)
+
     user_prompts = []
     for i, msg in enumerate(req.messages):
         if msg.role == "user":
@@ -1239,8 +1374,7 @@ The user was shown this HTML and asked to recreate it by prompting an AI:
 """
         convergence_section = """
 ### Convergence
-Did the prompts move the output closer to the reference over successive turns? List the key elements from the reference that the user described well, and list which ones they missed (just name them — no need to explain what they are). One sentence on the overall trajectory.
-"""
+One sentence: did they get closer to the reference? Name 1–2 things they got right and 1–2 they missed."""
 
     return f"""Analyze this prompt engineering session. Be encouraging but concise — say each thing once.
 
@@ -1260,50 +1394,36 @@ Did the prompts move the output closer to the reference over successive turns? L
 
 ---
 
-Write feedback in **markdown**. Follow these rules strictly:
-- **No letter grades or numeric scores.** Do not grade the user.
-- **Say each point exactly once.** If you mention something in the summary, don't repeat it in a later section.
-- **Don't over-explain obvious UI elements.** If listing missing features, just name them — the user knows what a navbar is.
-- **Be direct.** One point per bullet. No filler phrases like "which matches a tiny slice of" or "it's worth noting that."
-
-Use these sections and ONLY these sections:
+Reply in **markdown**. Exactly one sentence per section. No letter grades. Use ONLY these sections:
 
 ### Summary
-2-3 sentences. What went well and what the main opportunity is. This is the only place for high-level observations — later sections go deeper, not wider.
 {convergence_section}
 ### Strengths & Gaps
-One unified section. Bullet the specific things the user did effectively (quote their prompts), then bullet what was missing or vague. Don't re-list anything from the summary — go into new detail here.
-
-### Sharpest Improvement
-The single highest-leverage change that would have made the biggest difference in this session. Be specific — reference an actual prompt and show what a better version would look like. Keep it to 2-3 sentences.
-
-### Prompt Templates to Try
-End with 2-3 **concrete prompt formats/wrappers** the user can copy-paste and adapt for future challenges. These should be reusable structures, not advice. Format them as fenced code blocks. For example:
-
-```
-Build [component] with: layout: [describe], colors: [list], typography: [font/sizes], content: [exact text], interactions: [list behaviors]
-```
-
-Each template should address a gap you identified in this session.
-
-Keep it short. The whole response should be readable in under 60 seconds."""
+### One improvement
+### One template
+(One prompt format in a fenced code block.)"""
 
 
 @app.post("/api/prompt-feedback")
 async def prompt_feedback(req: PromptFeedbackRequest):
     """
-    Stream AI-powered feedback on the user's prompt engineering.
+    Stream AI-powered feedback on the user's prompt engineering (coding) or PRD (product).
     Uses SSE to stream the analysis as it's generated.
     """
-    if not req.messages:
-        raise HTTPException(status_code=400, detail="No messages to analyze")
+    if req.challenge_category == "product":
+        if not (req.prd_content or "").strip():
+            raise HTTPException(status_code=400, detail="No PRD content to analyze")
+    else:
+        if not req.messages:
+            raise HTTPException(status_code=400, detail="No messages to analyze")
+        user_messages = [m for m in req.messages if m.role == "user"]
+        if not user_messages:
+            raise HTTPException(status_code=400, detail="No user prompts to analyze")
 
-    user_messages = [m for m in req.messages if m.role == "user"]
-    if not user_messages:
-        raise HTTPException(status_code=400, detail="No user prompts to analyze")
+    is_product_prd = req.challenge_category == "product" and (req.prd_content or "").strip()
 
     analysis_prompt = _build_feedback_analysis_prompt(req)
-
+    system_prompt = PROMPT_FEEDBACK_PRD_SYSTEM_PROMPT if is_product_prd else PROMPT_FEEDBACK_SYSTEM_PROMPT
     db_session_id = req.db_session_id
 
     async def generate():
@@ -1312,7 +1432,7 @@ async def prompt_feedback(req: PromptFeedbackRequest):
                 base_url=settings.openai_base_url,
                 api_key=settings.openai_api_key,
                 model=settings.default_model,
-                system_prompt=PROMPT_FEEDBACK_SYSTEM_PROMPT,
+                system_prompt=system_prompt,
             )
 
             full_response = ""
@@ -1322,6 +1442,10 @@ async def prompt_feedback(req: PromptFeedbackRequest):
             ):
                 full_response += chunk
                 yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
+
+            # For PRD feedback, parse section scores and append total out of 100
+            if is_product_prd:
+                full_response = _append_prd_score_block(full_response)
 
             yield f"data: {json.dumps({'type': 'done', 'content': full_response})}\n\n"
 

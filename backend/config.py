@@ -1,3 +1,4 @@
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -8,7 +9,7 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_base_url: str = "https://api.openai.com/v1"
     default_model: str = "gpt-5.2"
-    """Model used for vision-based UI replication (screenshot → code). Should be vision-capable (e.g. gpt-4o, claude-3-5-sonnet)."""
+    """Model used for vision-based UI replication. Should be vision-capable (e.g. gpt-4o, claude-3-5-sonnet)."""
     vision_model: str = "gpt-4o"
     max_tokens: int = 16384
     
@@ -23,6 +24,14 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
     cors_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def _parse_cors(cls, v: object) -> list[str]:
+        """Accept both a JSON list and a comma-separated string for CORS_ORIGINS."""
+        if isinstance(v, str):
+            return [o.strip() for o in v.split(",") if o.strip()]
+        return v  # type: ignore[return-value]
 
     # Scoring defaults (medians for normalization)
     median_time_sec: float = 120.0
@@ -44,9 +53,8 @@ class Settings(BaseSettings):
     browserbase_api_key: str = ""
     browserbase_project_id: str = ""
 
-    # Lucidly app URL (optional: for agent to screenshot the run page as reference)
-    # When set, generate_landing_page screenshots /agents/run/{session_id} (the page you watch the run on).
-    # e.g. https://app.lucidly.com or http://localhost:3000 (Browserbase must be able to reach it).
+    # Lucidly app URL (optional: for agent to view the run page as reference)
+    # e.g. https://app.lucidly.com or http://localhost:3000
     lucidly_app_url: str = ""
 
     # Agent / Modal (for benchmark runs)
