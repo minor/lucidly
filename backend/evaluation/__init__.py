@@ -1,4 +1,4 @@
-"""Evaluation module for Lucidly challenges.
+"""Evaluation module for No Shot challenges.
 
 This module contains all evaluation-related functionality:
 - Test generation

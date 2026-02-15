@@ -1,7 +1,8 @@
 "use client";
 
+import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { Zap, Trophy } from "lucide-react";
+import { Trophy } from "lucide-react";
 import { PromptInput } from "@/components/PromptInput";
 
 export default function Home() {
@@ -29,9 +30,15 @@ export default function Home() {
       <div className="mb-12 text-center">
         {/* Brand icon */}
         <div className="mb-6 flex items-center justify-center gap-2">
-          <Zap className="h-6 w-6 text-accent" />
+          <Image
+            src="/logo.svg"
+            alt="No Shot"
+            width={40}
+            height={40}
+            className="h-10 w-10"
+          />
           <span className="font-serif text-xl font-semibold tracking-tight">
-            Lucidly
+            No Shot
           </span>
         </div>
 

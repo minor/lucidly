@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -133,10 +134,16 @@ export function Sidebar() {
       {/* Brand */}
       <div className="flex items-center gap-2 border-b border-border px-4 py-4 shrink-0">
         <Link href="/" className="flex items-center gap-2 min-w-0">
-          <Zap className="h-5 w-5 text-accent shrink-0" />
+          <Image
+            src="/logo.svg"
+            alt="No Shot"
+            width={28}
+            height={28}
+            className="h-7 w-7 shrink-0"
+          />
           {!collapsed && (
             <span className="font-serif text-lg font-semibold tracking-tight whitespace-nowrap overflow-hidden">
-              Lucidly
+              No Shot
             </span>
           )}
         </Link>

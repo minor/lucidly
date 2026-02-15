@@ -1,4 +1,4 @@
-"""Composite scoring engine for Lucidly challenges.
+"""Composite scoring engine for No Shot challenges.
 
 Score = Accuracy * (
         0.30 * Speed
