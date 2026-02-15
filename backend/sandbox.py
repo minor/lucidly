@@ -15,8 +15,8 @@ _sandbox_image = (
     modal.Image.debian_slim()
     # Install Python dependencies
     .pip_install("pandas", "requests", "beautifulsoup4", "numpy", "lxml")
-    # Install System dependencies (g++ for C++, sanitizers for testing)
-    .apt_install("g++", "libtsan0", "libasan5")
+    # Install System dependencies (g++ for C++; sanitizer libs come bundled with g++)
+    .apt_install("g++")
 )
 
 
