@@ -7,9 +7,9 @@ import {
 import { useRouter } from "next/navigation";
 import { type ReactNode, useCallback } from "react";
 
-const domain = process.env.AUTH0_ISSUER_BASE_URL;
-const clientId = process.env.AUTH0_CLIENT_ID;
-const appUrl = process.env.AUTH0_BASE_URL || "http://localhost:3000";
+const domain = process.env.NEXT_PUBLIC_AUTH0_DOMAIN;
+const clientId = process.env.NEXT_PUBLIC_AUTH0_CLIENT_ID;
+const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
 if (!domain || !clientId) {
   throw new Error(
