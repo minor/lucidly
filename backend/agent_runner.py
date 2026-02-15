@@ -7,6 +7,7 @@ Supports simple loop (claude-direct, openai-cot), Claude Agent SDK (claude-sdk),
 import asyncio
 import json
 import logging
+import os
 import time
 from typing import Any
 
@@ -19,6 +20,35 @@ from sessions import get_session, add_turn, append_trace, Turn
 from session_events import broadcast_session_event
 
 logger = logging.getLogger(__name__)
+
+# Optional debug log path for agent tool calls (prompts, scrape results, etc.)
+_AGENT_TOOL_DEBUG_LOG = os.environ.get("LUCIDLY_DEBUG_LOG") or os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", ".cursor", "debug.log")
+)
+
+
+def _agent_tool_log(tool: str, *, args: dict[str, Any] | None = None, result_preview: str | None = None, result_full: str | None = None) -> None:
+    """Log Claude SDK tool calls to the terminal and optionally to debug.log for inspection."""
+    if args is not None:
+        logger.info("[agent] %s args: %s", tool, json.dumps(args, ensure_ascii=False)[:2000])
+    if result_preview is not None:
+        logger.info("[agent] %s result: %s", tool, result_preview[:1500] if len(result_preview) > 1500 else result_preview)
+    if result_full is not None:
+        logger.info("[agent] %s result (full):\n%s", tool, result_full)
+    try:
+        with open(_AGENT_TOOL_DEBUG_LOG, "a") as f:
+            entry = {
+                "id": f"agent_tool_{tool}",
+                "timestamp": time.time() * 1000,
+                "tool": tool,
+                "args": args,
+                "result_preview": (result_preview or result_full or "")[:3000] if (result_preview or result_full) else None,
+                "result_len": len(result_full) if result_full else None,
+            }
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
 
 MAX_TURNS = 10
 ACCURACY_THRESHOLD = 0.95
@@ -167,26 +197,9 @@ async def _run_agent_loop_claude_sdk(
         {"prompt": str},
     )
     async def submit_prompt_tool(args: dict[str, Any]) -> dict[str, Any]:
-        _trace(session_id, "Requesting code from model", t0, prompt_len=len(args.get("prompt") or ""))
-        # #region agent log
-        try:
-            with open("/Users/helenazhou/Dev/lucidly/.cursor/debug.log", "a") as _f:
-                _f.write(
-                    json.dumps(
-                        {
-                            "id": "claude_sdk_tool_called",
-                            "timestamp": time.time() * 1000,
-                            "location": "agent_runner.py:submit_prompt_tool",
-                            "message": "claude_sdk tool called",
-                            "data": {"session_id": session_id[:8], "prompt_len": len((args.get("prompt") or ""))},
-                            "hypothesisId": "H4",
-                        }
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # #endregion
+        prompt_text = args.get("prompt") or ""
+        _trace(session_id, "Requesting code from model", t0, prompt_len=len(prompt_text))
+        _agent_tool_log("submit_prompt", args={"prompt": prompt_text})
         session_before = get_session(session_id)
         base_tokens = (session_before.total_tokens if session_before else 0)
 
@@ -213,32 +226,142 @@ async def _run_agent_loop_claude_sdk(
         if acc is not None:
             _trace(session_id, "Received code from model", t0, accuracy=round(float(acc), 2))
         snippet = (data.get("generated_code") or "")[:2000]
+        response_text = data.get("response_text", "")[:1500]
+        result_for_agent = f"Response: {response_text}\n\nGenerated code (excerpt):\n{snippet}\n\nAccuracy: {data.get('accuracy', 0):.2f}"
+        _agent_tool_log(
+            "submit_prompt",
+            result_preview=f"accuracy={data.get('accuracy', 0):.2f} code_len={len(data.get('generated_code') or '')}",
+            result_full=f"Response (excerpt):\n{response_text}\n\nGenerated code (excerpt):\n{snippet}",
+        )
         return {
             "content": [
-                {
-                    "type": "text",
-                    "text": f"Response: {data.get('response_text', '')[:1500]}\n\nGenerated code (excerpt):\n{snippet}\n\nAccuracy: {data.get('accuracy', 0):.2f}",
-                }
+                {"type": "text", "text": result_for_agent}
             ]
         }
+
+    embed_url = getattr(challenge, "embed_url", None) or (challenge.get("embed_url") if isinstance(challenge, dict) else None)
+    browserbase_configured = bool(
+        getattr(settings, "browserbase_api_key", "") and getattr(settings, "browserbase_project_id", "")
+    )
+
+    @tool(
+        "view_reference_page",
+        "Open a URL in a browser and extract the landing page structure and content (title, nav, hero, sections, footer, styling notes). "
+        "Use this when the challenge asks you to recreate a reference page (e.g. openai.com) so you can see what to build. "
+        "Pass url to scrape, or leave empty to use the challenge's reference URL.",
+        {"url": str},
+    )
+    async def view_reference_page_tool(args: dict[str, Any]) -> dict[str, Any]:
+        url = (args.get("url") or "").strip() or embed_url or ""
+        _agent_tool_log("view_reference_page", args={"url": url or "(empty, would use challenge embed_url)"})
+        if not url:
+            out = "No URL provided and this challenge has no reference URL. Use submit_prompt with a description of the page you want to build."
+            _agent_tool_log("view_reference_page", result_preview=out)
+            return {"content": [{"type": "text", "text": out}]}
+        _trace(session_id, "Viewing reference page", t0, url=url[:60])
+        from stagehand_scrape import scrape_landing_page
+        model_api_key = getattr(settings, "openai_api_key", "") or getattr(settings, "anthropic_api_key", "")
+        result = await scrape_landing_page(url, model_api_key=model_api_key or "dummy")
+        if result.get("error"):
+            text = f"Could not scrape {url}: {result['error']}"
+        else:
+            import json as _json
+            extracted = result.get("extracted") or result
+            text = f"Reference page: {url}\n\nExtracted structure and content:\n{_json.dumps(extracted, indent=2)}"
+        text = text[:8000]
+        _trace(session_id, "Reference page scraped", t0)
+        _agent_tool_log("view_reference_page", result_preview=text[:500] + ("..." if len(text) > 500 else ""), result_full=text)
+        return {"content": [{"type": "text", "text": text}]}
+
+    @tool(
+        "generate_landing_page",
+        "Generate the landing page from a reference URL in one shot (like v0). Captures a screenshot of the URL and uses vision to produce matching HTML. "
+        "Use this as your first call when the challenge asks to recreate a reference page—it produces accurate, pixel-close output in one try. "
+        "Pass url (or leave empty to use the challenge reference URL).",
+        {"url": str},
+    )
+    async def generate_landing_page_tool(args: dict[str, Any]) -> dict[str, Any]:
+        url = (args.get("url") or "").strip() or embed_url or ""
+        _agent_tool_log("generate_landing_page", args={"url": url or "(empty)"})
+        if not url:
+            return {
+                "content": [{"type": "text", "text": "No URL provided and this challenge has no reference URL. Use submit_prompt with a description instead."}]
+            }
+        _trace(session_id, "Capturing reference screenshot via Browserbase", t0, url=url[:60])
+        try:
+            from stagehand_scrape import capture_url_screenshot_base64_browserbase
+            screenshot_data_url = await capture_url_screenshot_base64_browserbase(
+                url,
+                api_key=getattr(settings, "browserbase_api_key", "") or "",
+                project_id=getattr(settings, "browserbase_project_id", "") or "",
+                full_page=True,
+                wait_after_load=2.0,
+            )
+        except Exception as e:
+            logger.exception("Browserbase screenshot failed: %s", e)
+            return {"content": [{"type": "text", "text": f"Could not capture screenshot of {url}: {e}"}]}
+        _trace(session_id, "Screenshot captured, generating HTML", t0)
+        replicate_prompt = (
+            "Recreate this landing page exactly as shown in the screenshot. "
+            "Output one complete HTML document with inline CSS. Match layout, typography, colors, spacing, and all visible text. "
+            "Do not add placeholder content—replicate what you see."
+        )
+        session_before = get_session(session_id)
+        base_tokens = (session_before.total_tokens if session_before else 0)
+
+        async def on_progress(est: int) -> None:
+            total_est = base_tokens + (len(replicate_prompt) // 4) + est
+            await broadcast_session_event(session_id, {"type": "token_progress", "total_estimated_tokens": total_est})
+
+        data = await execute_prompt_turn(
+            session_id,
+            replicate_prompt,
+            reference_image_data_url=screenshot_data_url,
+            on_progress=on_progress,
+        )
+        sess = get_session(session_id)
+        if sess:
+            await broadcast_session_event(session_id, {"type": "session_update", "session": sess.model_dump()})
+        snippet = (data.get("generated_code") or "")[:2000]
+        result_text = f"Response: {data.get('response_text', '')[:1500]}\n\nGenerated code (excerpt):\n{snippet}\n\nAccuracy: {data.get('accuracy', 0):.2f}"
+        _agent_tool_log("generate_landing_page", result_preview=f"accuracy={data.get('accuracy', 0):.2f}", result_full=result_text)
+        if data.get("accuracy") is not None:
+            _trace(session_id, "Landing page generated", t0, accuracy=round(float(data["accuracy"]), 2))
+        return {"content": [{"type": "text", "text": result_text}]}
+
+    tools_list: list[Any] = [submit_prompt_tool]
+    allowed_tools_list = ["mcp__lucidly-challenge__submit_prompt"]
+    if embed_url and browserbase_configured:
+        tools_list.append(generate_landing_page_tool)
+        allowed_tools_list.append("mcp__lucidly-challenge__generate_landing_page")
+        tools_list.append(view_reference_page_tool)
+        allowed_tools_list.append("mcp__lucidly-challenge__view_reference_page")
 
     custom_server = create_sdk_mcp_server(
         name="lucidly-challenge",
         version="1.0.0",
-        tools=[submit_prompt_tool],
+        tools=tools_list,
     )
     brief = _challenge_brief(challenge)
     _trace(session_id, "Task prepared for agent", t0)
+    system_prompt_parts = [
+        "You are completing a coding challenge. "
+    ]
+    if embed_url and browserbase_configured:
+        system_prompt_parts.append(
+            "When the challenge has a reference URL (e.g. a landing page to recreate): use generate_landing_page first. "
+            "It uses Browserbase to capture a screenshot of the reference and generates matching HTML in one shot (like v0). "
+            "If accuracy is not 1.0, use submit_prompt with a short refinement (e.g. 'Fix the header color to match'). "
+        )
+    system_prompt_parts.append(
+        "Use submit_prompt to send prompts to the code API; each call returns response, generated code, and accuracy. "
+        "Your first tool call must produce code (use generate_landing_page for reference-URL challenges, otherwise submit_prompt). "
+        "Iterate until accuracy is 1.0 or you have tried enough. Then reply with DONE.\n\n"
+    )
     options = ClaudeAgentOptions(
         mcp_servers={"lucidly-challenge": custom_server},
-        allowed_tools=["mcp__lucidly-challenge__submit_prompt"],
-        system_prompt=(
-            "You are completing a coding challenge. Use the submit_prompt tool to send prompts to the code generation API. "
-            "Each call returns the model's response, generated code, and an accuracy score. "
-            "Your first tool call must ask for code that fulfills the challenge (the response will be run in a preview). "
-            "Iterate until accuracy is 1.0 or you have tried enough. Then reply with DONE.\n\n"
-            f"{brief}"
-        ),
+        allowed_tools=allowed_tools_list,
+        system_prompt="".join(system_prompt_parts) + brief,
         max_turns=MAX_TURNS,
     )
 
@@ -282,7 +405,11 @@ async def _run_agent_loop_claude_sdk(
             except Exception:
                 pass
             # #endregion
-            prompt = "Complete this coding challenge. Use the submit_prompt tool to generate and refine code. Your first response must request runnable code (HTML for UI challenges) in a markdown code block."
+            prompt = (
+                "Complete this coding challenge. "
+                + ("Use generate_landing_page first (Browserbase captures the reference; then vision generates accurate HTML in one shot), then submit_prompt only if you need to refine. " if (embed_url and browserbase_configured) else "Use the submit_prompt tool to generate and refine code. ")
+                + "Your first response must produce runnable code (HTML for UI challenges) in a markdown code block."
+            )
             _trace(session_id, "Sending task to agent", t0)
             await client.query(prompt)
             _trace(session_id, "Agent reasoning…", t0)

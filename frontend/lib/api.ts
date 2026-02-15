@@ -352,6 +352,7 @@ export interface CalculateScoreRequest {
   elapsed_sec: number;
   total_tokens: number;
   total_turns: number;
+  difficulty?: string;
 }
 
 export async function calculateScore(

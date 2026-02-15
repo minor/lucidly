@@ -6,7 +6,7 @@ import time
 from collections.abc import Awaitable, Callable
 
 from challenges import get_challenge_by_id
-from llm import LLM
+from llm import LLM, REPLICATE_UI_SYSTEM_PROMPT
 from evaluation.scoring import compute_accuracy_text, compute_composite_score
 from sessions import (
     add_turn,
@@ -36,13 +36,13 @@ async def execute_prompt_turn(
     model: str | None = None,
     system_prompt: str | None = None,
     on_progress: Callable[[int], Awaitable[None]] | None = None,
+    reference_image_data_url: str | None = None,
 ) -> dict:
     """
     Run one turn: build history, call LLM, compute accuracy, add_turn.
     Returns dict with response_text, generated_code, accuracy, prompt_tokens, response_tokens, turn_number.
-    If on_progress(estimated_tokens) is provided, uses streaming and calls it with estimated response tokens
-    during the stream so the frontend can show token progress in real time.
-    Caller must ensure session exists and is active.
+    If reference_image_data_url is provided (reference page screenshot), uses vision model for UI replication.
+    If on_progress is provided, uses streaming. Caller must ensure session exists and is active.
     """
     session = get_session(session_id)
     if session is None:
@@ -56,17 +56,22 @@ async def execute_prompt_turn(
         history.append({"role": "user", "content": t.prompt_text})
         history.append({"role": "assistant", "content": t.response_text})
 
+    from config import settings
     llm = _get_llm()
-    model = model or session.model_used
+    if reference_image_data_url:
+        model = model or getattr(settings, "vision_model", None) or session.model_used
+        system_prompt = system_prompt or REPLICATE_UI_SYSTEM_PROMPT
+    else:
+        model = model or session.model_used
     llm_instance = LLM(model=model) if model != llm.model else llm
 
     if on_progress is not None:
-        # Stream and report estimated tokens so frontend can update in real time
         full_response = ""
         async for chunk in llm_instance.stream(
             prompt,
             conversation_history=history if history else None,
             system_prompt=system_prompt,
+            image_data_url=reference_image_data_url,
         ):
             full_response += chunk
             # ~4 chars per token estimate
@@ -104,6 +109,7 @@ async def execute_prompt_turn(
             prompt,
             conversation_history=history if history else None,
             system_prompt=system_prompt,
+            image_data_url=reference_image_data_url,
         )
         accuracy = 0.0
         if challenge.target_code:

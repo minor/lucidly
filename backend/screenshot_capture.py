@@ -558,3 +558,6 @@ async def capture_ui_screenshot_base64(
     
     async with ScreenshotCapture() as capture:
         return await capture.capture_to_base64(html_code, options)
+
+
+# URL screenshot: use stagehand_scrape.capture_url_screenshot_base64_browserbase (Browserbase) instead of local Playwright.

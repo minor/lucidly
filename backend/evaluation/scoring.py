@@ -1,9 +1,10 @@
 """Composite scoring engine for Lucidly challenges.
 
-Score = 0.40 * Accuracy
-      + 0.25 * Speed
-      + 0.20 * TokenEfficiency
-      + 0.15 * TurnEfficiency
+Score = Accuracy * (
+        0.30 * Speed
+      + 0.25 * TokenEfficiency
+      + 0.45 * TurnEfficiency
+      )
 
 All sub-scores are on a 0-1000 scale; the composite is also 0-1000.
 """
@@ -38,9 +39,11 @@ def compute_accuracy_text(generated: str, target: str) -> float:
     return common / max(len(tgt_tokens), 1)
 
 
-def compute_speed_score(elapsed_sec: float) -> float:
-    """Speed score: inverse of time, normalized against median."""
-    median = settings.median_time_sec
+def compute_speed_score(elapsed_sec: float, difficulty: str = "medium") -> float:
+    """Speed score: inverse of time, normalized against difficulty baseline."""
+    baselines = settings.SCORING_BASELINES.get(difficulty, settings.SCORING_BASELINES["medium"])
+    median = baselines["time"]
+    
     if elapsed_sec <= 0:
         return 1.0
     # Ratio: faster than median → score > 0.5
@@ -48,18 +51,22 @@ def compute_speed_score(elapsed_sec: float) -> float:
     return min(ratio, 2.0) / 2.0  # cap at 1.0
 
 
-def compute_token_efficiency(total_tokens: int) -> float:
+def compute_token_efficiency(total_tokens: int, difficulty: str = "medium") -> float:
     """Token efficiency: fewer tokens → higher score."""
-    median = settings.median_tokens
+    baselines = settings.SCORING_BASELINES.get(difficulty, settings.SCORING_BASELINES["medium"])
+    median = baselines["tokens"]
+    
     if total_tokens <= 0:
         return 1.0
     ratio = median / total_tokens
     return min(ratio, 2.0) / 2.0
 
 
-def compute_turn_efficiency(total_turns: int) -> float:
+def compute_turn_efficiency(total_turns: int, difficulty: str = "medium") -> float:
     """Turn efficiency: fewer turns → higher score."""
-    median = settings.median_turns
+    baselines = settings.SCORING_BASELINES.get(difficulty, settings.SCORING_BASELINES["medium"])
+    median = baselines["turns"]
+    
     if total_turns <= 0:
         return 1.0
     ratio = median / total_turns
@@ -71,21 +78,21 @@ def compute_composite_score(
     elapsed_sec: float,
     total_tokens: int,
     total_turns: int,
+    difficulty: str = "medium",
 ) -> dict:
     """
     Compute the full composite score.
 
     Returns a dict with individual sub-scores (0-1000) and the composite.
     """
-    speed = compute_speed_score(elapsed_sec)
-    token_eff = compute_token_efficiency(total_tokens)
-    turn_eff = compute_turn_efficiency(total_turns)
+    speed = compute_speed_score(elapsed_sec, difficulty)
+    token_eff = compute_token_efficiency(total_tokens, difficulty)
+    turn_eff = compute_turn_efficiency(total_turns, difficulty)
 
-    composite = (
-        0.40 * accuracy
-        + 0.25 * speed
-        + 0.20 * token_eff
-        + 0.15 * turn_eff
+    composite = accuracy * (
+        0.30 * speed
+        + 0.25 * token_eff
+        + 0.45 * turn_eff
     )
 
     return {
