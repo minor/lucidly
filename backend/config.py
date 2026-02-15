@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     # Anthropic/Claude configuration
     anthropic_api_key: str = ""
 
+    # xAI/Grok configuration
+    xai_api_key: str = ""
+    xai_base_url: str = "https://api.x.ai/v1"
+
     # Server configuration
     host: str = "0.0.0.0"
     port: int = 8000
@@ -72,4 +76,7 @@ MODEL_PRICING = {
     "gpt-5.2": {"input": 1.75, "output": 14.0},
     "gpt-5-nano": {"input": 0.05, "output": 0.40},
     "gpt-5-mini": {"input": 0.25, "output": 2.00},
+    # xAI/Grok
+    "grok-4-1-fast-reasoning": {"input": 0.20, "output": 0.50},
+    "grok-code-fast-1": {"input": 0.20, "output": 1.50},
 }
