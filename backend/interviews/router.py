@@ -288,20 +288,22 @@ async def submit_prompt(room_id: str, session_id: str, req: SubmitPromptRequest)
                 response_tokens=est_response_tokens,
                 timestamp=time.time(),
             )
-            store.add_turn(session_id, turn_obj)
+            updated_session = store.add_turn(session_id, turn_obj)
+            _total_tokens = updated_session.total_tokens if updated_session else session.total_tokens + est_prompt_tokens + est_response_tokens
+            _total_turns = updated_session.total_turns if updated_session else session.total_turns + 1
 
             # Broadcast turn complete to observers
             await realtime.broadcast(room_id, {
                 "type": "turn_complete",
                 "session_id": session_id,
-                "turn_number": session.total_turns,
+                "turn_number": _total_turns,
                 "generated_code": generated_code,
-                "total_tokens": session.total_tokens,
-                "total_turns": session.total_turns,
+                "total_tokens": _total_tokens,
+                "total_turns": _total_turns,
                 "timestamp": time.time(),
             })
 
-            yield f"data: {json.dumps({'type': 'done', 'content': full_response, 'generated_code': generated_code, 'input_tokens': est_prompt_tokens, 'output_tokens': est_response_tokens, 'cost': cost, 'total_tokens': session.total_tokens, 'total_turns': session.total_turns})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'content': full_response, 'generated_code': generated_code, 'input_tokens': est_prompt_tokens, 'output_tokens': est_response_tokens, 'cost': cost, 'total_tokens': _total_tokens, 'total_turns': _total_turns})}\n\n"
 
         except Exception as e:
             logger.error("Interview prompt streaming error: %s", e)
@@ -398,9 +400,9 @@ async def run_tests(room_id: str, session_id: str, code: str | None = None):
         passed_count = sum(1 for r in results if r.get("passed", False))
         total_count = len(results)
 
-        # Update session accuracy
+        # Update session accuracy (persisted to Supabase)
         if total_count > 0:
-            session.accuracy = passed_count / total_count
+            store.update_session_accuracy(session_id, passed_count / total_count)
 
         # Broadcast test results to observers
         await realtime.broadcast(room_id, {

@@ -1,7 +1,8 @@
 "use client";
 
-import { Auth0Provider as Auth0ProviderSDK } from "@auth0/auth0-react";
-import { type ReactNode } from "react";
+import { Auth0Provider as Auth0ProviderSDK, type AppState } from "@auth0/auth0-react";
+import { useRouter } from "next/navigation";
+import { type ReactNode, useCallback } from "react";
 
 const domain = process.env.NEXT_PUBLIC_AUTH0_DOMAIN;
 const clientId = process.env.NEXT_PUBLIC_AUTH0_CLIENT_ID;
@@ -14,6 +15,16 @@ if (!domain || !clientId) {
 }
 
 export function Auth0Provider({ children }: { children: ReactNode }) {
+  const router = useRouter();
+
+  const onRedirectCallback = useCallback(
+    (appState?: AppState) => {
+      // After login, navigate to the page the user was trying to reach
+      router.replace(appState?.returnTo || "/");
+    },
+    [router]
+  );
+
   return (
     <Auth0ProviderSDK
       domain={domain!}
@@ -21,6 +32,7 @@ export function Auth0Provider({ children }: { children: ReactNode }) {
       authorizationParams={{
         redirect_uri: appUrl,
       }}
+      onRedirectCallback={onRedirectCallback}
     >
       {children}
     </Auth0ProviderSDK>

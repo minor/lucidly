@@ -70,9 +70,9 @@ def extract_python_via_ast(text: str) -> str:
     stripped = text.strip()
     try:
         tree = ast.parse(stripped)
-        # Check it contains at least one function or class definition
+        # Accept if it has at least one function/class, or is valid script-style code (no def/class)
         has_def = any(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) for n in ast.walk(tree))
-        if has_def:
+        if has_def or len(tree.body) > 0:
             return stripped
     except SyntaxError:
         pass

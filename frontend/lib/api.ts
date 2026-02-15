@@ -854,3 +854,46 @@ export async function stopVercelSandbox(sandboxId: string): Promise<void> {
     () => {}
   );
 }
+
+// ---------------------------------------------------------------------------
+// Username management
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetch the stored username for an Auth0 user.
+ * Returns the username string or null if not yet set.
+ */
+export async function getUsername(auth0Id: string): Promise<string | null> {
+  const res = await fetch(`${API_BASE}/api/username/${encodeURIComponent(auth0Id)}`);
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data.username ?? null;
+}
+
+/**
+ * Check if a username is available (case-insensitive).
+ */
+export async function checkUsernameAvailable(username: string): Promise<boolean> {
+  const res = await fetch(`${API_BASE}/api/username-available/${encodeURIComponent(username)}`);
+  if (!res.ok) return false;
+  const data = await res.json();
+  return data.available;
+}
+
+/**
+ * Claim a username for the given Auth0 user.
+ * Throws an error with the detail message if the name is taken or invalid.
+ */
+export async function setUsername(auth0Id: string, username: string): Promise<string> {
+  const res = await fetch(`${API_BASE}/api/username`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ auth0_id: auth0Id, username }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ detail: "Failed to set username." }));
+    throw new Error(data.detail || "Failed to set username.");
+  }
+  const data = await res.json();
+  return data.username;
+}

@@ -4,6 +4,8 @@ import { Lora } from "next/font/google";
 import "./globals.css";
 import { Auth0Provider } from "@/components/Auth0Provider";
 import { Sidebar } from "@/components/Sidebar";
+import { TopAuthBar } from "@/components/TopAuthBar";
+import { UsernameGate } from "@/components/UsernameGate";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -43,7 +45,11 @@ export default function RootLayout({
         <Auth0Provider>
           <div className="flex h-screen overflow-hidden">
             <Sidebar />
-            <main className="flex-1 overflow-y-auto">{children}</main>
+            <main className="flex-1 overflow-y-auto relative">
+              <TopAuthBar />
+              <UsernameGate />
+              {children}
+            </main>
           </div>
         </Auth0Provider>
       </body>

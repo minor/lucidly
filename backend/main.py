@@ -393,6 +393,55 @@ async def leaderboard(limit: int = 50, category: str | None = None, challenge_id
 
 
 # ---------------------------------------------------------------------------
+# Username management
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/username/{auth0_id}")
+async def get_username(auth0_id: str):
+    """Return the stored username for an Auth0 user (or null)."""
+    from database import get_username_by_auth0_id
+    username = await get_username_by_auth0_id(auth0_id)
+    return {"username": username}
+
+
+class SetUsernameRequest(BaseModel):
+    auth0_id: str
+    username: str
+
+
+@app.post("/api/username")
+async def create_username(req: SetUsernameRequest):
+    """Claim a display name. Fails if the name is already taken."""
+    from database import is_username_taken, set_username, get_username_by_auth0_id
+
+    name = req.username.strip()
+    if not name or len(name) < 2 or len(name) > 30:
+        raise HTTPException(status_code=400, detail="Username must be 2-30 characters.")
+
+    # Allow the same user to keep their current name
+    existing = await get_username_by_auth0_id(req.auth0_id)
+    if existing and existing.lower() == name.lower():
+        return {"ok": True, "username": existing}
+
+    if await is_username_taken(name):
+        raise HTTPException(status_code=409, detail="Username is already taken.")
+
+    ok = await set_username(req.auth0_id, name)
+    if not ok:
+        raise HTTPException(status_code=500, detail="Failed to save username.")
+    return {"ok": True, "username": name}
+
+
+@app.get("/api/username-available/{username}")
+async def check_username_available(username: str):
+    """Check whether a username is available."""
+    from database import is_username_taken
+    taken = await is_username_taken(username.strip())
+    return {"available": not taken}
+
+
+# ---------------------------------------------------------------------------
 # Score calculation endpoint (for direct score calculation without session)
 # ---------------------------------------------------------------------------
 
