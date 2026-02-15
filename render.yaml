@@ -36,12 +36,10 @@ services:
       - key: AGENT_INTERNAL_SECRET
         sync: false
 
-      # Points back to this Render service (auto-set by Render)
+      # Points back to this Render service – set manually to your Render URL
+      # e.g. https://lucidly-api.onrender.com
       - key: BACKEND_PUBLIC_URL
-        fromService:
-          name: lucidly-api
-          type: web
-          property: url
+        sync: false
 
     healthCheckPath: /docs
     autoDeploy: true
