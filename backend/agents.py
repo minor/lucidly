@@ -37,13 +37,6 @@ AGENTS: list[Agent] = [
         description="Tools, reasoning, multi-step code generation.",
         model="",  # empty = use backend DEFAULT_MODEL
     ),
-    Agent(
-        id="openai-assistant",
-        name="OpenAI Assistant",
-        strategy="openai_assistant",
-        description="OpenAI Assistants API with function tool.",
-        model="gpt-4o",
-    ),
 ]
 
 

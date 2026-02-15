@@ -165,6 +165,11 @@ class LLM:
                 {"type": "image_url", "image_url": {"url": image_data_url}},
             ]
             messages.append({"role": "user", "content": user_content})
+            import logging
+            logging.getLogger(__name__).info(
+                "LLM vision: attaching image to user message, data_url len=%d",
+                len(image_data_url),
+            )
         else:
             messages.append({"role": "user", "content": prompt})
         return messages

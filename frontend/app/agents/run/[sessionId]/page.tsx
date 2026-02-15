@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { getSession, getChallenge, subscribeSessionEvents } from "@/lib/api";
 import { ScoreBar } from "@/components/ScoreBar";
+import { SimpleMarkdown } from "@/components/SimpleMarkdown";
 import type { Challenge, Session, ThinkingTraceEntry } from "@/lib/types";
 import { Loader2, ArrowLeft, Trophy, Code, ImageIcon, GripHorizontal } from "lucide-react";
 import { MODEL_PRICING } from "@/lib/api";
@@ -54,6 +55,8 @@ export default function AgentRunWatchPage() {
   const [elapsed, setElapsed] = useState(0);
   const [outputPanelHeight, setOutputPanelHeight] = useState(OUTPUT_PANEL_INITIAL);
   const [sessionNotFound, setSessionNotFound] = useState(false);
+  /** Reference HTML for challenges with html_url (same as user challenge page) */
+  const [referenceHtml, setReferenceHtml] = useState<string>("");
   /** Live token count during LLM stream (from SSE); null when using session.total_tokens */
   const [liveEstimatedTokens, setLiveEstimatedTokens] = useState<number | null>(null);
   const resizeStartYRef = useRef<number>(0);
@@ -148,7 +151,7 @@ export default function AgentRunWatchPage() {
     return () => abort();
   }, [sessionId]);
 
-  // Fetch challenge when session is available
+  // Fetch challenge when session is available (same as user challenge page)
   useEffect(() => {
     if (!session?.challenge_id) return;
     let ignore = false;
@@ -161,6 +164,22 @@ export default function AgentRunWatchPage() {
       ignore = true;
     };
   }, [session?.challenge_id]);
+
+  // Fetch reference HTML when challenge has html_url (match play page so agent benchmark = user challenge)
+  useEffect(() => {
+    if (!challenge?.html_url) return;
+    let ignore = false;
+    const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    fetch(`${API_BASE}/api/challenges/${challenge.id}/html`)
+      .then((r) => (r.ok ? r.text() : Promise.reject(new Error("Failed to fetch"))))
+      .then((html) => {
+        if (!ignore) setReferenceHtml(html);
+      })
+      .catch(() => {});
+    return () => {
+      ignore = true;
+    };
+  }, [challenge?.id, challenge?.html_url]);
 
   // Auto-scroll thinking trace to bottom when new entries appear
   useEffect(() => {
@@ -243,10 +262,11 @@ export default function AgentRunWatchPage() {
   const isActive = session?.status === "active";
   const latestCode = session?.final_code || (session?.turns?.length ? session?.turns[session.turns.length - 1]?.generated_code : "") || "";
 
-  // Calculate total cost from turns
+  // Calculate total cost from turns (use fallback pricing if model not in MODEL_PRICING, e.g. openai-cot uses gpt-4o)
+  const defaultPricing = { input: 0, output: 0 };
   const totalCost = session?.turns?.reduce((acc, turn) => {
-    const model = session.model_used || "claude-3-opus-20240229";
-    const pricing = MODEL_PRICING[model] || MODEL_PRICING["claude-3-opus-20240229"];
+    const model = session.model_used || "gpt-5.2";
+    const pricing = MODEL_PRICING[model] ?? MODEL_PRICING["gpt-5.2"] ?? defaultPricing;
     const inputCost = (turn.prompt_tokens * pricing.input) / 1_000_000;
     const outputCost = (turn.response_tokens * pricing.output) / 1_000_000;
     return acc + inputCost + outputCost;
@@ -304,13 +324,11 @@ export default function AgentRunWatchPage() {
 
       {/* Main content — left = task (narrow), right = thinking trace + source/output */}
       <div className="flex flex-1 min-h-0">
-        {/* Left: Task description only — fixed width so right panel has room */}
+        {/* Left: Challenge description — same structure as user play page */}
         <div className="w-[340px] shrink-0 border-r border-border overflow-y-auto">
           <div className="p-6">
-            <h2 className="text-sm font-semibold mb-3">Task</h2>
-            <p className="text-sm text-muted leading-relaxed whitespace-pre-wrap mb-4">
-              {challenge?.description ?? "Loading challenge…"}
-            </p>
+            <h2 className="text-sm font-semibold mb-3">Challenge</h2>
+            <SimpleMarkdown content={challenge?.description ?? ""} className="text-sm leading-relaxed mb-4" />
             {challenge?.starter_code && (
               <div className="rounded-lg border border-border bg-code-bg overflow-hidden mb-4">
                 <div className="px-3 py-1.5 border-b border-border">
@@ -325,7 +343,17 @@ export default function AgentRunWatchPage() {
                 </pre>
               </div>
             )}
-            {challenge?.embed_url && (
+            {challenge?.html_url && referenceHtml && (
+              <div className="rounded-lg border border-border overflow-hidden bg-muted/20 mb-4 h-[320px]">
+                <iframe
+                  srcDoc={referenceHtml}
+                  title="Challenge reference (top of page only)"
+                  className="w-full h-[500px] border-0 rounded-lg pointer-events-none"
+                  sandbox="allow-scripts allow-same-origin"
+                />
+              </div>
+            )}
+            {challenge?.embed_url && !challenge?.html_url && (
               <div className="rounded-lg border border-border overflow-hidden bg-muted/20 mb-4 h-[320px]">
                 <iframe
                   src={challenge.embed_url}
@@ -335,7 +363,7 @@ export default function AgentRunWatchPage() {
                 />
               </div>
             )}
-            {challenge?.image_url && !challenge?.embed_url && (
+            {challenge?.image_url && !challenge?.html_url && !challenge?.embed_url && (
               <div className="rounded-lg border border-border overflow-hidden bg-muted/20 mb-4">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img

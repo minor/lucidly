@@ -57,10 +57,17 @@ async def execute_prompt_turn(
         history.append({"role": "assistant", "content": t.response_text})
 
     from config import settings
+    import logging
+    _log = logging.getLogger(__name__)
     llm = _get_llm()
     if reference_image_data_url:
         model = model or getattr(settings, "vision_model", None) or session.model_used
         system_prompt = system_prompt or REPLICATE_UI_SYSTEM_PROMPT
+        _log.info(
+            "Vision turn: model=%s, image_data_url len=%d",
+            model,
+            len(reference_image_data_url or ""),
+        )
     else:
         model = model or session.model_used
     llm_instance = LLM(model=model) if model != llm.model else llm

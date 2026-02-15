@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     browserbase_api_key: str = ""
     browserbase_project_id: str = ""
 
+    # Lucidly app URL (optional: for agent to screenshot the run page as reference)
+    # When set, generate_landing_page screenshots /agents/run/{session_id} (the page you watch the run on).
+    # e.g. https://app.lucidly.com or http://localhost:3000 (Browserbase must be able to reach it).
+    lucidly_app_url: str = ""
+
     # Agent / Modal (for benchmark runs)
     agent_internal_secret: str = ""
     modal_app_name: str = "lucidly-agent"
