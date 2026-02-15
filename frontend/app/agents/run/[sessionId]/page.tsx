@@ -4,9 +4,8 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { getSession, getChallenge } from "@/lib/api";
-import { ChatMessage } from "@/components/ChatMessage";
 import { ScoreBar } from "@/components/ScoreBar";
-import type { Challenge, Session, Turn } from "@/lib/types";
+import type { Challenge, Session, ThinkingTraceEntry } from "@/lib/types";
 import { Loader2, ArrowLeft, Trophy, Code, ImageIcon, GripHorizontal } from "lucide-react";
 import { MODEL_PRICING } from "@/lib/api";
 
@@ -23,6 +22,25 @@ const OUTPUT_PLACEHOLDER_CODE = `<!DOCTYPE html>
 
 const POLL_INTERVAL_MS = 1500;
 
+/** Format trace entry kwargs into a short, user-facing detail string. */
+function formatTraceDetail(entry: ThinkingTraceEntry): string | null {
+  const parts: string[] = [];
+  if (typeof entry.prompt_len === "number") {
+    parts.push(`${entry.prompt_len.toLocaleString()} characters`);
+  }
+  if (typeof entry.response_tokens === "number") {
+    parts.push(`${entry.response_tokens.toLocaleString()} tokens`);
+  }
+  if (typeof entry.total_turns === "number") {
+    parts.push(entry.total_turns === 1 ? "1 turn" : `${entry.total_turns} turns`);
+  }
+  if (typeof entry.accuracy === "number") {
+    const pct = Math.round(entry.accuracy * 100);
+    parts.push(`${pct}% match`);
+  }
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
 export default function AgentRunWatchPage() {
   const params = useParams();
   const router = useRouter();
@@ -37,7 +55,7 @@ export default function AgentRunWatchPage() {
   const [sessionNotFound, setSessionNotFound] = useState(false);
   const resizeStartYRef = useRef<number>(0);
   const resizeStartHeightRef = useRef<number>(OUTPUT_PANEL_INITIAL);
-  const turnsEndRef = useRef<HTMLDivElement>(null);
+  const traceEndRef = useRef<HTMLDivElement>(null);
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -108,9 +126,10 @@ export default function AgentRunWatchPage() {
     };
   }, [session?.challenge_id]);
 
+  // Auto-scroll thinking trace to bottom when new entries appear
   useEffect(() => {
-    turnsEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [session?.turns?.length, session?.current_prompt]);
+    traceEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [session?.thinking_trace?.length]);
 
   // Elapsed time: when completed, use final duration and stop; otherwise tick every second
   useEffect(() => {
@@ -246,75 +265,127 @@ export default function AgentRunWatchPage() {
         )}
       </div>
 
-      {/* Main content — left = challenge + output (same as play), right = agent chat */}
+      {/* Main content — left = task (narrow), right = thinking trace + source/output */}
       <div className="flex flex-1 min-h-0">
-        {/* Left: Challenge description + Your output (same as play page) */}
-        <div className="flex-1 flex flex-col min-w-0 border-r border-border overflow-hidden">
-          {/* Challenge description (scrollable) */}
-          <div className="flex-1 min-h-0 overflow-y-auto border-b border-border">
-            <div className="p-6">
-              <h2 className="text-sm font-semibold mb-3">Challenge</h2>
-              <p className="text-sm text-muted leading-relaxed whitespace-pre-wrap mb-4">
-                {challenge?.description ?? "Loading challenge…"}
-              </p>
-              {challenge?.starter_code && (
-                <div className="rounded-lg border border-border bg-code-bg overflow-hidden mb-4">
-                  <div className="px-3 py-1.5 border-b border-border">
-                    <span className="text-xs font-medium text-muted">
-                      Buggy Code
-                    </span>
-                  </div>
-                  <pre className="p-3 overflow-x-auto">
-                    <code className="text-xs font-mono">
-                      {challenge.starter_code}
-                    </code>
-                  </pre>
+        {/* Left: Task description only — fixed width so right panel has room */}
+        <div className="w-[340px] shrink-0 border-r border-border overflow-y-auto">
+          <div className="p-6">
+            <h2 className="text-sm font-semibold mb-3">Task</h2>
+            <p className="text-sm text-muted leading-relaxed whitespace-pre-wrap mb-4">
+              {challenge?.description ?? "Loading challenge…"}
+            </p>
+            {challenge?.starter_code && (
+              <div className="rounded-lg border border-border bg-code-bg overflow-hidden mb-4">
+                <div className="px-3 py-1.5 border-b border-border">
+                  <span className="text-xs font-medium text-muted">
+                    Buggy Code
+                  </span>
                 </div>
-              )}
-              {challenge?.embed_url && (
-                <div className="rounded-lg border border-border overflow-hidden bg-muted/20 mb-4 h-[320px]">
-                  <iframe
-                    src={challenge.embed_url}
-                    title="Challenge reference"
-                    className="w-full h-[500px] border-0 rounded-lg pointer-events-none"
-                    sandbox="allow-scripts allow-same-origin"
-                  />
+                <pre className="p-3 overflow-x-auto">
+                  <code className="text-xs font-mono">
+                    {challenge.starter_code}
+                  </code>
+                </pre>
+              </div>
+            )}
+            {challenge?.embed_url && (
+              <div className="rounded-lg border border-border overflow-hidden bg-muted/20 mb-4 h-[320px]">
+                <iframe
+                  src={challenge.embed_url}
+                  title="Challenge reference"
+                  className="w-full h-[500px] border-0 rounded-lg pointer-events-none"
+                  sandbox="allow-scripts allow-same-origin"
+                />
+              </div>
+            )}
+            {challenge?.image_url && !challenge?.embed_url && (
+              <div className="rounded-lg border border-border overflow-hidden bg-muted/20 mb-4">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={challenge.image_url}
+                  alt="Challenge reference"
+                  className="w-full max-h-[280px] object-contain object-top"
+                />
+              </div>
+            )}
+            {challenge?.test_suite && challenge.test_suite.length > 0 && (
+              <div className="mt-4">
+                <h3 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">
+                  Test Cases
+                </h3>
+                <div className="space-y-1.5">
+                  {challenge.test_suite.map((tc, i) => (
+                    <div
+                      key={i}
+                      className="rounded-lg bg-code-bg px-3 py-2 text-xs font-mono"
+                    >
+                      <span className="text-muted">Input:</span> {tc.input}
+                      <br />
+                      <span className="text-muted">Expected:</span>{" "}
+                      {tc.expected_output}
+                    </div>
+                  ))}
                 </div>
-              )}
-              {challenge?.image_url && !challenge?.embed_url && (
-                <div className="rounded-lg border border-border overflow-hidden bg-muted/20 mb-4">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={challenge.image_url}
-                    alt="Challenge reference"
-                    className="w-full max-h-[280px] object-contain object-top"
-                  />
-                </div>
-              )}
-              {challenge?.test_suite && challenge.test_suite.length > 0 && (
-                <div className="mt-4">
-                  <h3 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">
-                    Test Cases
-                  </h3>
-                  <div className="space-y-1.5">
-                    {challenge.test_suite.map((tc, i) => (
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Right: Thinking trace (top) + Source code & output (bottom) — flex so both get space */}
+        <div className="flex flex-col flex-1 min-w-0 min-h-0 overflow-hidden border-l border-border">
+          {/* Thinking trace — flex-1 so it shares space with output below */}
+          <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+            <div className="p-6 pb-0 shrink-0">
+              <h2 className="text-sm font-semibold mb-3">Thinking trace</h2>
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto px-6 py-3 space-y-2">
+              {(session?.thinking_trace?.length ?? 0) > 0 ? (
+                <>
+                  {(session?.thinking_trace ?? []).map((entry: ThinkingTraceEntry, i: number) => {
+                    const detail = formatTraceDetail(entry);
+                    return (
                       <div
                         key={i}
-                        className="rounded-lg bg-code-bg px-3 py-2 text-xs font-mono"
+                        className="flex flex-col gap-0.5 text-sm text-foreground/90"
                       >
-                        <span className="text-muted">Input:</span> {tc.input}
-                        <br />
-                        <span className="text-muted">Expected:</span>{" "}
-                        {tc.expected_output}
+                        <div className="flex items-baseline gap-2">
+                          <span className="shrink-0 tabular-nums text-muted-foreground text-xs">
+                            +{entry.elapsed_ms}ms
+                          </span>
+                          <span>{entry.step}</span>
+                        </div>
+                        {detail && (
+                          <div className="pl-6 text-xs text-muted-foreground">
+                            {detail}
+                          </div>
+                        )}
                       </div>
-                    ))}
-                  </div>
+                    );
+                  })}
+                  {isActive && (
+                    <div className="flex items-center gap-2 text-xs text-muted">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
+                      <span>Working…</span>
+                    </div>
+                  )}
+                  <div ref={traceEndRef} />
+                </>
+              ) : (
+                <div className="flex items-center gap-2 text-sm text-muted">
+                  {isActive ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                      <span>Starting…</span>
+                    </>
+                  ) : (
+                    <span>No trace entries.</span>
+                  )}
                 </div>
               )}
             </div>
           </div>
 
-          {/* Resize handle (drag up to expand output panel) */}
+          {/* Resize handle — drag to give more space to trace or output */}
           <button
             type="button"
             onMouseDown={handleResizeStart}
@@ -324,7 +395,7 @@ export default function AgentRunWatchPage() {
             <GripHorizontal className="h-4 w-4" />
           </button>
 
-          {/* Your output panel — expandable like play page */}
+          {/* Source code & rendered output — fixed height so trace gets the rest; resize handle adjusts this */}
           <div
             className="shrink-0 flex flex-col border-t border-border bg-muted/5 overflow-hidden"
             style={{ height: outputPanelHeight }}
@@ -386,93 +457,6 @@ export default function AgentRunWatchPage() {
               )}
             </div>
           </div>
-        </div>
-
-        {/* Right: Agent chat (turns) + current prompt + loading/done assistant */}
-        <div className="flex flex-col w-[480px] shrink-0 overflow-hidden">
-          <div className="flex-1 overflow-y-auto p-6">
-            {(session?.turns?.length ?? 0) > 0 || session?.current_prompt ? (
-              <div className="space-y-0">
-                {session?.turns?.map((turn: Turn) => {
-                  const isInternalPrompt =
-                    turn.turn_number > 1 &&
-                    (turn.prompt_text.startsWith("Review the previous response") ||
-                      turn.prompt_text.startsWith("Your previous response did not include"));
-                  const userContent = isInternalPrompt ? "Refining…" : turn.prompt_text;
-                  return (
-                    <div key={turn.turn_number} className="space-y-0">
-                      <ChatMessage
-                        role="user"
-                        content={userContent}
-                        userLabel="Agent"
-                      />
-                      <ChatMessage
-                        role="assistant"
-                        content={turn.response_text}
-                        generatedCode={turn.generated_code || undefined}
-                        accuracy={turn.accuracy_at_turn}
-                        turnNumber={turn.turn_number}
-                        tokens={turn.prompt_tokens + turn.response_tokens}
-                        isAssistantLoading={false}
-                        hideGeneratedOutput
-                      />
-                    </div>
-                  );
-                })}
-                {/* Current turn in progress: show prompt immediately, then loading assistant */}
-                {session?.current_prompt && (
-                  <>
-                    <ChatMessage
-                      role="user"
-                      content={session.current_prompt}
-                      userLabel="Agent"
-                    />
-                    <ChatMessage
-                      role="assistant"
-                      content=""
-                      isAssistantLoading={true}
-                      turnNumber={(session?.turns?.length ?? 0) + 1}
-                      hideGeneratedOutput
-                    />
-                  </>
-                )}
-                <div ref={turnsEndRef} />
-              </div>
-            ) : (
-              <p className="text-sm text-muted">
-                {isActive
-                  ? "Waiting for agent to submit first prompt…"
-                  : "No turns yet."}
-              </p>
-            )}
-          </div>
-          {session?.status === "completed" && (
-            <div className="shrink-0 border-t border-border p-4 bg-muted/5">
-              <h2 className="text-xs font-semibold uppercase tracking-wider text-muted mb-2">
-                Final score
-              </h2>
-              <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
-                <div>
-                  <span className="text-muted">Composite </span>
-                  <span className="font-mono font-semibold text-accent">
-                    {session.composite_score ?? "—"}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-muted">Accuracy </span>
-                  <span className="font-mono">{session.accuracy_score ?? "—"}</span>
-                </div>
-                <div>
-                  <span className="text-muted">Turns </span>
-                  <span className="font-mono">{session.total_turns}</span>
-                </div>
-                <div>
-                  <span className="text-muted">Tokens </span>
-                  <span className="font-mono">{session.total_tokens}</span>
-                </div>
-              </div>
-            </div>
-          )}
         </div>
       </div>
     </div>

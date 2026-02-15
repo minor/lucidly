@@ -20,28 +20,28 @@ AGENTS: list[Agent] = [
         id="claude-direct",
         name="Claude Direct",
         strategy="claude_direct",
-        description="Single-model direct code generation. Uses DEFAULT_MODEL from your .env (OpenAI, OpenRouter, etc.).",
+        description="Single-model direct code generation.",
         model="",  # empty = use backend DEFAULT_MODEL so it works with any configured API
     ),
     Agent(
         id="openai-cot",
         name="OpenAI Chain-of-Thought",
         strategy="openai_cot",
-        description="OpenAI model with chain-of-thought system prompt.",
+        description="Chain-of-thought system prompt.",
         model="gpt-4o",
     ),
     Agent(
         id="claude-sdk",
         name="Claude Agent SDK",
         strategy="claude_sdk",
-        description="Claude with Agent SDK: tools, reasoning, and multi-step code generation.",
+        description="Tools, reasoning, multi-step code generation.",
         model="",  # empty = use backend DEFAULT_MODEL
     ),
     Agent(
         id="openai-assistant",
         name="OpenAI Assistant",
         strategy="openai_assistant",
-        description="OpenAI Assistants API with a submit_prompt function tool.",
+        description="OpenAI Assistants API with function tool.",
         model="gpt-4o",
     ),
 ]

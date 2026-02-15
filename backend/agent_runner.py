@@ -15,7 +15,7 @@ from challenges import get_challenge_by_id
 from agent_turn import complete_agent_session, execute_prompt_turn
 from llm import LLM
 from evaluation.scoring import compute_accuracy_text
-from sessions import get_session, add_turn, Turn
+from sessions import get_session, add_turn, append_trace, Turn
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +53,25 @@ async def _run_agent_loop_claude_sdk(
     session_id: str, challenge_id: str, agent_id: str
 ) -> None:
     """Run the Claude Agent SDK with a custom submit_prompt tool that calls our backend."""
+    # #region agent log
+    try:
+        with open("/Users/helenazhou/Dev/lucidly/.cursor/debug.log", "a") as _f:
+            _f.write(
+                json.dumps(
+                    {
+                        "id": "claude_sdk_entry",
+                        "timestamp": time.time() * 1000,
+                        "location": "agent_runner.py:_run_agent_loop_claude_sdk",
+                        "message": "claude_sdk entry",
+                        "data": {"session_id": session_id[:8]},
+                        "hypothesisId": "H1",
+                    }
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # #endregion
     try:
         from claude_agent_sdk import (
             ClaudeAgentOptions,
@@ -62,13 +81,84 @@ async def _run_agent_loop_claude_sdk(
         )
     except ImportError as e:
         logger.error("claude-agent-sdk not installed: %s", e)
+        # #region agent log
+        try:
+            with open("/Users/helenazhou/Dev/lucidly/.cursor/debug.log", "a") as _f:
+                _f.write(
+                    json.dumps(
+                        {
+                            "id": "claude_sdk_import_failed",
+                            "timestamp": time.time() * 1000,
+                            "location": "agent_runner.py:_run_agent_loop_claude_sdk",
+                            "message": "claude_sdk import failed",
+                            "data": {"session_id": session_id[:8], "error": str(e)[:200]},
+                            "hypothesisId": "H1",
+                        }
+                    )
+                    + "\n"
+                )
+        except Exception:
+            pass
+        # #endregion
         complete_agent_session(session_id)
         return
+
+    # #region agent log
+    try:
+        with open("/Users/helenazhou/Dev/lucidly/.cursor/debug.log", "a") as _f:
+            _f.write(
+                json.dumps(
+                    {
+                        "id": "claude_sdk_import_ok",
+                        "timestamp": time.time() * 1000,
+                        "location": "agent_runner.py:_run_agent_loop_claude_sdk",
+                        "message": "claude_sdk import ok",
+                        "data": {"session_id": session_id[:8]},
+                        "hypothesisId": "H2",
+                    }
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # #endregion
+
+    import os
+    from config import settings
+    # Claude Agent SDK reads ANTHROPIC_API_KEY from env; without it receive_response() hangs
+    if not (os.environ.get("ANTHROPIC_API_KEY") or getattr(settings, "anthropic_api_key", "")):
+        # #region agent log
+        try:
+            with open("/Users/helenazhou/Dev/lucidly/.cursor/debug.log", "a") as _f:
+                _f.write(
+                    json.dumps(
+                        {
+                            "id": "claude_sdk_no_key",
+                            "timestamp": time.time() * 1000,
+                            "location": "agent_runner.py:_run_agent_loop_claude_sdk",
+                            "message": "claude_sdk requires ANTHROPIC_API_KEY",
+                            "data": {"session_id": session_id[:8]},
+                            "hypothesisId": "H5",
+                        }
+                    )
+                    + "\n"
+                )
+        except Exception:
+            pass
+        # #endregion
+        logger.error("Claude Agent SDK requires ANTHROPIC_API_KEY in .env (SDK uses Anthropic API, not OPENAI_API_KEY)")
+        complete_agent_session(session_id)
+        return
+    if getattr(settings, "anthropic_api_key", ""):
+        os.environ.setdefault("ANTHROPIC_API_KEY", settings.anthropic_api_key)
 
     session = get_session(session_id)
     challenge = get_challenge_by_id(challenge_id)
     if not session or not challenge or session.status != "active":
         return
+
+    t0 = time.time()
+    _trace(session_id, "Starting Claude Agent SDK", t0)
 
     @tool(
         "submit_prompt",
@@ -76,7 +166,30 @@ async def _run_agent_loop_claude_sdk(
         {"prompt": str},
     )
     async def submit_prompt_tool(args: dict[str, Any]) -> dict[str, Any]:
+        _trace(session_id, "Requesting code from model", t0, prompt_len=len(args.get("prompt") or ""))
+        # #region agent log
+        try:
+            with open("/Users/helenazhou/Dev/lucidly/.cursor/debug.log", "a") as _f:
+                _f.write(
+                    json.dumps(
+                        {
+                            "id": "claude_sdk_tool_called",
+                            "timestamp": time.time() * 1000,
+                            "location": "agent_runner.py:submit_prompt_tool",
+                            "message": "claude_sdk tool called",
+                            "data": {"session_id": session_id[:8], "prompt_len": len((args.get("prompt") or ""))},
+                            "hypothesisId": "H4",
+                        }
+                    )
+                    + "\n"
+                )
+        except Exception:
+            pass
+        # #endregion
         data = await execute_prompt_turn(session_id, args["prompt"])
+        acc = data.get("accuracy")
+        if acc is not None:
+            _trace(session_id, "Received code from model", t0, accuracy=round(float(acc), 2))
         snippet = (data.get("generated_code") or "")[:2000]
         return {
             "content": [
@@ -93,6 +206,7 @@ async def _run_agent_loop_claude_sdk(
         tools=[submit_prompt_tool],
     )
     brief = _challenge_brief(challenge)
+    _trace(session_id, "Task prepared for agent", t0)
     options = ClaudeAgentOptions(
         mcp_servers={"lucidly-challenge": custom_server},
         allowed_tools=["mcp__lucidly-challenge__submit_prompt"],
@@ -106,15 +220,113 @@ async def _run_agent_loop_claude_sdk(
         max_turns=MAX_TURNS,
     )
 
+    # #region agent log
+    try:
+        with open("/Users/helenazhou/Dev/lucidly/.cursor/debug.log", "a") as _f:
+            _f.write(
+                json.dumps(
+                    {
+                        "id": "claude_sdk_before_client",
+                        "timestamp": time.time() * 1000,
+                        "location": "agent_runner.py:_run_agent_loop_claude_sdk",
+                        "message": "claude_sdk before ClaudeSDKClient",
+                        "data": {"session_id": session_id[:8]},
+                        "hypothesisId": "H2",
+                    }
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # #endregion
     try:
         async with ClaudeSDKClient(options=options) as client:
+            # #region agent log
+            try:
+                with open("/Users/helenazhou/Dev/lucidly/.cursor/debug.log", "a") as _f:
+                    _f.write(
+                        json.dumps(
+                            {
+                                "id": "claude_sdk_before_query",
+                                "timestamp": time.time() * 1000,
+                                "location": "agent_runner.py:_run_agent_loop_claude_sdk",
+                                "message": "claude_sdk before client.query",
+                                "data": {"session_id": session_id[:8]},
+                                "hypothesisId": "H2,H4",
+                            }
+                        )
+                        + "\n"
+                    )
+            except Exception:
+                pass
+            # #endregion
             prompt = "Complete this coding challenge. Use the submit_prompt tool to generate and refine code. Your first response must request runnable code (HTML for UI challenges) in a markdown code block."
+            _trace(session_id, "Sending task to agent", t0)
             await client.query(prompt)
+            _trace(session_id, "Agent reasoning…", t0)
+            # #region agent log
+            try:
+                with open("/Users/helenazhou/Dev/lucidly/.cursor/debug.log", "a") as _f:
+                    _f.write(
+                        json.dumps(
+                            {
+                                "id": "claude_sdk_query_done",
+                                "timestamp": time.time() * 1000,
+                                "location": "agent_runner.py:_run_agent_loop_claude_sdk",
+                                "message": "claude_sdk client.query returned",
+                                "data": {"session_id": session_id[:8]},
+                                "hypothesisId": "H2",
+                            }
+                        )
+                        + "\n"
+                    )
+            except Exception:
+                pass
+            # #endregion
             async for _ in client.receive_response():
                 pass
+            _trace(session_id, "Agent finished", t0)
     except Exception as e:
+        # #region agent log
+        try:
+            with open("/Users/helenazhou/Dev/lucidly/.cursor/debug.log", "a") as _f:
+                _f.write(
+                    json.dumps(
+                        {
+                            "id": "claude_sdk_exception",
+                            "timestamp": time.time() * 1000,
+                            "location": "agent_runner.py:_run_agent_loop_claude_sdk",
+                            "message": "claude_sdk exception",
+                            "data": {"session_id": session_id[:8], "error": str(e)[:300]},
+                            "hypothesisId": "H3",
+                        }
+                    )
+                    + "\n"
+                )
+        except Exception:
+            pass
+        # #endregion
         logger.exception("Claude SDK run failed: %s", e)
     finally:
+        # #region agent log
+        try:
+            with open("/Users/helenazhou/Dev/lucidly/.cursor/debug.log", "a") as _f:
+                _f.write(
+                    json.dumps(
+                        {
+                            "id": "claude_sdk_finally",
+                            "timestamp": time.time() * 1000,
+                            "location": "agent_runner.py:_run_agent_loop_claude_sdk",
+                            "message": "claude_sdk finally",
+                            "data": {"session_id": session_id[:8]},
+                            "hypothesisId": "H3",
+                        }
+                    )
+                    + "\n"
+                )
+        except Exception:
+            pass
+        # #endregion
         complete_agent_session(session_id)
         logger.info("Claude SDK agent run finished: session_id=%s", session_id)
 
@@ -170,6 +382,8 @@ async def _run_agent_loop_openai_assistant(
         ],
     )
 
+    title = getattr(challenge, "title", None) or "Challenge"
+    description = getattr(challenge, "description", None) or ""
     thread = await client.beta.threads.create()
     await client.beta.threads.messages.create(
         thread_id=thread.id,
@@ -228,6 +442,9 @@ def _trace(session_id: str, step: str, t0: float, **kwargs: Any) -> None:
     elapsed_ms = int((time.time() - t0) * 1000)
     extra = " ".join(f"{k}={v}" for k, v in kwargs.items())
     logger.info("[agent_trace] session_id=%s %s (+%dms) %s", session_id[:8], step, elapsed_ms, extra or "")
+    session = get_session(session_id)
+    if session and session.username.startswith("agent:"):
+        append_trace(session_id, step, elapsed_ms, **kwargs)
     # #region agent log
     try:
         with open("/Users/helenazhou/Dev/lucidly/.cursor/debug.log", "a") as _f:
@@ -285,7 +502,7 @@ async def run_agent_loop(session_id: str, challenge_id: str, agent_id: str) -> N
     # #endregion
 
     t0 = time.time()
-    _trace(session_id, "run_agent_loop started", t0, challenge_id=challenge_id, agent_id=agent_id)
+    _trace(session_id, "Starting run", t0, challenge_id=challenge_id, agent_id=agent_id)
 
     session = get_session(session_id)
     if session is None:
@@ -314,14 +531,14 @@ async def run_agent_loop(session_id: str, challenge_id: str, agent_id: str) -> N
         # #region agent log
         _debug_log("run_agent_loop branch", {"branch": "claude-sdk"}, "H3,H4")
         # #endregion
-        _trace(session_id, "delegating to claude-sdk", t0)
+        _trace(session_id, "Starting Claude Agent SDK", t0)
         await _run_agent_loop_claude_sdk(session_id, challenge_id, agent_id)
         return
     if agent_id == "openai-assistant":
         # #region agent log
         _debug_log("run_agent_loop branch", {"branch": "openai-assistant"}, "H3,H4")
         # #endregion
-        _trace(session_id, "delegating to openai-assistant", t0)
+        _trace(session_id, "Starting OpenAI Assistant", t0)
         await _run_agent_loop_openai_assistant(session_id, challenge_id, agent_id)
         return
 
@@ -331,9 +548,9 @@ async def run_agent_loop(session_id: str, challenge_id: str, agent_id: str) -> N
 
     from config import settings
     model_used = agent.model or settings.default_model
-    _trace(session_id, "building brief", t0)
+    _trace(session_id, "Preparing task", t0)
     brief = _challenge_brief(challenge)
-    _trace(session_id, "brief built, creating LLM", t0)
+    _trace(session_id, "Initializing model", t0)
 
     def first_turn_prompt(aid: str) -> str:
         if aid == "openai-cot":
@@ -384,7 +601,7 @@ async def run_agent_loop(session_id: str, challenge_id: str, agent_id: str) -> N
             elif s and turn_count > 1:
                 s.current_prompt = None
 
-            _trace(session_id, f"turn_{turn_count} llm.generate start", t0, prompt_len=len(prompt))
+            _trace(session_id, "Sending task to model", t0, prompt_len=len(prompt))
             max_tok = getattr(settings, "max_completion_tokens_agent", 4096)
             response = await llm.generate(
                 prompt,
@@ -392,7 +609,7 @@ async def run_agent_loop(session_id: str, challenge_id: str, agent_id: str) -> N
                 system_prompt=system_prompt,
                 max_tokens=max_tok,
             )
-            _trace(session_id, f"turn_{turn_count} llm.generate done", t0, response_tokens=response.response_tokens)
+            _trace(session_id, "Model responded", t0, response_tokens=response.response_tokens)
 
             accuracy = 0.0
             if challenge.target_code:
@@ -411,7 +628,7 @@ async def run_agent_loop(session_id: str, challenge_id: str, agent_id: str) -> N
                 timestamp=time.time(),
             )
             add_turn(session_id, turn)
-            _trace(session_id, f"turn_{turn_count} recorded", t0)
+            _trace(session_id, "Saved response", t0)
             session = get_session(session_id)
             if session:
                 session.current_prompt = None
@@ -426,7 +643,7 @@ async def run_agent_loop(session_id: str, challenge_id: str, agent_id: str) -> N
                 break
 
         complete_agent_session(session_id)
-        _trace(session_id, "completed", t0, total_turns=turn_count)
+        _trace(session_id, "Done", t0, total_turns=turn_count)
         logger.info("Agent run completed: session_id=%s turns=%s", session_id, turn_count)
     except Exception as e:
         logger.exception("Agent run failed: session_id=%s %s", session_id, e)

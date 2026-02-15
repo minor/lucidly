@@ -2,6 +2,8 @@
 
 import time
 import uuid
+from typing import Any
+
 from pydantic import BaseModel
 
 
@@ -29,6 +31,8 @@ class Session(BaseModel):
     turns: list[Turn] = []
     # Prompt for the turn currently in progress (shown in chat before response is ready)
     current_prompt: str | None = None
+    # Agent run: ordered list of thinking-trace steps (step, elapsed_ms, timestamp, **kwargs)
+    thinking_trace: list[dict] = []
     # Scores (populated on completion)
     accuracy_score: float | None = None
     speed_score: float | None = None
@@ -84,6 +88,19 @@ def add_turn(session_id: str, turn: Turn) -> Session | None:
     session.total_tokens += turn.prompt_tokens + turn.response_tokens
     session.final_code = turn.generated_code
     return session
+
+
+def append_trace(session_id: str, step: str, elapsed_ms: int, **kwargs: Any) -> None:
+    """Append a thinking-trace entry for agent runs (used by agent_runner._trace)."""
+    session = _sessions.get(session_id)
+    if session is None:
+        return
+    session.thinking_trace.append({
+        "step": step,
+        "elapsed_ms": elapsed_ms,
+        "timestamp": time.time(),
+        **kwargs,
+    })
 
 
 def complete_session(session_id: str, scores: dict) -> Session | None:

@@ -27,6 +27,14 @@ export interface Turn {
   timestamp: number;
 }
 
+/** One step in the agent thinking trace (agent runs only). */
+export interface ThinkingTraceEntry {
+  step: string;
+  elapsed_ms: number;
+  timestamp: number;
+  [key: string]: unknown;
+}
+
 export interface Session {
   id: string;
   challenge_id: string;
@@ -40,6 +48,8 @@ export interface Session {
   turns: Turn[];
   /** Prompt for the turn currently in progress (show in chat before response is ready) */
   current_prompt?: string | null;
+  /** Agent run: ordered list of thinking-trace steps */
+  thinking_trace?: ThinkingTraceEntry[];
   accuracy_score: number | null;
   speed_score: number | null;
   token_score: number | null;
