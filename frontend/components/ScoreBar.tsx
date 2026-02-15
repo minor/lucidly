@@ -40,7 +40,7 @@ export function ScoreBar({
   // Determine circle color based on score (0-100)
   const getScoreColor = (scoreValue: number) => {
     if (scoreValue <= 50) return "bg-red-500"; // Red for 0-50
-    if (scoreValue <= 80) return "bg-yellow-500"; // Yellow for 51-80
+    if (scoreValue <= 80) return "bg-orange-500"; // Orange for 51-80
     return "bg-green-500"; // Green for 81-100
   };
 

@@ -31,10 +31,10 @@ export function ChallengeCard({ challenge }: ChallengeCardProps) {
   return (
     <Link
       href={`/play/${challenge.id}`}
-      className="group block rounded-xl border border-border bg-card p-5 transition-all hover:border-accent/40 hover:shadow-md"
+      className="card-hover group block rounded-2xl border border-border bg-card p-5 transition-all hover:border-accent/40"
     >
       <div className="flex items-start justify-between mb-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent/10 text-accent">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent/10 text-accent">
           <Icon className="h-5 w-5" />
         </div>
         <div className="flex items-center gap-2">
