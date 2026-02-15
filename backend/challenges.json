@@ -74,14 +74,14 @@
     {
         "id": "loss-reserve-prd",
         "title": "Loss Reserve Adequacy: Discovery & PRD",
-        "description": "In Part 1, you must ask questions to understand the problem. In the next part, you must write a PRD that proposes a technical solution.\n\nYou are the CEO of a technology solutions company. You are meeting the Chief Risk Officer (CRO) of a multinational insurance company operating in 9 countries. They want to improve their process of submitting quarterly Loss Reserve Adequacy Reports to regulators in each jurisdiction.",
+        "description": "In Part 1, you must ask questions to understand the problem. In Part 2, you must write a PRD that proposes a technical solution.\nYou are the CEO of a technology solutions company. You are meeting the Chief Risk Officer (CRO) of a multinational insurance company operating in 9 countries. They want to improve their process of submitting quarterly Loss Reserve Adequacy Reports to regulators in each jurisdiction.",
         "category": "product",
         "difficulty": "hard",
         "product_parts": [
             {
                 "part": 1,
                 "title": "Part 1: Discovery",
-                "description": "Chat with the Chief Risk Officer (CRO) to understand the problem. Ask clarifying questions to uncover the current process, pain points, risks, and constraints. Take notes in the notepad. When you feel you have a clear picture, proceed to Part 2."
+                "description": "Chat with the Chief Risk Officer (CRO) to understand the problem. Ask clarifying questions to uncover the current process, pain points, and constraints. Take notes in the notepad. When you feel you have a clear picture, proceed to Part 2."
             },
             {
                 "part": 2,

@@ -864,29 +864,29 @@ export default function ChallengePage() {
               <SimpleMarkdown content={challenge?.description || ""} className="text-sm leading-relaxed mb-4" />
 
               {isProductChallenge && productParts.length > 0 && (
-                <div className="mb-4 space-y-3">
-                  <div className="rounded-lg border border-border bg-muted/10 p-4">
-                    <div className="flex items-center justify-between gap-2 mb-2">
-                      <span className="text-sm font-semibold text-foreground">
-                        {productParts[productPart - 1]?.title ?? `Part ${productPart}`}
-                      </span>
-                      {productPart === 1 && (
+                <div className="mb-10 pb-4 space-y-3">
+                  <div className="rounded-lg border border-border bg-muted/10 p-4 pb-5 flex flex-col">
+                    <span className="text-sm font-semibold text-foreground mb-2">
+                      {productParts[productPart - 1]?.title ?? `Part ${productPart}`}
+                    </span>
+                    <SimpleMarkdown
+                      content={productParts[productPart - 1]?.description ?? ""}
+                      className="text-sm leading-relaxed text-muted-foreground"
+                    />
+                    {productPart === 1 && (
+                      <div className="mt-2 flex justify-start">
                         <button
                           type="button"
                           onClick={() => {
                             setProductPart(2);
                             setMessages([]);
                           }}
-                          className="shrink-0 rounded-lg bg-foreground text-background px-3 py-1.5 text-xs font-medium hover:opacity-90 cursor-pointer"
+                          className="rounded-lg bg-foreground text-background px-3 py-1.5 text-xs font-medium hover:opacity-90 cursor-pointer"
                         >
                           Next → Part 2
                         </button>
-                      )}
-                    </div>
-                    <SimpleMarkdown
-                      content={productParts[productPart - 1]?.description ?? ""}
-                      className="text-sm leading-relaxed text-muted-foreground"
-                    />
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

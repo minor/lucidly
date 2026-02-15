@@ -245,7 +245,6 @@ async def _run_agent_loop_claude_sdk(
     embed_url = getattr(challenge, "embed_url", None) or (challenge.get("embed_url") if isinstance(challenge, dict) else None)
     html_url = getattr(challenge, "html_url", None) or (challenge.get("html_url") if isinstance(challenge, dict) else None)
     image_url = getattr(challenge, "image_url", None) or (challenge.get("image_url") if isinstance(challenge, dict) else None)
-    lucidly_app_url = (getattr(settings, "lucidly_app_url", "") or "").strip().rstrip("/")
     has_reference = bool(embed_url or html_url or image_url)
     browserbase_configured = bool(
         getattr(settings, "browserbase_api_key", "") and getattr(settings, "browserbase_project_id", "")
@@ -310,24 +309,10 @@ async def _run_agent_loop_claude_sdk(
             err_msg = f"Could not capture screenshot of {url}: {e}"
             if "401" in str(e) or "Unauthorized" in str(e):
                 err_msg += " Check BROWSERBASE_API_KEY and BROWSERBASE_PROJECT_ID in .env; the key must be valid and the project must belong to your Browserbase account."
-            if "ERR_CONNECTION_REFUSED" in str(e) and ("localhost" in url or "127.0.0.1" in url):
-                err_msg += " Browserbase runs in the cloud and cannot open localhost. Set LUCIDLY_APP_URL to a public URL (e.g. ngrok or deployed app) or leave it unset to use the challenge reference URL (e.g. embed_url) for the screenshot."
             _agent_tool_log("generate_landing_page", result_preview=err_msg[:500], result_full=err_msg)
             return {"content": [{"type": "text", "text": err_msg}]}
         _trace(session_id, "Screenshot captured, generating HTML", t0, screenshot_len=len(screenshot_data_url or ""))
         logger.info("[generate_landing_page] Screenshot captured, len=%d, calling vision model", len(screenshot_data_url or ""))
-        if lucidly_app_url and f"/agents/run/{session_id}" in (url or ""):
-            replicate_prompt = (
-                "The screenshot shows the Lucidly agent run page. Recreate only the reference design (the embedded landing page or reference block in the left task panel), not the Lucidly chrome or right-hand panels. "
-                "Output one complete HTML document with inline CSS that matches that reference: layout, typography, colors, spacing, and all visible text. "
-                "Do not add placeholder content—replicate the reference exactly."
-            )
-        else:
-            replicate_prompt = (
-                "Recreate this landing page exactly as shown in the screenshot. "
-                "Output one complete HTML document with inline CSS. Match layout, typography, colors, spacing, and all visible text. "
-                "Do not add placeholder content—replicate what you see."
-            )
         session_before = get_session(session_id)
         base_tokens = (session_before.total_tokens if session_before else 0)
 
