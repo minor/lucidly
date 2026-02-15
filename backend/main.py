@@ -522,7 +522,17 @@ async def session_ws(ws: WebSocket, session_id: str):
                     history.append({"role": "user", "content": turn.prompt_text})
                     history.append({"role": "assistant", "content": turn.response_text})
 
-                llm_instance = LLM(model=model) if model != llm.model else llm
+                # Route to the correct provider based on model name
+                if model.startswith("grok") and settings.xai_api_key:
+                    llm_instance = LLM(
+                        base_url=settings.xai_base_url,
+                        api_key=settings.xai_api_key,
+                        model=model,
+                    )
+                elif model != llm.model:
+                    llm_instance = LLM(model=model)
+                else:
+                    llm_instance = llm
 
                 # Stream response
                 full_response = ""
@@ -625,11 +635,20 @@ async def chat_stream(req: ChatRequest):
     is_claude_model = req.model is not None and req.model.startswith("claude")
     use_anthropic = bool(settings.anthropic_api_key) and is_claude_model
     
+    # Determine if we should use xAI API for Grok models
+    is_grok_model = req.model is not None and req.model.startswith("grok")
+    use_xai = bool(settings.xai_api_key) and is_grok_model
+    
     # Validate that we have at least one API key configured
-    if not use_anthropic and not settings.openai_api_key:
+    if not use_anthropic and not use_xai and not settings.openai_api_key:
         raise HTTPException(
             status_code=500,
-            detail="No API key configured. Please set either ANTHROPIC_API_KEY or OPENAI_API_KEY in your .env file."
+            detail="No API key configured. Please set ANTHROPIC_API_KEY, XAI_API_KEY, or OPENAI_API_KEY in your .env file."
+        )
+    if use_xai and not settings.xai_api_key:
+        raise HTTPException(
+            status_code=500,
+            detail="XAI_API_KEY is not configured. Please set it in your .env file to use Grok models."
         )
     
     # Use correct Anthropic model names
@@ -731,6 +750,55 @@ async def chat_stream(req: ChatRequest):
                         cost = (input_tokens * pricing["input"] + output_tokens * pricing["output"]) / 1_000_000
                         
                         yield f"data: {json.dumps({'type': 'done', 'content': full_response, 'input_tokens': input_tokens, 'output_tokens': output_tokens, 'cost': cost})}\n\n"
+            elif use_xai:
+                # Use xAI API for Grok models (OpenAI-compatible)
+                conversation_history = []
+                current_prompt = ""
+                
+                for msg in anthropic_messages:
+                    if msg["role"] == "user":
+                        if current_prompt:
+                            conversation_history.append({"role": "user", "content": current_prompt})
+                        current_prompt = msg["content"]
+                    elif msg["role"] == "assistant":
+                        if current_prompt:
+                            conversation_history.append({"role": "user", "content": current_prompt})
+                            current_prompt = ""
+                        conversation_history.append({"role": "assistant", "content": msg["content"]})
+                
+                xai_llm = LLM(
+                    base_url=settings.xai_base_url,
+                    api_key=settings.xai_api_key,
+                    model=model,
+                    system_prompt=system_message,
+                )
+                
+                full_response = ""
+                async for chunk in xai_llm.stream(
+                    current_prompt,
+                    conversation_history=conversation_history if conversation_history else None,
+                ):
+                    full_response += chunk
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
+                
+                est_input_tokens = len(current_prompt.split()) * 2
+                est_output_tokens = len(full_response.split()) * 2
+                
+                yield f"data: {json.dumps({'type': 'usage', 'input_tokens': est_input_tokens})}\n\n"
+
+                from config import MODEL_PRICING
+                pricing = MODEL_PRICING.get(model)
+                if not pricing:
+                    for key, p in MODEL_PRICING.items():
+                        if model.startswith(key):
+                            pricing = p
+                            break
+                if not pricing:
+                    pricing = {"input": 0.20, "output": 0.50}
+
+                cost = (est_input_tokens * pricing["input"] + est_output_tokens * pricing["output"]) / 1_000_000
+                
+                yield f"data: {json.dumps({'type': 'done', 'content': full_response, 'input_tokens': est_input_tokens, 'output_tokens': est_output_tokens, 'cost': cost})}\n\n"
             else:
                 # Use OpenAI-compatible API (e.g., OpenRouter)
                 conversation_history = []
