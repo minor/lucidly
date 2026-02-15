@@ -3,6 +3,12 @@ export interface TestCase {
   expected_output: string;
 }
 
+export interface ProductPart {
+  part: number;
+  title: string;
+  description: string;
+}
+
 export interface Challenge {
   id: string;
   title: string;
@@ -15,6 +21,9 @@ export interface Challenge {
   image_url: string | null;
   embed_url: string | null;
   html_url: string | null;
+  /** Product challenges: Part 1 (discovery) and Part 2 (PRD) */
+  product_parts?: ProductPart[] | null;
+  agent_context?: string | null;
 }
 
 export interface Turn {

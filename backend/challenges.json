@@ -65,45 +65,30 @@
         ]
     },
     {
-        "id": "debug-lis",
-        "title": "Debug: Longest Increasing Subsequence",
-        "description": "The following function is supposed to return the length of the longest STRICTLY increasing subsequence, but it has a subtle bug. It produces correct results for many inputs but fails on others.\n\nFind and fix the bug. Your fixed function must be named `longest_increasing_subsequence`.",
-        "category": "debug",
-        "difficulty": "easy",
-        "starter_code": "import bisect\n\ndef longest_increasing_subsequence(nums):\n    if not nums:\n        return 0\n    tails = []\n    for num in nums:\n        pos = bisect.bisect_right(tails, num)\n        if pos == len(tails):\n            tails.append(num)\n        else:\n            tails[pos] = num\n    return len(tails)\n",
-        "target_code": "import bisect\n\ndef longest_increasing_subsequence(nums):\n    if not nums:\n        return 0\n    tails = []\n    for num in nums:\n        pos = bisect.bisect_left(tails, num)\n        if pos == len(tails):\n            tails.append(num)\n        else:\n            tails[pos] = num\n    return len(tails)\n",
-        "test_suite": [
-            {
-                "input": "longest_increasing_subsequence([10, 9, 2, 5, 3, 7, 101, 18])",
-                "expected_output": "4"
-            },
-            {
-                "input": "longest_increasing_subsequence([1, 2, 3, 4, 5])",
-                "expected_output": "5"
-            },
-            {
-                "input": "longest_increasing_subsequence([7, 7, 7, 7, 7])",
-                "expected_output": "1"
-            },
-            {
-                "input": "longest_increasing_subsequence([3, 1, 2, 1, 2, 3])",
-                "expected_output": "3"
-            },
-            {
-                "input": "longest_increasing_subsequence([1, 1, 1, 2, 2, 3])",
-                "expected_output": "3"
-            },
-            {
-                "input": "longest_increasing_subsequence([])",
-                "expected_output": "0"
-            }
-        ]
-    },
-    {
         "id": "nyt-front-page-scraper",
         "title": "NYT Front Page Scraper",
         "description": "Build a web scraper that grabs all the articles on the NYT front page (https://www.nytimes.com). Extract article titles, URLs, and optionally summaries or bylines. Return structured data (e.g. JSON or list of dicts). Use Python with requests/BeautifulSoup, or another language of your choice.",
         "category": "data",
         "difficulty": "medium"
+    },
+    {
+        "id": "loss-reserve-prd",
+        "title": "Loss Reserve Adequacy: Discovery & PRD",
+        "description": "In Part 1, you must ask questions to understand the problem. In Part 2, you must write a PRD that proposes a technical solution.\nYou are the CEO of a technology solutions company. You are meeting the Chief Risk Officer (CRO) of a multinational insurance company operating in 9 countries. They want to improve their process of submitting quarterly Loss Reserve Adequacy Reports to regulators in each jurisdiction.",
+        "category": "product",
+        "difficulty": "hard",
+        "product_parts": [
+            {
+                "part": 1,
+                "title": "Part 1: Discovery",
+                "description": "Chat with the Chief Risk Officer (CRO) to understand the problem. Ask clarifying questions to uncover the current process, pain points, and constraints. Take notes in the notepad. When you feel you have a clear picture, proceed to Part 2."
+            },
+            {
+                "part": 2,
+                "title": "Part 2: PRD",
+                "description": "Write a Product Requirements Document (PRD) that proposes a technical solution to improve the Loss Reserve Adequacy reporting process. Use the information you gathered in Part 1. Your PRD should address the current pain points and propose a clear, actionable solution."
+            }
+        ],
+        "agent_context": "You are the Chief Risk Officer (CRO) of a multinational insurance company operating in 9 countries. You are in a meeting with the CEO of a technology solutions company who may help improve your process. Stay in character at all times: you are the CRO, not an AI. Always speak in first person: use \"I\", \"we\", \"my team\", \"our process\", \"I don't\", \"we have\", etc. Never break character or refer to yourself as a model or assistant.\n\n**Critical behavior:** Be sassy and a bit curt. Answer only what is explicitly asked—nothing more. Never give a response longer than 100 words. Be specific and narrow; do not volunteer extra context or elaborate. If they ask a broad question, answer the narrowest reasonable interpretation (in 1–3 sentences). This tests whether they ask the right questions. You have the following information but you are human and busy: you do not reveal everything at once.\n\n**Stakes – failure to submit on time or incorrect reporting results in:**\n- Regulatory penalties\n- Capital requirement increases\n- Public disclosure\n- Share price impact\n\nThe previous CRO resigned after a reserve misstatement triggered regulatory review.\n\n**Current situation – every quarter-end:**\n- Step 1 – Policy Data Extraction: Contractors log into Guidewire (Policy system), extract all active policies for the quarter, export to spreadsheets.\n- Step 2 – Claims Data Pull: Log into SAP Claims module, extract all claims for those policies, pull claim amount, paid amount, outstanding reserve.\n- Step 3 – Actuarial Adjustment: Upload claims data into a third-party actuarial software tool, apply reserve development factors, determine if additional reserves are needed.\n- Step 4 – Manual Review: Analysts manually review large claims, flag inconsistencies, identify potentially under-reserved claims.\n- Step 5 – Regulatory Report Creation: Final spreadsheet contains per policy: total claims, total paid, total outstanding, adjusted reserve, capital impact. Output formats: 5 jurisdictions require CSV, 2 require XML, 1 requires regulator portal upload, 1 requires signed PDF submission. Submission deadline: 30 days post-quarter close.\n\n**Operational reality:**\nTakes ~3 weeks to complete. Large BPO team in Eastern Europe handles first pass. Internal actuarial team validates. QA sampling covers ~10% of policies. Frequent reconciliation mismatches between systems. No centralized visibility dashboard. Audit trail mostly email-based.\n\n**Hidden problems:**\nReserve miscalculations could distort capital ratios. Heavy spreadsheet dependency. Manual reconciliation between Guidewire, SAP, and the actuarial tool. Data lineage not documented. Jurisdiction-specific formatting errors. Senior leadership only sees final output. If regulators question assumptions, manual reconstruction is required."
     }
 ]

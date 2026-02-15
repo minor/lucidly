@@ -8,11 +8,17 @@ class TestCase(BaseModel):
     expected_output: str
 
 
+class ProductPart(BaseModel):
+    part: int
+    title: str
+    description: str
+
+
 class Challenge(BaseModel):
     id: str
     title: str
     description: str
-    category: str  # ui, function, debug, system, data
+    category: str  # ui, function, debug, system, data, product
     difficulty: str  # easy, medium, hard
     target_code: str | None = None
     test_suite: list[TestCase] | None = None
@@ -20,6 +26,9 @@ class Challenge(BaseModel):
     image_url: str | None = None  # URL or path to challenge visual (image/gif)
     embed_url: str | None = None  # URL to embed as live page (e.g. for animated UIs)
     html_url: str | None = None  # Path to HTML file to render as reference
+    # Product-type challenges: multi-part flow (discovery → PRD) with roleplay agent
+    product_parts: list[ProductPart] | None = None
+    agent_context: str | None = None  # System prompt for roleplay agent (e.g. CRO)
 
 
 # ---------------------------------------------------------------------------
