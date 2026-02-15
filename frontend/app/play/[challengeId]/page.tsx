@@ -693,10 +693,10 @@ export default function ChallengePage() {
                 isStreaming || 
                 (!testResults && !codeResult && !renderedCode)
             }
-            className={`shrink-0 rounded-lg px-4 py-2 text-xs font-medium transition-opacity ${
+            className={`shrink-0 rounded-lg bg-foreground text-background px-4 py-2 text-xs font-medium transition-opacity ${
                 submitState === 'pending' || (submitState === 'idle' && (isExecuting || isStreaming || (!testResults && !codeResult && !renderedCode)))
-                ? "bg-muted text-muted-foreground cursor-not-allowed italic"
-                : "bg-foreground text-background hover:opacity-90 cursor-pointer"
+                ? "opacity-50 cursor-not-allowed"
+                : "hover:opacity-90 cursor-pointer"
             }`}
         >
             {submitState === "pending" ? "Pending" : submitState === "completed" ? "Retry" : "Submit solution"}
