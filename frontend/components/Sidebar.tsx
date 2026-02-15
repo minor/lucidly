@@ -10,6 +10,7 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useAuth0 } from "@auth0/auth0-react";
 
 const NAV_ITEMS = [
   { href: "/play", label: "New Challenge", icon: PlusCircle },
@@ -22,8 +23,17 @@ const MAX_WIDTH = 400;
 const DEFAULT_WIDTH = 240; // 60 * 4 = 240px (w-60)
 const COLLAPSED_WIDTH = 64;
 
+const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+
 export function Sidebar() {
   const pathname = usePathname();
+  const {
+    isLoading: authLoading,
+    isAuthenticated,
+    user,
+    loginWithRedirect,
+    logout,
+  } = useAuth0();
   const [width, setWidth] = useState(DEFAULT_WIDTH);
   const [isResizing, setIsResizing] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -168,10 +178,43 @@ export function Sidebar() {
         })}
       </nav>
 
-      {/* Footer */}
+      {/* Auth */}
       {!collapsed && (
-        <div className="border-t border-border px-4 py-3 shrink-0">
-          <div className="flex items-center gap-3 text-xs text-muted min-w-0">
+        <div className="border-t border-border px-4 py-3 shrink-0 space-y-2">
+          {authLoading ? (
+            <div className="text-xs text-muted">Loading...</div>
+          ) : isAuthenticated && user ? (
+            <div className="min-w-0">
+              <p className="text-xs text-muted truncate" title={user.email ?? undefined}>
+                {user.email}
+              </p>
+              <button
+                type="button"
+                onClick={() => logout({ logoutParams: { returnTo: appUrl } })}
+                className="text-xs text-muted hover:text-foreground transition-colors cursor-pointer"
+              >
+                Logout
+              </button>
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => loginWithRedirect({ authorizationParams: { screen_hint: "signup" } })}
+                className="text-xs text-muted hover:text-foreground transition-colors cursor-pointer"
+              >
+                Signup
+              </button>
+              <button
+                type="button"
+                onClick={() => loginWithRedirect()}
+                className="text-xs text-muted hover:text-foreground transition-colors cursor-pointer"
+              >
+                Login
+              </button>
+            </div>
+          )}
+          <div className="flex items-center gap-3 text-xs text-muted min-w-0 pt-2 border-t border-border">
             <Link href="#" className="hover:text-foreground transition-colors whitespace-nowrap overflow-hidden">
               Terms
             </Link>
