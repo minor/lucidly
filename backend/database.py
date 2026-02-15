@@ -97,6 +97,28 @@ async def save_challenge_session(
         logger.error(f"Error saving to Supabase: {e}")
         return None
 
+async def save_prompt_feedback(session_id: str, feedback: str) -> bool:
+    """
+    Save prompt feedback text for an existing challenge session.
+    Returns True on success, False on failure.
+    """
+    supabase = get_supabase_client()
+    if not supabase:
+        return False
+
+    try:
+        response = (
+            supabase.table("challenge_sessions")
+            .update({"prompt_feedback": feedback})
+            .eq("id", session_id)
+            .execute()
+        )
+        return bool(response.data)
+    except Exception as e:
+        logger.error(f"Error saving prompt feedback: {e}")
+        return False
+
+
 async def get_leaderboard(
     challenge_id: str = None, 
     limit: int = 50,

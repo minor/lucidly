@@ -410,7 +410,7 @@ async def calculate_score(req: CalculateScoreRequest):
             
             challenge = get_challenge_by_id(req.challenge_id)
             if challenge:
-                 await save_challenge_session(
+                 db_session_id = await save_challenge_session(
                     challenge_id=req.challenge_id,
                     title=challenge.title,
                     category=challenge.category,
@@ -429,6 +429,8 @@ async def calculate_score(req: CalculateScoreRequest):
                     turn_score=scores["turn_score"],
                     messages=req.messages
                  )
+                 if db_session_id:
+                     scores["db_session_id"] = db_session_id
         except Exception as e:
             logger.error(f"Failed to save score: {e}")
         
@@ -1108,3 +1110,167 @@ async def run_code(req: RunCodeRequest):
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Prompt feedback endpoint — AI-powered analysis of user prompts
+# ---------------------------------------------------------------------------
+
+
+class PromptFeedbackRequest(BaseModel):
+    messages: list[ChatMessage]
+    challenge_id: str
+    challenge_description: str = ""
+    challenge_category: str = ""
+    challenge_difficulty: str = ""
+    reference_html: str = ""  # Original HTML the user was trying to recreate
+    accuracy: float = 0.0
+    total_turns: int = 0
+    total_tokens: int = 0
+    elapsed_sec: float = 0.0
+    db_session_id: str | None = None  # Supabase session ID for persisting feedback
+
+
+PROMPT_FEEDBACK_SYSTEM_PROMPT = (
+    "You are a concise, supportive prompt engineering coach. You give direct, non-redundant "
+    "feedback. Never repeat the same point across sections. Be warm but respect the reader's "
+    "intelligence — don't over-explain obvious things. Quote the user's actual prompts when relevant."
+)
+
+
+def _build_feedback_analysis_prompt(req: PromptFeedbackRequest) -> str:
+    """Build the analysis prompt that evaluates the user's prompting strategy."""
+    user_prompts = []
+    for i, msg in enumerate(req.messages):
+        if msg.role == "user":
+            user_prompts.append(f"**Prompt {len(user_prompts) + 1}:** {msg.content}")
+
+    conversation_text = "\n\n".join(
+        f"**{msg.role.upper()}:** {msg.content[:1500]}{'...' if len(msg.content) > 1500 else ''}"
+        for msg in req.messages
+    )
+
+    # Build reference HTML context section if available
+    reference_section = ""
+    convergence_section = ""
+    if req.reference_html:
+        truncated_html = req.reference_html[:3000]
+        if len(req.reference_html) > 3000:
+            truncated_html += "\n... (truncated)"
+        reference_section = f"""
+## Reference Target
+The user was shown this HTML and asked to recreate it by prompting an AI:
+
+```html
+{truncated_html}
+```
+"""
+        convergence_section = """
+### Convergence
+Did the prompts move the output closer to the reference over successive turns? List the key elements from the reference that the user described well, and list which ones they missed (just name them — no need to explain what they are). One sentence on the overall trajectory.
+"""
+
+    return f"""Analyze this prompt engineering session. Be encouraging but concise — say each thing once.
+
+## Challenge Context
+- **Category:** {req.challenge_category}
+- **Difficulty:** {req.challenge_difficulty}
+- **Description:** {req.challenge_description}
+{reference_section}
+## Stats
+- **Accuracy:** {req.accuracy:.0%} · **Turns:** {req.total_turns} · **Tokens:** {req.total_tokens:,} · **Time:** {req.elapsed_sec:.0f}s
+
+## User's Prompts
+{chr(10).join(user_prompts)}
+
+## Full Conversation
+{conversation_text}
+
+---
+
+Write feedback in **markdown**. Follow these rules strictly:
+- **No letter grades or numeric scores.** Do not grade the user.
+- **Say each point exactly once.** If you mention something in the summary, don't repeat it in a later section.
+- **Don't over-explain obvious UI elements.** If listing missing features, just name them — the user knows what a navbar is.
+- **Be direct.** One point per bullet. No filler phrases like "which matches a tiny slice of" or "it's worth noting that."
+
+Use these sections and ONLY these sections:
+
+### Summary
+2-3 sentences. What went well and what the main opportunity is. This is the only place for high-level observations — later sections go deeper, not wider.
+{convergence_section}
+### Strengths & Gaps
+One unified section. Bullet the specific things the user did effectively (quote their prompts), then bullet what was missing or vague. Don't re-list anything from the summary — go into new detail here.
+
+### Sharpest Improvement
+The single highest-leverage change that would have made the biggest difference in this session. Be specific — reference an actual prompt and show what a better version would look like. Keep it to 2-3 sentences.
+
+### Prompt Templates to Try
+End with 2-3 **concrete prompt formats/wrappers** the user can copy-paste and adapt for future challenges. These should be reusable structures, not advice. Format them as fenced code blocks. For example:
+
+```
+Build [component] with: layout: [describe], colors: [list], typography: [font/sizes], content: [exact text], interactions: [list behaviors]
+```
+
+Each template should address a gap you identified in this session.
+
+Keep it short. The whole response should be readable in under 60 seconds."""
+
+
+@app.post("/api/prompt-feedback")
+async def prompt_feedback(req: PromptFeedbackRequest):
+    """
+    Stream AI-powered feedback on the user's prompt engineering.
+    Uses SSE to stream the analysis as it's generated.
+    """
+    if not req.messages:
+        raise HTTPException(status_code=400, detail="No messages to analyze")
+
+    user_messages = [m for m in req.messages if m.role == "user"]
+    if not user_messages:
+        raise HTTPException(status_code=400, detail="No user prompts to analyze")
+
+    analysis_prompt = _build_feedback_analysis_prompt(req)
+
+    db_session_id = req.db_session_id
+
+    async def generate():
+        try:
+            feedback_llm = LLM(
+                base_url=settings.openai_base_url,
+                api_key=settings.openai_api_key,
+                model=settings.default_model,
+                system_prompt=PROMPT_FEEDBACK_SYSTEM_PROMPT,
+            )
+
+            full_response = ""
+            async for chunk in feedback_llm.stream(
+                analysis_prompt,
+                temperature=0.4,
+            ):
+                full_response += chunk
+                yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
+
+            yield f"data: {json.dumps({'type': 'done', 'content': full_response})}\n\n"
+
+            # Persist feedback to Supabase if we have a session ID
+            if db_session_id and full_response:
+                try:
+                    from database import save_prompt_feedback
+                    await save_prompt_feedback(db_session_id, full_response)
+                except Exception as e:
+                    logger.error(f"Failed to persist prompt feedback: {e}")
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"Prompt feedback failed: {error_msg}")
+            yield f"data: {json.dumps({'type': 'error', 'message': error_msg})}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
