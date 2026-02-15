@@ -1,0 +1,13 @@
+# Auto-generated from pyproject.toml for Render deployment
+fastapi[standard]
+uvicorn[standard]
+openai
+pydantic
+pydantic-settings
+python-dotenv
+httpx
+websockets
+modal>=1.3.3
+stagehand-py>=0.3.10
+browserbase>=0.1.0
+

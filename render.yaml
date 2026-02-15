@@ -1,0 +1,48 @@
+# Render Blueprint – https://docs.render.com/blueprint-spec
+# Deploy with: "New > Blueprint" in the Render dashboard, pointing at this repo.
+
+services:
+  - type: web
+    name: lucidly-api
+    runtime: python
+    region: oregon
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      # Required
+      - key: OPENAI_API_KEY
+        sync: false                       # set manually in Render dashboard
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+
+      # CORS – set to your Vercel production URL (e.g. https://lucidly.vercel.app)
+      - key: CORS_ORIGINS
+        sync: false
+
+      # Optional – LLM providers
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: XAI_API_KEY
+        sync: false
+
+      # Optional – Auth0 / Browserbase / Modal
+      - key: BROWSERBASE_API_KEY
+        sync: false
+      - key: BROWSERBASE_PROJECT_ID
+        sync: false
+      - key: AGENT_INTERNAL_SECRET
+        sync: false
+
+      # Points back to this Render service (auto-set by Render)
+      - key: BACKEND_PUBLIC_URL
+        fromService:
+          name: lucidly-api
+          type: web
+          property: url
+
+    healthCheckPath: /docs
+    autoDeploy: true
+
