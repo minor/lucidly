@@ -18,6 +18,7 @@ import { extractRenderableUI, extractPythonCode } from "@/lib/codeExtract";
 import type {
   InterviewRoom,
   InterviewSession,
+  InterviewChallenge,
 } from "@/lib/types";
 import type { ChatMessage } from "@/lib/api";
 import {
