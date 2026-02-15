@@ -615,30 +615,113 @@ async def session_ws(ws: WebSocket, session_id: str):
                     history.append({"role": "user", "content": turn.prompt_text})
                     history.append({"role": "assistant", "content": turn.response_text})
 
-                # Route to the correct provider based on model name
-                if model.startswith("grok") and settings.xai_api_key:
+                # ── Route to the correct provider based on model name ──
+                is_claude = model.startswith("claude")
+                is_grok = model.startswith("grok")
+                is_perplexity = model.startswith("sonar")
+
+                # Map short Claude names → full Anthropic API model IDs
+                CLAUDE_MODEL_MAPPING = {
+                    "claude-opus-4-6": "claude-opus-4-6",
+                    "claude-sonnet-4-5": "claude-sonnet-4-5-20250929",
+                    "claude-haiku-4-5": "claude-haiku-4-5-20251001",
+                }
+
+                full_response = ""
+
+                if is_claude and settings.anthropic_api_key:
+                    # ── Anthropic (native API via httpx) ──
+                    api_model = CLAUDE_MODEL_MAPPING.get(model, model)
+                    messages_for_api = []
+                    for h in history:
+                        messages_for_api.append({"role": h["role"], "content": h["content"]})
+                    messages_for_api.append({"role": "user", "content": prompt_text})
+
+                    async with httpx.AsyncClient(timeout=60.0) as http_client:
+                        headers = {
+                            "x-api-key": settings.anthropic_api_key,
+                            "anthropic-version": "2023-06-01",
+                            "content-type": "application/json",
+                        }
+                        payload = {
+                            "model": api_model,
+                            "max_tokens": settings.max_tokens,
+                            "messages": messages_for_api,
+                            "stream": True,
+                        }
+                        async with http_client.stream(
+                            "POST",
+                            "https://api.anthropic.com/v1/messages",
+                            headers=headers,
+                            json=payload,
+                        ) as resp:
+                            if resp.status_code != 200:
+                                error_text = (await resp.aread()).decode()
+                                await ws.send_json({"type": "error", "message": f"Anthropic API error ({resp.status_code}): {error_text}"})
+                                continue
+                            async for line in resp.aiter_lines():
+                                if line.startswith("data: "):
+                                    data_str = line[6:]
+                                    if data_str == "[DONE]":
+                                        break
+                                    try:
+                                        data = json.loads(data_str)
+                                        evt = data.get("type")
+                                        if evt == "content_block_delta":
+                                            chunk = data.get("delta", {}).get("text", "")
+                                            if chunk:
+                                                full_response += chunk
+                                                await ws.send_json({"type": "stream", "content": chunk})
+                                        elif evt == "message_stop":
+                                            break
+                                    except json.JSONDecodeError:
+                                        continue
+
+                elif is_grok and settings.xai_api_key:
+                    # ── xAI / Grok (OpenAI-compatible) ──
                     llm_instance = LLM(
                         base_url=settings.xai_base_url,
                         api_key=settings.xai_api_key,
                         model=model,
                     )
-                elif model != llm.model:
-                    llm_instance = LLM(model=model)
-                else:
-                    llm_instance = llm
+                    async for chunk in llm_instance.stream(
+                        prompt_text,
+                        conversation_history=history if history else None,
+                    ):
+                        full_response += chunk
+                        await ws.send_json({"type": "stream", "content": chunk})
 
-                # Stream response
-                full_response = ""
-                # GPT-5 Mini and Nano require temperature=1
-                temperature = 1.0 if model in ["gpt-5-mini", "gpt-5-nano"] else None
-                
-                async for chunk in llm_instance.stream(
-                    prompt_text,
-                    conversation_history=history if history else None,
-                    temperature=temperature,
-                ):
-                    full_response += chunk
-                    await ws.send_json({"type": "stream", "content": chunk})
+                elif is_perplexity and settings.perplexity_api_key:
+                    # ── Perplexity Sonar (OpenAI-compatible) ──
+                    llm_instance = LLM(
+                        base_url=settings.perplexity_base_url,
+                        api_key=settings.perplexity_api_key,
+                        model=model,
+                    )
+                    async for chunk in llm_instance.stream(
+                        prompt_text,
+                        conversation_history=history if history else None,
+                    ):
+                        full_response += chunk
+                        await ws.send_json({"type": "stream", "content": chunk})
+
+                else:
+                    # ── OpenAI (default) ──
+                    if model != llm.model:
+                        llm_instance = LLM(model=model)
+                    else:
+                        llm_instance = llm
+
+                    # GPT-5 Mini and Nano require temperature=1
+                    temperature = 1.0 if model in ["gpt-5-mini", "gpt-5-nano"] else None
+
+                    async for chunk in llm_instance.stream(
+                        prompt_text,
+                        conversation_history=history if history else None,
+                        temperature=temperature,
+                    ):
+                        full_response += chunk
+                        await ws.send_json({"type": "stream", "content": chunk})
 
                 generated_code = LLM.extract_code_blocks(full_response)
 
