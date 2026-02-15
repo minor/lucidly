@@ -106,29 +106,62 @@ async def capture_iframe_and_compare(
     Returns:
         VisionComparisonResult with similarity score and feedback
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.info(f"[Screenshot] Starting iframe capture (viewport: {width}x{height})")
     options = ScreenshotOptions(width=width, height=height)
     
     # Capture iframe screenshots
+    logger.info("[Screenshot] Capturing reference iframe screenshot...")
     async with ScreenshotCapture() as capture:
         reference_screenshot = await capture.capture_iframe_base64(
             reference_page_html,
             iframe_selector=iframe_selector,
             options=options,
         )
+        logger.info(f"[Screenshot] Reference screenshot captured ({len(reference_screenshot)} chars)")
         
+        # Save reference screenshot to file
+        import base64
+        import os
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        os.makedirs("screenshots", exist_ok=True)
+        ref_path = f"screenshots/reference_{timestamp}.png"
+        if reference_screenshot.startswith("data:image"):
+            # Extract base64 data
+            base64_data = reference_screenshot.split(",")[1]
+            with open(ref_path, "wb") as f:
+                f.write(base64.b64decode(base64_data))
+            logger.info(f"[Screenshot] Reference screenshot saved to: {ref_path}")
+        
+        logger.info("[Screenshot] Capturing generated iframe screenshot...")
         generated_screenshot = await capture.capture_iframe_base64(
             generated_page_html,
             iframe_selector=iframe_selector,
             options=options,
         )
+        logger.info(f"[Screenshot] Generated screenshot captured ({len(generated_screenshot)} chars)")
+        
+        # Save generated screenshot to file
+        gen_path = f"screenshots/generated_{timestamp}.png"
+        if generated_screenshot.startswith("data:image"):
+            # Extract base64 data
+            base64_data = generated_screenshot.split(",")[1]
+            with open(gen_path, "wb") as f:
+                f.write(base64.b64decode(base64_data))
+            logger.info(f"[Screenshot] Generated screenshot saved to: {gen_path}")
     
     # Compare using vision comparison
+    logger.info("[Vision] Starting Claude Vision comparison...")
     comparator = VisionComparator()
     result = await comparator.compare_base64_images(
         reference_image_base64=reference_screenshot,
         generated_image_base64=generated_screenshot,
         challenge_description=challenge.description if challenge else None,
     )
+    logger.info(f"[Vision] Comparison complete. Similarity: {result.similarity_score:.4f}, Match: {result.overall_match}")
     
     return result
 
@@ -159,12 +192,20 @@ async def compare_with_challenge_reference(
     Returns:
         VisionComparisonResult with similarity score and feedback
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    
     if not challenge.image_url:
         raise ValueError(f"Challenge '{challenge.id}' does not have an image_url")
+    
+    logger.info(f"[Screenshot] Starting screenshot capture (viewport: {width}x{height})")
+    logger.info(f"[Screenshot] Reference image URL: {challenge.image_url}")
+    logger.info(f"[Screenshot] Generated HTML length: {len(generated_html)} chars")
     
     options = ScreenshotOptions(width=width, height=height)
     
     # Capture generated screenshot
+    logger.info("[Screenshot] Capturing generated HTML screenshot...")
     async with ScreenshotCapture() as capture:
         if generated_selector:
             if 'iframe' in generated_selector.lower():
@@ -185,13 +226,47 @@ async def compare_with_challenge_reference(
                 options=options,
             )
     
+    logger.info(f"[Screenshot] Generated screenshot captured ({len(generated_screenshot)} chars)")
+    
+    # Save screenshots to files
+    import base64
+    import os
+    from datetime import datetime
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    os.makedirs("screenshots", exist_ok=True)
+    
+    # Save reference image (from URL)
+    if challenge.image_url:
+        ref_path = f"screenshots/reference_{timestamp}.png"
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(challenge.image_url)
+                response.raise_for_status()
+                with open(ref_path, "wb") as f:
+                    f.write(response.content)
+                logger.info(f"[Screenshot] Reference image saved to: {ref_path}")
+        except Exception as e:
+            logger.warning(f"[Screenshot] Failed to save reference image: {e}")
+    
+    # Save generated screenshot
+    gen_path = f"screenshots/generated_{timestamp}.png"
+    if generated_screenshot.startswith("data:image"):
+        # Extract base64 data
+        base64_data = generated_screenshot.split(",")[1]
+        with open(gen_path, "wb") as f:
+            f.write(base64.b64decode(base64_data))
+        logger.info(f"[Screenshot] Generated screenshot saved to: {gen_path}")
+    
     # Compare with challenge reference image
+    logger.info("[Vision] Starting Claude Vision comparison with reference image...")
     comparator = VisionComparator()
     result = await comparator.compare_images(
         reference_image_url=challenge.image_url,
         generated_image_url=generated_screenshot,  # Base64 data URL
         challenge_description=challenge.description,
     )
+    logger.info(f"[Vision] Comparison complete. Similarity: {result.similarity_score:.4f}, Match: {result.overall_match}")
     
     return result
 
