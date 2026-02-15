@@ -40,6 +40,11 @@ from evaluation import (
     ChallengeEvaluator,
 )
 from sandbox import create_sandbox, terminate_sandbox
+from session_events import (
+    broadcast_session_event,
+    subscribe_session_events,
+    unsubscribe_session_events,
+)
 
 # ---------------------------------------------------------------------------
 # App setup
@@ -228,6 +233,43 @@ async def get_session_state(session_id: str):
         # #endregion
         raise HTTPException(status_code=404, detail="Session not found")
     return session
+
+
+@app.get("/api/sessions/{session_id}/events")
+async def session_events_stream(session_id: str):
+    """
+    Server-Sent Events stream for agent run sessions.
+    Pushes token_progress (estimated tokens during LLM stream) and session_update (full session when turn completes).
+    """
+    session = get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    queue = subscribe_session_events(session_id)
+
+    async def event_generator():
+        try:
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    # SSE format: "data: {json}\n\n"
+                    yield f"data: {json.dumps(event)}\n\n"
+                except asyncio.TimeoutError:
+                    yield f"data: {json.dumps({'type': 'ping'})}\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            unsubscribe_session_events(session_id, queue)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 def _require_agent_token_if_agent(session, request: Request) -> None:

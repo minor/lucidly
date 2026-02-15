@@ -62,6 +62,63 @@ export async function getSession(sessionId: string): Promise<Session> {
   return fetchJSON<Session>(`/api/sessions/${sessionId}`);
 }
 
+/** Session event from SSE stream (agent runs): token_progress and session_update */
+export type SessionEvent =
+  | { type: "token_progress"; total_estimated_tokens: number }
+  | { type: "session_update"; session: Session }
+  | { type: "ping" };
+
+/**
+ * Subscribe to server-sent events for an agent run session.
+ * Call onMessage for each event; returns an abort function to close the stream.
+ */
+export function subscribeSessionEvents(
+  sessionId: string,
+  onMessage: (event: SessionEvent) => void,
+  signal?: AbortSignal
+): () => void {
+  const url = `${API_BASE.replace(/^http/, "http")}/api/sessions/${sessionId}/events`;
+  const controller = new AbortController();
+  if (signal) {
+    signal.addEventListener("abort", () => controller.abort());
+  }
+
+  const abort = () => controller.abort();
+
+  fetch(url, { signal: controller.signal })
+    .then((res) => {
+      if (!res.ok || !res.body) return;
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      const process = (): Promise<void> =>
+        reader.read().then(({ done, value }) => {
+          if (done) return;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+          for (const line of lines) {
+            if (line.startsWith("data: ")) {
+              try {
+                const data = JSON.parse(line.slice(6)) as SessionEvent;
+                onMessage(data);
+              } catch {
+                // ignore parse errors
+              }
+            }
+          }
+          return process();
+        });
+      return process();
+    })
+    .catch((err) => {
+      if (err?.name === "AbortError") return;
+      console.warn("Session events stream error:", err);
+    });
+
+  return abort;
+}
+
 export async function submitPrompt(
   sessionId: string,
   prompt: string,

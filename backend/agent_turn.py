@@ -3,6 +3,7 @@ Internal: execute one prompt turn (LLM + record) and complete session. Used by H
 """
 
 import time
+from collections.abc import Awaitable, Callable
 
 from challenges import get_challenge_by_id
 from llm import LLM
@@ -34,10 +35,13 @@ async def execute_prompt_turn(
     *,
     model: str | None = None,
     system_prompt: str | None = None,
+    on_progress: Callable[[int], Awaitable[None]] | None = None,
 ) -> dict:
     """
     Run one turn: build history, call LLM, compute accuracy, add_turn.
     Returns dict with response_text, generated_code, accuracy, prompt_tokens, response_tokens, turn_number.
+    If on_progress(estimated_tokens) is provided, uses streaming and calls it with estimated response tokens
+    during the stream so the frontend can show token progress in real time.
     Caller must ensure session exists and is active.
     """
     session = get_session(session_id)
@@ -55,38 +59,76 @@ async def execute_prompt_turn(
     llm = _get_llm()
     model = model or session.model_used
     llm_instance = LLM(model=model) if model != llm.model else llm
-    response = await llm_instance.generate(
-        prompt,
-        conversation_history=history if history else None,
-        system_prompt=system_prompt,
-    )
 
-    accuracy = 0.0
-    if challenge.target_code:
-        accuracy = compute_accuracy_text(
-            response.generated_code, challenge.target_code
+    if on_progress is not None:
+        # Stream and report estimated tokens so frontend can update in real time
+        full_response = ""
+        async for chunk in llm_instance.stream(
+            prompt,
+            conversation_history=history if history else None,
+            system_prompt=system_prompt,
+        ):
+            full_response += chunk
+            # ~4 chars per token estimate
+            est_tokens = max(0, len(full_response) // 4)
+            await on_progress(est_tokens)
+
+        generated_code = LLM.extract_code_blocks(full_response)
+        accuracy = 0.0
+        if challenge.target_code:
+            accuracy = compute_accuracy_text(generated_code, challenge.target_code)
+        est_prompt_tokens = len(prompt.split()) * 2
+        est_response_tokens = len(full_response.split()) * 2
+
+        turn = Turn(
+            turn_number=len(session.turns) + 1,
+            prompt_text=prompt,
+            prompt_tokens=est_prompt_tokens,
+            response_text=full_response,
+            response_tokens=est_response_tokens,
+            generated_code=generated_code,
+            accuracy_at_turn=accuracy,
+            timestamp=time.time(),
         )
-
-    turn = Turn(
-        turn_number=len(session.turns) + 1,
-        prompt_text=prompt,
-        prompt_tokens=response.prompt_tokens,
-        response_text=response.response_text,
-        response_tokens=response.response_tokens,
-        generated_code=response.generated_code,
-        accuracy_at_turn=accuracy,
-        timestamp=time.time(),
-    )
-    add_turn(session_id, turn)
-
-    return {
-        "response_text": response.response_text,
-        "generated_code": response.generated_code,
-        "accuracy": accuracy,
-        "prompt_tokens": response.prompt_tokens,
-        "response_tokens": response.response_tokens,
-        "turn_number": turn.turn_number,
-    }
+        add_turn(session_id, turn)
+        return {
+            "response_text": full_response,
+            "generated_code": generated_code,
+            "accuracy": accuracy,
+            "prompt_tokens": est_prompt_tokens,
+            "response_tokens": est_response_tokens,
+            "turn_number": turn.turn_number,
+        }
+    else:
+        response = await llm_instance.generate(
+            prompt,
+            conversation_history=history if history else None,
+            system_prompt=system_prompt,
+        )
+        accuracy = 0.0
+        if challenge.target_code:
+            accuracy = compute_accuracy_text(
+                response.generated_code, challenge.target_code
+            )
+        turn = Turn(
+            turn_number=len(session.turns) + 1,
+            prompt_text=prompt,
+            prompt_tokens=response.prompt_tokens,
+            response_text=response.response_text,
+            response_tokens=response.response_tokens,
+            generated_code=response.generated_code,
+            accuracy_at_turn=accuracy,
+            timestamp=time.time(),
+        )
+        add_turn(session_id, turn)
+        return {
+            "response_text": response.response_text,
+            "generated_code": response.generated_code,
+            "accuracy": accuracy,
+            "prompt_tokens": response.prompt_tokens,
+            "response_tokens": response.response_tokens,
+            "turn_number": turn.turn_number,
+        }
 
 
 def complete_agent_session(session_id: str) -> None:

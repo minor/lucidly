@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { getSession, getChallenge } from "@/lib/api";
+import { getSession, getChallenge, subscribeSessionEvents } from "@/lib/api";
 import { ScoreBar } from "@/components/ScoreBar";
 import type { Challenge, Session, ThinkingTraceEntry } from "@/lib/types";
 import { Loader2, ArrowLeft, Trophy, Code, ImageIcon, GripHorizontal } from "lucide-react";
@@ -21,6 +21,7 @@ const OUTPUT_PLACEHOLDER_CODE = `<!DOCTYPE html>
 </html>`;
 
 const POLL_INTERVAL_MS = 1500;
+const POLL_INTERVAL_ACTIVE_MS = 500; // Faster polling while run is active so tokens/stats update in near real time
 
 /** Format trace entry kwargs into a short, user-facing detail string. */
 function formatTraceDetail(entry: ThinkingTraceEntry): string | null {
@@ -53,6 +54,8 @@ export default function AgentRunWatchPage() {
   const [elapsed, setElapsed] = useState(0);
   const [outputPanelHeight, setOutputPanelHeight] = useState(OUTPUT_PANEL_INITIAL);
   const [sessionNotFound, setSessionNotFound] = useState(false);
+  /** Live token count during LLM stream (from SSE); null when using session.total_tokens */
+  const [liveEstimatedTokens, setLiveEstimatedTokens] = useState<number | null>(null);
   const resizeStartYRef = useRef<number>(0);
   const resizeStartHeightRef = useRef<number>(OUTPUT_PANEL_INITIAL);
   const traceEndRef = useRef<HTMLDivElement>(null);
@@ -84,25 +87,6 @@ export default function AgentRunWatchPage() {
         });
     }
     poll();
-    pollIntervalRef.current = setInterval(() => {
-      if (ignore) return;
-      getSession(sessionId)
-        .then((data) => {
-          if (!ignore) setSession(data);
-        })
-        .catch((err) => {
-          if (!ignore) {
-            const msg = (err as Error).message ?? "";
-            if (msg.toLowerCase().includes("session") && msg.toLowerCase().includes("not found")) {
-              setSessionNotFound(true);
-              if (pollIntervalRef.current) {
-                clearInterval(pollIntervalRef.current);
-                pollIntervalRef.current = null;
-              }
-            }
-          }
-        });
-    }, POLL_INTERVAL_MS);
     return () => {
       ignore = true;
       if (pollIntervalRef.current) {
@@ -110,6 +94,58 @@ export default function AgentRunWatchPage() {
         pollIntervalRef.current = null;
       }
     };
+  }, [sessionId]);
+
+  // Poll at a faster rate when run is active so tokens and trace update in near real time
+  useEffect(() => {
+    if (!session || session.status !== "active") return;
+    const intervalMs = POLL_INTERVAL_ACTIVE_MS;
+    pollIntervalRef.current = setInterval(() => {
+      getSession(sessionId)
+        .then((data) => setSession(data))
+        .catch((err) => {
+          const msg = (err as Error).message ?? "";
+          if (msg.toLowerCase().includes("session") && msg.toLowerCase().includes("not found")) {
+            setSessionNotFound(true);
+            if (pollIntervalRef.current) {
+              clearInterval(pollIntervalRef.current);
+              pollIntervalRef.current = null;
+            }
+          }
+        });
+    }, intervalMs);
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+    };
+  }, [sessionId, session?.status]);
+
+  // Slower poll when completed (or before first session load) to catch completion
+  useEffect(() => {
+    if (session?.status === "active") return; // Handled by faster poll above
+    const intervalMs = POLL_INTERVAL_MS;
+    const id = setInterval(() => {
+      getSession(sessionId)
+        .then((data) => setSession(data))
+        .catch(() => {});
+    }, intervalMs);
+    return () => clearInterval(id);
+  }, [sessionId, session?.status]);
+
+  // Subscribe to SSE for real-time token progress (and session updates) during agent run
+  useEffect(() => {
+    if (!sessionId) return;
+    const abort = subscribeSessionEvents(sessionId, (event) => {
+      if (event.type === "token_progress") {
+        setLiveEstimatedTokens(event.total_estimated_tokens);
+      } else if (event.type === "session_update") {
+        setSession(event.session as Session);
+        setLiveEstimatedTokens(null); // use real total_tokens from session now
+      }
+    });
+    return () => abort();
   }, [sessionId]);
 
   // Fetch challenge when session is available
@@ -250,7 +286,7 @@ export default function AgentRunWatchPage() {
       <div className="flex items-center justify-between gap-4 border-b border-border px-6 py-2">
         <ScoreBar
           turns={session?.total_turns ?? 0}
-          tokens={session?.total_tokens ?? 0}
+          tokens={liveEstimatedTokens ?? session?.total_tokens ?? 0}
           elapsedSec={elapsed}
           accuracy={
             session?.turns?.length
@@ -259,6 +295,7 @@ export default function AgentRunWatchPage() {
           }
           compositeScore={session?.composite_score ?? undefined}
           cost={totalCost}
+          hideTurns
         />
         {isActive && (
           <span className="text-xs text-muted">Watching agent run…</span>
