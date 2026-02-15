@@ -997,6 +997,7 @@ export default function ChallengePage() {
                           onClick={() => {
                             setProductPart(2);
                             setMessages([]);
+                            setSelectedModel("sonar-pro");
                           }}
                           className="rounded-lg bg-foreground text-background px-3 py-1.5 text-xs font-medium hover:opacity-90 cursor-pointer"
                         >

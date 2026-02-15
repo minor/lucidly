@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     xai_api_key: str = ""
     xai_base_url: str = "https://api.x.ai/v1"
 
+    # Perplexity Sonar (product challenge Part 2 General AI)
+    perplexity_api_key: str = ""
+    perplexity_base_url: str = "https://api.perplexity.ai"
+
     # Server configuration
     host: str = "0.0.0.0"
     port: int = 8000
@@ -87,6 +91,9 @@ MODEL_PRICING = {
     # xAI/Grok
     "grok-4-1-fast-reasoning": {"input": 0.20, "output": 0.50},
     "grok-code-fast-1": {"input": 0.20, "output": 1.50},
+    # Perplexity Sonar
+    "sonar": {"input": 0.20, "output": 1.00},
+    "sonar-pro": {"input": 3.0, "output": 15.0},
 }
 
 # Default pricing for unknown models (use GPT-5.2 rates)

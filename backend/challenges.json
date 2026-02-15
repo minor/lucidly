@@ -73,7 +73,7 @@
     },
     {
         "id": "loss-reserve-prd",
-        "title": "Loss Reserve Adequacy: Discovery & PRD",
+        "title": "Write a PRD: Loss Reserve Adequacy",
         "description": "In Part 1, you must ask questions to understand the problem. In Part 2, you must write a PRD that proposes a technical solution.\nYou are the CEO of a technology solutions company. You are meeting the Chief Risk Officer (CRO) of a multinational insurance company operating in 9 countries. They want to improve their process of submitting quarterly Loss Reserve Adequacy Reports to regulators in each jurisdiction.",
         "category": "product",
         "difficulty": "hard",

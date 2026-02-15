@@ -409,6 +409,8 @@ export const MODEL_PRICING: Record<string, { input: number; output: number }> = 
   "gpt-4o": { input: 2.5, output: 10.0 },
   "grok-4-1-fast-reasoning": { input: 0.20, output: 0.50 },
   "grok-code-fast-1": { input: 0.20, output: 1.50 },
+  "sonar": { input: 0.20, output: 1.0 },
+  "sonar-pro": { input: 3.0, output: 15.0 },
 };
 
 export const MODELS = [
@@ -420,6 +422,7 @@ export const MODELS = [
   { id: "claude-haiku-4-5", name: "Claude Haiku 4.5" },
   { id: "grok-4-1-fast-reasoning", name: "Grok 4.1 Fast Reasoning" },
   { id: "grok-code-fast-1", name: "Grok Code Fast" },
+  { id: "sonar-pro", name: "Perplexity Sonar Pro" },
 ];
 
 // ---- Prompt Feedback (AI analysis) ----
