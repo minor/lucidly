@@ -1,18 +1,21 @@
 @import "tailwindcss";
 
-/* Arena.ai-inspired design system */
+/* Warm, educational design system — homey and focused */
 :root {
-  --background: #faf9f6;
-  --foreground: #1a1a1a;
-  --sidebar-bg: #ffffff;
-  --border: #e8e4df;
-  --muted: #8a8478;
-  --accent: #e8b931;
-  --accent-bg: rgba(232, 185, 49, 0.2);
+  --background: #fafaf9;
+  --foreground: #1c1917;
+  --sidebar-bg: #fafaf9;
+  --border: #e7e5e4;
+  --muted: #78716c;
+  --accent: #f97316;
+  --accent-light: #fdba74;
+  --accent-bg: rgba(249, 115, 22, 0.07);
+  --accent-secondary: #8b5cf6;
+  --accent-tertiary: #06b6d4;
   --card-bg: #ffffff;
   --input-bg: #ffffff;
-  --input-border: #e0dcd6;
-  --code-bg: #f8f6f2;
+  --input-border: #d6d3d1;
+  --code-bg: #f5f5f4;
   --success: #22c55e;
   --error: #ef4444;
 }
@@ -24,7 +27,10 @@
   --color-border: var(--border);
   --color-muted: var(--muted);
   --color-accent: var(--accent);
+  --color-accent-light: var(--accent-light);
   --color-accent-bg: var(--accent-bg);
+  --color-accent-secondary: var(--accent-secondary);
+  --color-accent-tertiary: var(--accent-tertiary);
   --color-card: var(--card-bg);
   --color-input: var(--input-bg);
   --color-input-border: var(--input-border);
@@ -54,12 +60,61 @@ body {
   border-radius: 3px;
 }
 
-/* Gold highlight for emphasis text */
+/* Soft highlight for emphasis text */
 .highlight {
-  background: var(--accent-bg);
-  padding: 0.1em 0.3em;
+  background: rgba(253, 186, 116, 0.25);
+  padding: 0.1em 0.35em;
   border-radius: 4px;
   font-style: italic;
+}
+
+/* Animated underline highlight — draws in on mount */
+.highlight-underline {
+  position: relative;
+  display: inline-block;
+}
+.highlight-underline::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 4px;
+  height: 6px;
+  width: 100%;
+  background: var(--accent-light);
+  border-radius: 3px;
+  opacity: 0.5;
+  animation: underline-draw 0.8s ease-out forwards;
+  transform-origin: left;
+}
+@keyframes underline-draw {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+/* Fade-in-up animation */
+.fade-in-up {
+  opacity: 0;
+  transform: translateY(12px);
+  animation: fade-in-up 0.5s ease-out forwards;
+}
+@keyframes fade-in-up {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Card lift-on-hover */
+.card-hover {
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
 }
 
 /* Code block styling */
