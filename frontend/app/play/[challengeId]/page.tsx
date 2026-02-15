@@ -143,6 +143,8 @@ export default function ChallengePage() {
   const [notes, setNotes] = useState("");
   const [prdContent, setPrdContent] = useState("");
   const [productBottomTab, setProductBottomTab] = useState<"notepad" | "prd">("notepad");
+  const [playerName, setPlayerName] = useState("");
+  const [scoreSubmitted, setScoreSubmitted] = useState(false);
 
   // Initialize challenge
   useEffect(() => {
@@ -1391,22 +1393,16 @@ export default function ChallengePage() {
                         <Sparkles className="h-6 w-6 text-accent" />
                       </div>
                       <h3 className="text-lg font-medium text-foreground mb-2">
-                        Start a conversation
+                        {isProductChallenge && productPart === 1 ? "Ask the CRO questions" : "Start a conversation"}
                       </h3>
                       <p className="text-sm text-muted">
-                        Describe what you want built for this challenge
+                        {isProductChallenge && productPart === 1
+                          ? "Ask clarifying questions to understand the problem, pain points, and constraints. Take notes in the notepad."
+                          : isProductChallenge && productPart === 2
+                            ? "Chat with the assistant to draft your PRD. Use the Notepad / PRD tabs on the left to write."
+                            : "Describe what you want built for this challenge"}
                       </p>
                     </div>
-                    <h3 className="text-lg font-medium text-foreground mb-2">
-                      {isProductChallenge && productPart === 1 ? "Ask the CRO questions" : "Start a conversation"}
-                    </h3>
-                    <p className="text-sm text-muted">
-                      {isProductChallenge && productPart === 1
-                        ? "Ask clarifying questions to understand the problem, pain points, and constraints. Take notes in the notepad."
-                        : isProductChallenge && productPart === 2
-                          ? "Chat with the assistant to draft your PRD. Use the Notepad / PRD tabs on the left to write."
-                          : "Describe what you want built for this challenge"}
-                    </p>
                   </div>
                 )}
 

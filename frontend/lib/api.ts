@@ -374,7 +374,7 @@ export interface CalculateScoreRequest {
   difficulty?: string;
   model?: string;
   username?: string;
-  messages?: Record<string, unknown>[];
+  messages?: ChatMessage[];
   total_cost?: number;
 }
 
