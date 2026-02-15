@@ -85,6 +85,7 @@ export interface Scores {
   token_score: number;
   turn_score: number;
   composite_score: number;
+  db_session_id?: string;
 }
 
 export interface LeaderboardEntry {
