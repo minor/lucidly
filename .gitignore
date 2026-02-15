@@ -2,6 +2,7 @@ node_modules
 *.lock
 *.lockb
 *.env
+package-lock.json
 
 # Python cache files
 **/__pycache__/
