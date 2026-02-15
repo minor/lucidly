@@ -279,68 +279,9 @@ async def _run_agent_loop_claude_sdk(
         _agent_tool_log("view_reference_page", result_preview=text[:500] + ("..." if len(text) > 500 else ""), result_full=text)
         return {"content": [{"type": "text", "text": text}]}
 
-    @tool(
-        "generate_landing_page",
-        "Generate the landing page in one shot (like v0). Captures a screenshot of the reference URL from the task description and uses vision to produce matching HTML. "
-        "Use this as your first call when the challenge asks to recreate a reference page. "
-        "The reference URL is in the task description (e.g. 'Reference page (recreate this design): https://...'). Pass url only to override; otherwise leave empty to use the task's reference URL.",
-        {"url": str},
-    )
-    async def generate_landing_page_tool(args: dict[str, Any]) -> dict[str, Any]:
-        # Use reference URL from the task description (challenge.embed_url). Agent can pass url to override.
-        url = (args.get("url") or "").strip() or embed_url or ""
-        _agent_tool_log("generate_landing_page", args={"url": url or "(from task)"})
-        if not url:
-            return {
-                "content": [{"type": "text", "text": "No URL provided and this challenge has no reference URL. Use submit_prompt with a description instead."}]
-            }
-        _trace(session_id, "Capturing reference screenshot via Browserbase", t0, url=url[:60])
-        try:
-            from stagehand_scrape import capture_url_screenshot_base64_browserbase
-            screenshot_data_url = await capture_url_screenshot_base64_browserbase(
-                url,
-                api_key=getattr(settings, "browserbase_api_key", "") or "",
-                project_id=getattr(settings, "browserbase_project_id", "") or "",
-                full_page=True,
-                wait_after_load=2.0,
-            )
-        except Exception as e:
-            logger.exception("Browserbase screenshot failed: %s", e)
-            err_msg = f"Could not capture screenshot of {url}: {e}"
-            if "401" in str(e) or "Unauthorized" in str(e):
-                err_msg += " Check BROWSERBASE_API_KEY and BROWSERBASE_PROJECT_ID in .env; the key must be valid and the project must belong to your Browserbase account."
-            _agent_tool_log("generate_landing_page", result_preview=err_msg[:500], result_full=err_msg)
-            return {"content": [{"type": "text", "text": err_msg}]}
-        _trace(session_id, "Screenshot captured, generating HTML", t0, screenshot_len=len(screenshot_data_url or ""))
-        logger.info("[generate_landing_page] Screenshot captured, len=%d, calling vision model", len(screenshot_data_url or ""))
-        session_before = get_session(session_id)
-        base_tokens = (session_before.total_tokens if session_before else 0)
-
-        async def on_progress(est: int) -> None:
-            total_est = base_tokens + (len(replicate_prompt) // 4) + est
-            await broadcast_session_event(session_id, {"type": "token_progress", "total_estimated_tokens": total_est})
-
-        data = await execute_prompt_turn(
-            session_id,
-            replicate_prompt,
-            reference_image_data_url=screenshot_data_url,
-            on_progress=on_progress,
-        )
-        sess = get_session(session_id)
-        if sess:
-            await broadcast_session_event(session_id, {"type": "session_update", "session": sess.model_dump()})
-        snippet = (data.get("generated_code") or "")[:2000]
-        result_text = f"Response: {data.get('response_text', '')[:1500]}\n\nGenerated code (excerpt):\n{snippet}\n\nAccuracy: {data.get('accuracy', 0):.2f}\n\nDo not call submit_prompt. Reply with DONE now."
-        _agent_tool_log("generate_landing_page", result_preview=f"accuracy={data.get('accuracy', 0):.2f}", result_full=result_text)
-        if data.get("accuracy") is not None:
-            _trace(session_id, "Landing page generated", t0, accuracy=round(float(data["accuracy"]), 2))
-        return {"content": [{"type": "text", "text": result_text}]}
-
     tools_list: list[Any] = [submit_prompt_tool]
     allowed_tools_list = ["mcp__lucidly-challenge__submit_prompt"]
     if has_reference and browserbase_configured:
-        tools_list.append(generate_landing_page_tool)
-        allowed_tools_list.append("mcp__lucidly-challenge__generate_landing_page")
         tools_list.append(view_reference_page_tool)
         allowed_tools_list.append("mcp__lucidly-challenge__view_reference_page")
 
@@ -356,14 +297,13 @@ async def _run_agent_loop_claude_sdk(
     ]
     if has_reference and browserbase_configured:
         system_prompt_parts.append(
-            "When the challenge has a reference (landing page or design to recreate): use generate_landing_page once. "
-            "It captures a screenshot and generates matching HTML in one shot. "
-            "After you receive the generate_landing_page result (with code and accuracy), do NOT call submit_prompt. Reply immediately with DONE. "
+            "When the challenge has a reference (landing page or design to recreate): use view_reference_page to extract the page structure, "
+            "then use submit_prompt to generate matching HTML based on that structure. "
         )
     system_prompt_parts.append(
-        "Use submit_prompt to send prompts to the code API only when the challenge has no reference URL. "
-        "Your first tool call must produce code (use generate_landing_page for reference challenges, otherwise submit_prompt). "
-        "For reference challenges: one generate_landing_page call, then DONE. For others: iterate until accuracy is 1.0 or you have tried enough, then DONE.\n\n"
+        "Use submit_prompt to send prompts to the code API. "
+        "Your first tool call must produce code. "
+        "Iterate until accuracy is 1.0 or you have tried enough, then reply with DONE.\n\n"
     )
     options = ClaudeAgentOptions(
         mcp_servers={"lucidly-challenge": custom_server},
@@ -414,7 +354,7 @@ async def _run_agent_loop_claude_sdk(
             # #endregion
             prompt = (
                 "Complete this coding challenge. "
-                + ("Call generate_landing_page once; after you get the result, reply with DONE only—do not call submit_prompt. " if (has_reference and browserbase_configured) else "Use the submit_prompt tool to generate and refine code. ")
+                + ("Use view_reference_page first, then submit_prompt to generate code. " if (has_reference and browserbase_configured) else "Use the submit_prompt tool to generate and refine code. ")
                 + "Your first response must produce runnable code (HTML for UI challenges) in a markdown code block."
             )
             _trace(session_id, "Sending task to agent", t0)
