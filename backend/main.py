@@ -55,6 +55,7 @@ from session_events import (
     subscribe_session_events,
     unsubscribe_session_events,
 )
+from interviews import interview_router
 
 # ---------------------------------------------------------------------------
 # App setup
@@ -85,6 +86,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Mount interview router
+app.include_router(interview_router)
 
 # Default LLM instance (can be overridden per-request)
 llm = LLM()
