@@ -1,7 +1,7 @@
 ## Setup Steps
 
 ### 1. Install root dependencies
-From the root directory (`/Users/emily/Documents/Github/lucidly`), install the root dependency:
+From the root directory (`/`), install the root dependency:
 
 ```bash
 bun install
