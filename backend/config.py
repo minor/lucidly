@@ -8,6 +8,8 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_base_url: str = "https://api.openai.com/v1"
     default_model: str = "gpt-5.2"
+    """Model used for vision-based UI replication (screenshot → code). Should be vision-capable (e.g. gpt-4o, claude-3-5-sonnet)."""
+    vision_model: str = "gpt-4o"
     max_tokens: int = 16384
     
     # Anthropic/Claude configuration
@@ -29,6 +31,10 @@ class Settings(BaseSettings):
         "medium": {"time": 120.0, "tokens": 500, "turns": 4},
         "hard": {"time": 300.0, "tokens": 1000, "turns": 8},
     }
+
+    # Browserbase / Stagehand (optional: for agent view_reference_page tool)
+    browserbase_api_key: str = ""
+    browserbase_project_id: str = ""
 
     # Agent / Modal (for benchmark runs)
     agent_internal_secret: str = ""

@@ -66,10 +66,10 @@ To run **agent benchmark runs** (Agents page: select agent + challenge, Run):
   3. In `backend/.env`: set `USE_INPROCESS_AGENT=false`, `BACKEND_PUBLIC_URL=<url-reachable-from-Modal>` (e.g. ngrok URL for local backend), and `AGENT_INTERNAL_SECRET=<same-secret>`.
 
 **Agent types:** The app supports several agents. Two use **real SDKs**:
-- **Claude Agent SDK** (`claude-sdk`): Uses the `claude-agent-sdk` package with a custom `submit_prompt` tool that calls your backend. Set `ANTHROPIC_API_KEY` for the SDK to call Claude.
+- **Claude Agent SDK** (`claude-sdk`): Uses the `claude-agent-sdk` package with a custom `submit_prompt` tool that calls your backend. Set `ANTHROPIC_API_KEY` for the SDK to call Claude. For challenges with a reference URL (e.g. “Build this UI: Landing Page” with openai.com), you can optionally enable **view_reference_page**: the agent can open the URL in a browser and scrape structure/content (via [Browserbase Stagehand](https://www.browserbase.com/stagehand)). Set `BROWSERBASE_API_KEY` and `BROWSERBASE_PROJECT_ID` in `backend/.env` to enable it; the agent will then get a `view_reference_page` tool for those challenges.
 - **OpenAI Assistant** (`openai-assistant`): Uses the OpenAI Assistants API with a `submit_prompt` function tool. Uses `OPENAI_API_KEY` and `OPENAI_BASE_URL`.
 
-See `backend/.env.example` for all optional variables (OpenAI, Anthropic, agent secret, Modal).
+See `backend/.env.example` for all optional variables (OpenAI, Anthropic, agent secret, Modal, Browserbase).
 
 **Agent trace logs (in-process):** When running in-process, agent steps are logged to the **backend terminal** (the `[server]` process). You can also tail the debug log: `tail -f .cursor/debug.log` from the project root to see `agent_trace` and session events (NDJSON, one line per event).
 
