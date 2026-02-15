@@ -27,7 +27,7 @@ export function SimpleMarkdown({ content, className = "" }: SimpleMarkdownProps)
             if (inCodeBlock) {
                 // End of code block
                 elements.push(
-                    <pre key={key++} className="bg-muted p-3 dashed rounded-md my-4 overflow-x-auto text-sm font-mono text-foreground">
+                    <pre key={key++} className="bg-muted/30 p-3 dashed rounded-md my-4 overflow-x-auto text-sm font-mono text-foreground">
                         <code>{codeBlockContent.join('\n')}</code>
                     </pre>
                 );
@@ -79,7 +79,7 @@ export function SimpleMarkdown({ content, className = "" }: SimpleMarkdownProps)
     const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
     return parts.map((part, index) => {
         if (part.startsWith('`') && part.endsWith('`')) {
-            return <code key={index} className="bg-muted px-1 py-0.5 rounded font-mono text-sm">{part.slice(1, -1)}</code>;
+            return <code key={index} className="bg-muted/30 px-1 py-0.5 rounded font-mono text-sm">{part.slice(1, -1)}</code>;
         }
         if (part.startsWith('**') && part.endsWith('**')) {
             return <strong key={index} className="font-semibold">{part.slice(2, -2)}</strong>;
