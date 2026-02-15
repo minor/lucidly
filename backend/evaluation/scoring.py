@@ -104,6 +104,30 @@ def compute_composite_score(
     }
 
 
+def compute_composite_score_efficiency_only(
+    elapsed_sec: float,
+    total_tokens: int,
+    total_turns: int,
+    difficulty: str = "medium",
+) -> dict:
+    """
+    Composite score for challenges with no accuracy (e.g. product/PRD).
+    Score = weighted efficiency only (speed, tokens, turns), scaled 0–700
+    so the max is 700 and 1000 is reserved for coding with perfect accuracy.
+    """
+    speed = compute_speed_score(elapsed_sec, difficulty)
+    token_eff = compute_token_efficiency(total_tokens, difficulty)
+    turn_eff = compute_turn_efficiency(total_turns, difficulty)
+    composite = 0.30 * speed + 0.25 * token_eff + 0.45 * turn_eff
+    return {
+        "accuracy_score": 0,
+        "speed_score": round(speed * 1000),
+        "token_score": round(token_eff * 1000),
+        "turn_score": round(turn_eff * 1000),
+        "composite_score": round(composite * 700),
+    }
+
+
 async def run_function_tests(sandbox_id: str, code: str, test_suite: list[dict]) -> list[bool]:
     """
     Run test cases via a persistent Modal sandbox. Returns list of booleans.

@@ -375,6 +375,8 @@ export interface CalculateScoreRequest {
   total_turns: number;
   difficulty?: string;
   model?: string;
+  category?: string;
+  prd_content?: string;
   username?: string;
   messages?: ChatMessage[];
   total_cost?: number;
@@ -422,6 +424,8 @@ export interface PromptFeedbackRequest {
   challenge_category: string;
   challenge_difficulty: string;
   reference_html?: string;
+  /** For product challenges: the submitted PRD text to grade */
+  prd_content?: string;
   accuracy: number;
   total_turns: number;
   total_tokens: number;
