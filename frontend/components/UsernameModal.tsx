@@ -96,14 +96,14 @@ export function UsernameModal({
 
       {/* Content */}
       <div className="flex flex-col items-center">
-        <h2 className="text-3xl font-semibold tracking-tight mb-1.5 whitespace-nowrap">
+        <h2 className="text-3xl font-semibold tracking-tight mb-2 whitespace-nowrap">
           Choose a username
         </h2>
-        <p className="text-sm text-muted font-serif italic mb-4 whitespace-nowrap">
+        <p className="text-base text-muted font-serif italic mb-6 whitespace-nowrap">
           This will appear on the leaderboard
         </p>
 
-        <form onSubmit={handleSubmit} className="w-[180px] space-y-2">
+        <form onSubmit={handleSubmit} className="w-[320px] space-y-3">
           <div className="relative">
             <input
               type="text"
@@ -115,7 +115,7 @@ export function UsernameModal({
               placeholder="username"
               autoFocus
               maxLength={30}
-              className={`w-full rounded border bg-card px-2.5 py-1 text-[11px] font-mono placeholder:text-muted/50 focus:outline-none transition-colors ${
+              className={`w-full rounded-md border bg-card px-3.5 py-2.5 text-sm font-mono placeholder:text-muted/50 focus:outline-none transition-colors ${
                 hasError
                   ? "border-red-400 focus:border-red-400"
                   : available === true
@@ -124,22 +124,22 @@ export function UsernameModal({
               }`}
             />
             {/* Availability indicator */}
-            <div className="absolute right-2 top-1/2 -translate-y-1/2">
+            <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
               {checking && (
-                <Loader2 className="h-2.5 w-2.5 animate-spin text-muted" />
+                <Loader2 className="h-4 w-4 animate-spin text-muted" />
               )}
               {!checking && available === true && trimmed.length >= 2 && (
-                <Check className="h-2.5 w-2.5 text-green-500" />
+                <Check className="h-4 w-4 text-green-500" />
               )}
               {!checking && available === false && trimmed.length >= 2 && (
-                <X className="h-2.5 w-2.5 text-red-500" />
+                <X className="h-4 w-4 text-red-500" />
               )}
             </div>
           </div>
 
           {/* Validation — compact single line */}
           {hasError && (
-            <p className="text-[9px] text-red-500 leading-tight">
+            <p className="text-xs text-red-500 leading-tight">
               {tooShort
                 ? "Must be at least 2 characters."
                 : tooLong
@@ -160,10 +160,10 @@ export function UsernameModal({
               available === false ||
               checking
             }
-            className="w-full rounded bg-foreground px-2.5 py-1 text-[11px] font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+            className="w-full rounded-md bg-foreground px-4 py-2.5 text-sm font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
           >
             {submitting ? (
-              <Loader2 className="h-2.5 w-2.5 animate-spin mx-auto" />
+              <Loader2 className="h-4 w-4 animate-spin mx-auto" />
             ) : (
               "Continue"
             )}
