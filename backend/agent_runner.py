@@ -15,7 +15,8 @@ from agents import get_agent_by_id
 from challenges import get_challenge_by_id
 from agent_turn import complete_agent_session, execute_prompt_turn
 from llm import LLM
-from evaluation.scoring import compute_accuracy_text
+from evaluation.evaluator import ChallengeEvaluator
+from evaluation.test_generator import TestGenerator
 from sessions import get_session, add_turn, append_trace, Turn
 from session_events import broadcast_session_event
 
@@ -48,6 +49,25 @@ def _agent_tool_log(tool: str, *, args: dict[str, Any] | None = None, result_pre
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
     except Exception:
         pass
+
+
+# Lazy singletons for evaluator + test generator (same pipeline as user flow)
+_evaluator: ChallengeEvaluator | None = None
+_test_generator: TestGenerator | None = None
+
+
+def _get_evaluator() -> ChallengeEvaluator:
+    global _evaluator
+    if _evaluator is None:
+        _evaluator = ChallengeEvaluator()
+    return _evaluator
+
+
+def _get_test_generator() -> TestGenerator:
+    global _test_generator
+    if _test_generator is None:
+        _test_generator = TestGenerator()
+    return _test_generator
 
 
 MAX_TURNS = 10
@@ -134,7 +154,7 @@ async def _run_agent_loop_claude_sdk(
         except Exception:
             pass
         # #endregion
-        complete_agent_session(session_id)
+        await complete_agent_session(session_id)
         return
 
     # #region agent log
@@ -181,7 +201,7 @@ async def _run_agent_loop_claude_sdk(
             pass
         # #endregion
         logger.error("Claude Agent SDK requires ANTHROPIC_API_KEY in .env (SDK uses Anthropic API, not OPENAI_API_KEY)")
-        complete_agent_session(session_id)
+        await complete_agent_session(session_id)
         return
     if getattr(settings, "anthropic_api_key", ""):
         os.environ.setdefault("ANTHROPIC_API_KEY", settings.anthropic_api_key)
@@ -313,6 +333,11 @@ async def _run_agent_loop_claude_sdk(
             return {"content": [{"type": "text", "text": err_msg}]}
         _trace(session_id, "Screenshot captured, generating HTML", t0, screenshot_len=len(screenshot_data_url or ""))
         logger.info("[generate_landing_page] Screenshot captured, len=%d, calling vision model", len(screenshot_data_url or ""))
+        replicate_prompt = (
+            "Recreate this landing page exactly as shown in the screenshot. "
+            "Output one complete HTML document with inline CSS. Match layout, typography, colors, spacing, and all visible text. "
+            "Do not add placeholder content—replicate what you see."
+        )
         session_before = get_session(session_id)
         base_tokens = (session_before.total_tokens if session_before else 0)
 
@@ -483,7 +508,7 @@ async def _run_agent_loop_claude_sdk(
         except Exception:
             pass
         # #endregion
-        complete_agent_session(session_id)
+        await complete_agent_session(session_id)
         logger.info("Claude SDK agent run finished: session_id=%s", session_id)
 
 
@@ -646,12 +671,28 @@ async def run_agent_loop(session_id: str, challenge_id: str, agent_id: str) -> N
             max_tok = getattr(settings, "max_completion_tokens_agent", 4096)
             base_tokens = session.total_tokens
             full_response = ""
+
+            # --- LLM call: pause timer during latency (before first token) ---
+            await broadcast_session_event(session_id, {"type": "timer_paused"})
+            llm_start = time.time()
+            first_token_time: float | None = None
             async for chunk in llm.stream(
                 prompt,
                 conversation_history=history if history else None,
                 system_prompt=system_prompt,
                 max_tokens=max_tok,
             ):
+                if first_token_time is None:
+                    first_token_time = time.time()
+                    # Latency period over — accumulate and resume timer
+                    latency = first_token_time - llm_start
+                    _s = get_session(session_id)
+                    if _s:
+                        _s.paused_seconds += latency
+                    await broadcast_session_event(session_id, {
+                        "type": "timer_resumed",
+                        "paused_seconds": _s.paused_seconds if _s else 0,
+                    })
                 full_response += chunk
                 est = len(full_response) // 4
                 total_est = base_tokens + (len(prompt) // 4) + est
@@ -659,15 +700,53 @@ async def run_agent_loop(session_id: str, challenge_id: str, agent_id: str) -> N
                     session_id,
                     {"type": "token_progress", "total_estimated_tokens": total_est},
                 )
+            # Edge case: no tokens received at all (empty response)
+            if first_token_time is None:
+                latency = time.time() - llm_start
+                _s = get_session(session_id)
+                if _s:
+                    _s.paused_seconds += latency
+                await broadcast_session_event(session_id, {
+                    "type": "timer_resumed",
+                    "paused_seconds": _s.paused_seconds if _s else 0,
+                })
 
             generated_code = LLM.extract_code_blocks(full_response)
             est_prompt_tokens = len(prompt.split()) * 2
             est_response_tokens = len(full_response.split()) * 2
             _trace(session_id, "Model responded", t0, response_tokens=est_response_tokens)
 
-            accuracy = 0.0
-            if challenge.target_code:
-                accuracy = compute_accuracy_text(generated_code, challenge.target_code)
+            # Check for DONE signal BEFORE evaluating — don't waste time evaluating
+            # or recording a turn when the agent has nothing new to offer.
+            if "DONE" in (full_response or "").upper() and not generated_code.strip():
+                _trace(session_id, "Agent signaled DONE (no new code)", t0)
+                session = get_session(session_id)
+                if session:
+                    session.current_prompt = None
+                break
+
+            # --- Evaluation: pause timer during eval overhead ---
+            await broadcast_session_event(session_id, {"type": "timer_paused"})
+            eval_start = time.time()
+            _eval = _get_evaluator()
+            _tgen = _get_test_generator()
+            _gen_suite = None
+            if not challenge.test_suite:
+                _gen_suite = await _tgen.generate_tests(challenge)
+            _eval_result = await _eval.evaluate(challenge, generated_code, _gen_suite)
+            accuracy = _eval_result.accuracy
+            eval_elapsed = time.time() - eval_start
+            _s2 = get_session(session_id)
+            if _s2:
+                _s2.paused_seconds += eval_elapsed
+            await broadcast_session_event(session_id, {
+                "type": "timer_resumed",
+                "paused_seconds": _s2.paused_seconds if _s2 else 0,
+            })
+            _trace(session_id, "Evaluator result", t0, accuracy=round(accuracy, 2))
+
+            from config import compute_cost
+            turn_cost = compute_cost(model_used, est_prompt_tokens, est_response_tokens)
 
             turn = Turn(
                 turn_number=len(session.turns) + 1,
@@ -679,7 +758,7 @@ async def run_agent_loop(session_id: str, challenge_id: str, agent_id: str) -> N
                 accuracy_at_turn=accuracy,
                 timestamp=time.time(),
             )
-            add_turn(session_id, turn)
+            add_turn(session_id, turn, turn_cost=turn_cost)
             sess = get_session(session_id)
             if sess:
                 await broadcast_session_event(
@@ -697,10 +776,11 @@ async def run_agent_loop(session_id: str, challenge_id: str, agent_id: str) -> N
                 break
             if accuracy >= ACCURACY_THRESHOLD:
                 break
+            # DONE with code: turn was recorded above, now exit
             if "DONE" in (full_response or "").upper():
                 break
 
-        complete_agent_session(session_id)
+        await complete_agent_session(session_id)
         _trace(session_id, "Done", t0, total_turns=turn_count)
         logger.info("Agent run completed: session_id=%s turns=%s", session_id, turn_count)
     except Exception as e:

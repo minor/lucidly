@@ -252,17 +252,15 @@ class ChallengeEvaluator:
         test_suite: GeneratedTestSuite | None,
     ) -> EvaluationResult:
         """
-        Evaluate function challenges by running test cases.
-        Uses existing run_function_tests logic.
+        Evaluate function challenges by running test cases in-process.
         Prioritizes challenge.test_suite if available, otherwise uses generated test suite.
         """
-        from .scoring import run_function_tests
+        from llm import run_function_tests_local
         
         # Prioritize challenge's test_suite if available
         if challenge.test_suite:
             test_dicts = [t.model_dump() for t in challenge.test_suite]
-            test_results = run_function_tests(generated_code, test_dicts)
-            accuracy = sum(test_results) / len(test_results) if test_results else 0.0
+            accuracy, test_results = run_function_tests_local(generated_code, test_dicts)
             return EvaluationResult(
                 accuracy=accuracy,
                 test_results=test_results,
@@ -273,8 +271,7 @@ class ChallengeEvaluator:
         # Fall back to generated test suite
         if test_suite and test_suite.test_cases:
             test_dicts = [t.model_dump() for t in test_suite.test_cases]
-            test_results = run_function_tests(generated_code, test_dicts)
-            accuracy = sum(test_results) / len(test_results) if test_results else 0.0
+            accuracy, test_results = run_function_tests_local(generated_code, test_dicts)
             return EvaluationResult(
                 accuracy=accuracy,
                 test_results=test_results,

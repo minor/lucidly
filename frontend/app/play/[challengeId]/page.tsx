@@ -140,6 +140,9 @@ export default function ChallengePage() {
   
   // Execution state (from Leaderboard - allows pausing during tests)
   const [isExecuting, setIsExecuting] = useState(false);
+  
+  // True from prompt submission until first LLM token arrives (pause timer during latency)
+  const [isWaitingForFirstToken, setIsWaitingForFirstToken] = useState(false);
 
   // Product challenge state (Part 1: discovery chat, Part 2: PRD)
   const [productPart, setProductPart] = useState<1 | 2>(1);
@@ -188,10 +191,11 @@ export default function ChallengePage() {
     const isPerfect = testResults && testResults.total_count > 0 && testResults.passed_count === testResults.total_count;
     
     // Pause conditions:
-    // 1. Running tests or code (executing but not streaming chat)
-    // 2. Submitting or Finished (submitState !== 'idle')
-    // 3. 100% Accuracy achieved
-    const shouldPause = (isExecuting && !isStreaming) || submitState !== 'idle' || (isPerfect && submitState === 'idle');
+    // 1. Waiting for first LLM token (network/inference latency after prompt submit)
+    // 2. Running tests or code (executing but not streaming chat)
+    // 3. Submitting or Finished (submitState !== 'idle')
+    // 4. 100% Accuracy achieved
+    const shouldPause = isWaitingForFirstToken || (isExecuting && !isStreaming) || submitState !== 'idle' || (isPerfect && submitState === 'idle');
 
     if (shouldPause) {
       if (!pauseStartTimeRef.current) {
@@ -204,12 +208,12 @@ export default function ChallengePage() {
         pauseStartTimeRef.current = null;
       }
     }
-  }, [isExecuting, isStreaming, submitState, testResults]);
+  }, [isWaitingForFirstToken, isExecuting, isStreaming, submitState, testResults]);
 
   useEffect(() => {
     const interval = setInterval(() => {
       const isPerfect = testResults && testResults.total_count > 0 && testResults.passed_count === testResults.total_count;
-      const shouldPause = (isExecuting && !isStreaming) || submitState !== 'idle' || (isPerfect && submitState === 'idle');
+      const shouldPause = isWaitingForFirstToken || (isExecuting && !isStreaming) || submitState !== 'idle' || (isPerfect && submitState === 'idle');
 
       if (!shouldPause) {
         const now = Date.now();
@@ -218,7 +222,7 @@ export default function ChallengePage() {
       }
     }, 1000);
     return () => clearInterval(interval);
-  }, [isExecuting, isStreaming, submitState, testResults]);
+  }, [isWaitingForFirstToken, isExecuting, isStreaming, submitState, testResults]);
 
   // Resize handler
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
@@ -441,6 +445,7 @@ export default function ChallengePage() {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
       setIsStreaming(false);
+      setIsWaitingForFirstToken(false);
       if (estimatedTokens > 0 || inputCost > 0) {
         setTotalTokens((t) => t + Math.round(estimatedTokens));
         // Calculate estimated output cost dynamically
@@ -556,6 +561,7 @@ export default function ChallengePage() {
     setScoreBarFrozen(false);
     setScoreLoading(false);
     setShowCompletionModal(false);
+    setIsWaitingForFirstToken(false);
     frozenStatsRef.current = null;
     startTimeRef.current = Date.now();
     setElapsed(0);
@@ -663,16 +669,23 @@ export default function ChallengePage() {
     setMessages(updatedMessages);
     setIsStreaming(true);
     setIsExecuting(true); // Start execution state (stops timer for chat duration + execution)
+    setIsWaitingForFirstToken(true); // Pause timer during LLM latency
     setCurrentStreamingMessage("");
     setTotalTurns((t) => t + 1);
 
     if (abortControllerRef.current) abortControllerRef.current.abort();
     abortControllerRef.current = new AbortController();
 
+    let firstTokenReceived = false;
     await streamChat(
       updatedMessages,
       model,
       (chunk) => {
+        // Resume timer on first token — latency period is over
+        if (!firstTokenReceived) {
+          firstTokenReceived = true;
+          setIsWaitingForFirstToken(false);
+        }
         setCurrentStreamingMessage((prev) => prev + chunk);
         setEstimatedTokens((prev) => prev + chunk.length / 4);
       },
@@ -684,6 +697,7 @@ export default function ChallengePage() {
         setMessages([...updatedMessages, assistantMessage]);
         setCurrentStreamingMessage("");
         setIsStreaming(false);
+        setIsWaitingForFirstToken(false); // Ensure cleared
         setEstimatedTokens(0);
         abortControllerRef.current = null;
       },
@@ -697,6 +711,7 @@ export default function ChallengePage() {
         setMessages([...updatedMessages, errorMessage]);
         setCurrentStreamingMessage("");
         setIsStreaming(false);
+        setIsWaitingForFirstToken(false); // Ensure cleared
         setEstimatedTokens(0);
         abortControllerRef.current = null;
       },

@@ -55,6 +55,9 @@ export interface Session {
   completed_at: number | null;
   total_tokens: number;
   total_turns: number;
+  total_cost: number;
+  /** Seconds excluded from elapsed time (LLM latency + evaluation overhead) */
+  paused_seconds: number;
   turns: Turn[];
   /** Prompt for the turn currently in progress (show in chat before response is ready) */
   current_prompt?: string | null;

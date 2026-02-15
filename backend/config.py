@@ -80,3 +80,12 @@ MODEL_PRICING = {
     "grok-4-1-fast-reasoning": {"input": 0.20, "output": 0.50},
     "grok-code-fast-1": {"input": 0.20, "output": 1.50},
 }
+
+# Default pricing for unknown models (use GPT-5.2 rates)
+_DEFAULT_PRICING = {"input": 1.75, "output": 14.0}
+
+
+def compute_cost(model: str, prompt_tokens: int, response_tokens: int) -> float:
+    """Compute dollar cost from token counts and model pricing (per 1M tokens)."""
+    pricing = MODEL_PRICING.get(model, _DEFAULT_PRICING)
+    return (prompt_tokens * pricing["input"] + response_tokens * pricing["output"]) / 1_000_000

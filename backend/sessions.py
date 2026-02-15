@@ -28,6 +28,8 @@ class Session(BaseModel):
     completed_at: float | None = None
     total_tokens: int = 0
     total_turns: int = 0
+    total_cost: float = 0.0  # Accumulated dollar cost from model pricing
+    paused_seconds: float = 0.0  # Time excluded from elapsed (LLM latency + evaluation)
     turns: list[Turn] = []
     # Prompt for the turn currently in progress (shown in chat before response is ready)
     current_prompt: str | None = None
@@ -79,13 +81,14 @@ def get_session(session_id: str) -> Session | None:
     return _sessions.get(session_id)
 
 
-def add_turn(session_id: str, turn: Turn) -> Session | None:
+def add_turn(session_id: str, turn: Turn, *, turn_cost: float = 0.0) -> Session | None:
     session = _sessions.get(session_id)
     if session is None:
         return None
     session.turns.append(turn)
     session.total_turns = len(session.turns)
     session.total_tokens += turn.prompt_tokens + turn.response_tokens
+    session.total_cost += turn_cost
     session.final_code = turn.generated_code
     return session
 
