@@ -912,7 +912,7 @@ export default function ChallengePage() {
                 : "hover:opacity-90 cursor-pointer"
             }`}
         >
-            {submitState === "pending" ? "Pending" : submitState === "completed" ? "Retry" : isProductChallenge && productPart === 2 ? "Submit PRD" : "Submit solution"}
+            {submitState === "pending" ? "Pending..." : submitState === "completed" ? "Retry" : isProductChallenge && productPart === 2 ? "Submit PRD" : "Submit solution"}
         </button>
       </div>
 

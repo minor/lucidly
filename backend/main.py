@@ -400,6 +400,7 @@ async def calculate_score(req: CalculateScoreRequest):
         total_tokens=req.total_tokens,
         total_turns=req.total_turns,
         difficulty=req.difficulty,
+        total_cost=req.total_cost or 0.0,
     )
     
     
