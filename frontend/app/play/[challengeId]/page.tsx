@@ -26,6 +26,7 @@ import {
   FileText,
   LogIn,
   UserPlus,
+  HelpCircle,
 } from "lucide-react";
 import { useAuth0 } from "@auth0/auth0-react";
 import { useUsername } from "@/hooks/useUsername";
@@ -122,6 +123,7 @@ export default function ChallengePage() {
   const [scoreBarFrozen, setScoreBarFrozen] = useState(false);
   const [scoreLoading, setScoreLoading] = useState(false);
   const [showCompletionModal, setShowCompletionModal] = useState(false);
+  const [showScoreExplainer, setShowScoreExplainer] = useState(false);
 
   // Prompt feedback state
   const [workspaceTab, setWorkspaceTab] = useState<"chat" | "feedback">("chat");
@@ -806,13 +808,33 @@ export default function ChallengePage() {
             <p className="mb-8 text-muted">Great job! Here&apos;s how you performed.</p>
 
             <div className="mb-10 flex justify-center">
-              <div className="text-center">
-                <div className="text-6xl font-black text-foreground font-mono tracking-tighter">
-                  {finalScores.composite_score}
+              <div className="relative">
+                <div className="text-center">
+                  <div className="text-6xl font-black text-foreground font-mono tracking-tighter">
+                    {finalScores.composite_score}
+                  </div>
+                  <div className="mt-2 text-sm font-medium text-muted uppercase tracking-widest flex items-center justify-center gap-1">
+                    Final Score
+                    <button
+                      onClick={() => setShowScoreExplainer((v) => !v)}
+                      className="inline-flex items-center justify-center rounded-full text-muted hover:text-foreground transition-colors cursor-pointer"
+                      aria-label="How is the score calculated?"
+                    >
+                      <HelpCircle className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                 </div>
-                <div className="mt-2 text-sm font-medium text-muted uppercase tracking-widest">
-                  Final Score
-                </div>
+                {showScoreExplainer && (
+                  <div className="absolute left-full top-0 ml-4 w-52 rounded-lg border border-border bg-background p-3 text-left text-xs text-muted leading-relaxed shadow-lg animate-in fade-in slide-in-from-left-1 duration-150">
+                    <p className="mb-1 font-semibold text-foreground text-[11px] uppercase tracking-wider">Scoring</p>
+                    <p>
+                      ELO-style rating (0–1000) weighted by{" "}
+                      <span className="text-foreground font-medium">Accuracy 70%</span>,{" "}
+                      <span className="text-foreground font-medium">Speed 15%</span>, and{" "}
+                      <span className="text-foreground font-medium">Cost 15%</span>.
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
 
