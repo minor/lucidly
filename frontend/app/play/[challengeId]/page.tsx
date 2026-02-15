@@ -139,6 +139,8 @@ export default function ChallengePage() {
   // Code execution state (data challenges)
   const [codeResult, setCodeResult] = useState<RunCodeResponse | null>(null);
   const [runningCode, setRunningCode] = useState(false);
+  const [playerName, setPlayerName] = useState("");
+  const [scoreSubmitted, setScoreSubmitted] = useState(false);
 
   // Model selection state
   const [selectedModel, setSelectedModel] = useState("gpt-5.2");
@@ -454,11 +456,17 @@ export default function ChallengePage() {
       
       // Calculate composite score using backend API with difficulty
       const scores = await calculateScore({
+        challenge_id: challengeId,
         accuracy,
         elapsed_sec: currentElapsed,
         total_tokens: currentTokens,
         total_turns: currentTurns,
         difficulty: challenge?.difficulty || "medium",
+        model: selectedModel,
+        // Don't save yet - wait for user to enter name
+        // username: "anonymous", 
+        messages: undefined, // Don't persist messages yet either
+        total_cost: currentCost,
       });
       
       setFinalScores(scores);
@@ -496,6 +504,36 @@ export default function ChallengePage() {
     setElapsed(0);
     totalPausedTimeRef.current = 0;
     pauseStartTimeRef.current = null;
+    setPlayerName("");
+    setScoreSubmitted(false);
+  };
+
+  const handleFinalSubmit = async () => {
+    if (!playerName.trim() || scoreSubmitted || !finalScores || !frozenStatsRef.current) return;
+    
+    setScoreLoading(true);
+    try {
+      // Calculate again WITH username/messages to persist
+      // Since accuracy/etc didn't change, scores will be identical but saved
+      await calculateScore({
+        challenge_id: challengeId,
+        accuracy: frozenStatsRef.current.accuracy || 0,
+        elapsed_sec: frozenStatsRef.current.elapsed,
+        total_tokens: frozenStatsRef.current.tokens,
+        total_turns: frozenStatsRef.current.turns,
+        difficulty: challenge?.difficulty || "medium",
+        model: selectedModel,
+        username: playerName,
+        messages: messages,
+        total_cost: frozenStatsRef.current.cost,
+      });
+      setScoreSubmitted(true);
+    } catch (err) {
+      console.error("Failed to submit score:", err);
+      // Maybe show error toast?
+    } finally {
+      setScoreLoading(false);
+    }
   };
 
   const handleSubmit = async (prompt: string, model: string) => {
@@ -629,16 +667,30 @@ export default function ChallengePage() {
             </div>
 
             <div className="mx-auto max-w-sm space-y-4">
-              <div className="flex gap-2">
-                <input 
-                  type="text" 
-                  placeholder="Enter your name" 
-                  className="flex-1 rounded-lg border border-input-border bg-input px-4 py-2 text-sm focus:border-accent focus:outline-none"
-                />
-                <button className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground hover:bg-accent/90">
-                  Submit
-                </button>
-              </div>
+              {!scoreSubmitted ? (
+                <div className="flex gap-2">
+                  <input 
+                    type="text" 
+                    value={playerName}
+                    onChange={(e) => setPlayerName(e.target.value)}
+                    placeholder="Enter your name" 
+                    className="flex-1 rounded-lg border border-input-border bg-input px-4 py-2 text-sm focus:border-accent focus:outline-none"
+                    disabled={scoreLoading}
+                  />
+                  <button 
+                    onClick={handleFinalSubmit}
+                    disabled={scoreLoading || !playerName.trim()}
+                    className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground hover:bg-accent/90 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {scoreLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Submit"}
+                  </button>
+                </div>
+              ) : (
+                <div className="rounded-lg bg-green-500/10 border border-green-500/20 p-4 text-green-500 flex items-center justify-center gap-2 animate-in fade-in duration-300">
+                  <CheckCircle2 className="h-5 w-5" />
+                  <span className="font-medium">Score submitted successfully!</span>
+                </div>
+              )}
               <button 
                 onClick={() => router.push("/play")}
                 className="text-sm text-muted hover:text-foreground underline underline-offset-4"

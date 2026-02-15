@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     browserbase_api_key: str = ""
     browserbase_project_id: str = ""
 
+    # Supabase (Leaderboard & Logs)
+    supabase_url: str = ""
+    supabase_service_key: str = ""
+
     # Agent / Modal (for benchmark runs)
     agent_internal_secret: str = ""
     modal_app_name: str = "lucidly-agent"

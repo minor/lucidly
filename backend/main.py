@@ -1,11 +1,9 @@
 """Lucidly backend — FastAPI application."""
 
 import asyncio
-import base64
 import json
 import logging
 import time
-import httpx
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 
@@ -66,23 +64,6 @@ def _configure_agent_trace_logging():
         _h.terminator = "\n"
         _agent_log.addHandler(_h)
         _agent_log.propagate = False
-    try:
-        with open("/Users/helenazhou/Dev/lucidly/.cursor/debug.log", "a") as _f:
-            _f.write(
-                json.dumps(
-                    {
-                        "id": "main_backend_started",
-                        "timestamp": time.time() * 1000,
-                        "location": "main.py:startup",
-                        "message": "backend started, agent_trace logging enabled",
-                        "data": {},
-                        "hypothesisId": "Hlog",
-                    }
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
 
 
 app.add_middleware(
@@ -147,11 +128,17 @@ class AgentRunRequest(BaseModel):
 
 
 class CalculateScoreRequest(BaseModel):
+    challenge_id: str
     accuracy: float
     elapsed_sec: float
     total_tokens: int
     total_turns: int
     difficulty: str = "medium"
+    model: str = "unknown"
+    # Optional fields for persistence
+    username: str | None = None
+    messages: list[dict] | None = None
+    total_cost: float | None = 0.0
 
 # ---------------------------------------------------------------------------
 # Challenge endpoints
@@ -239,25 +226,6 @@ async def start_session(req: CreateSessionRequest):
 async def get_session_state(session_id: str):
     session = get_session(session_id)
     if session is None:
-        # #region agent log
-        try:
-            with open("/Users/helenazhou/Dev/lucidly/.cursor/debug.log", "a") as _f:
-                _f.write(
-                    json.dumps(
-                        {
-                            "id": "main_get_session_404",
-                            "timestamp": time.time() * 1000,
-                            "location": "main.py:get_session_state",
-                            "message": "GET session 404",
-                            "data": {"requested_session_id": session_id},
-                            "hypothesisId": "H404",
-                        }
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # #endregion
         raise HTTPException(status_code=404, detail="Session not found")
     return session
 
@@ -393,8 +361,18 @@ async def finish_session(session_id: str, request: Request):
 
 
 @app.get("/api/leaderboard")
-async def leaderboard(limit: int = 50, category: str | None = None):
-    return get_leaderboard(limit=limit, category=category)
+async def leaderboard(limit: int = 50, category: str | None = None, challenge_id: str | None = None):
+    """Fetch leaderboard entries from Supabase."""
+    from database import get_leaderboard as get_db_leaderboard
+    
+    # Fetch from Supabase
+    entries = await get_db_leaderboard(challenge_id=challenge_id, limit=limit)
+    
+    # Filter by category if provided (since DB currently filters by challenge_id only)
+    if category and category != "all":
+        entries = [e for e in entries if e.get("category") == category]
+        
+    return entries
 
 
 # ---------------------------------------------------------------------------
@@ -404,7 +382,7 @@ async def leaderboard(limit: int = 50, category: str | None = None):
 
 @app.post("/api/calculate-score")
 async def calculate_score(req: CalculateScoreRequest):
-    """Calculate composite score from challenge stats."""
+    """Calculate composite score from challenge stats and persist to DB."""
     scores = compute_composite_score(
         accuracy=req.accuracy,
         elapsed_sec=req.elapsed_sec,
@@ -412,6 +390,38 @@ async def calculate_score(req: CalculateScoreRequest):
         total_turns=req.total_turns,
         difficulty=req.difficulty,
     )
+    
+    
+    # Persist to Supabase if credentials exist and username/messages are provided
+    if req.username and req.messages:
+        try:
+            from database import save_challenge_session
+            from challenges import get_challenge_by_id
+            
+            challenge = get_challenge_by_id(req.challenge_id)
+            if challenge:
+                 await save_challenge_session(
+                    challenge_id=req.challenge_id,
+                    title=challenge.title,
+                    category=challenge.category,
+                    difficulty=req.difficulty,
+                    model=req.model, 
+                    username=req.username,
+                    accuracy=req.accuracy,
+                    time_seconds=req.elapsed_sec,
+                    total_tokens=req.total_tokens,
+                    total_turns=req.total_turns,
+                    total_cost=req.total_cost or 0.0,
+                    composite_score=scores["composite_score"],
+                    accuracy_score=scores["accuracy_score"],
+                    speed_score=scores["speed_score"],
+                    token_score=scores["token_score"],
+                    turn_score=scores["turn_score"],
+                    messages=req.messages
+                 )
+        except Exception as e:
+            logger.error(f"Failed to save score: {e}")
+        
     return scores
 
 
@@ -438,29 +448,6 @@ async def start_agent_run(req: AgentRunRequest):
     session = create_session(req.challenge_id, model_used, username)
     modal_spawned = False
 
-    # #region agent log
-    try:
-        with open("/Users/helenazhou/Dev/lucidly/.cursor/debug.log", "a") as _f:
-            _f.write(
-                json.dumps(
-                    {
-                        "id": "main_agent_run_created",
-                        "timestamp": time.time() * 1000,
-                        "location": "main.py:start_agent_run",
-                        "message": "session created, scheduling agent",
-                        "data": {
-                            "session_id": session.id,
-                            "use_inprocess_agent": settings.use_inprocess_agent,
-                            "agent_id": req.agent_id,
-                        },
-                        "hypothesisId": "H404",
-                    }
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # #endregion
 
     if not settings.use_inprocess_agent:
         try:
