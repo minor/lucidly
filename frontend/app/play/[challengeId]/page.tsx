@@ -18,6 +18,7 @@ import {
   XCircle,
   FlaskConical,
   GripHorizontal,
+  Trophy,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -96,6 +97,13 @@ function isHtmlCode(code: string): boolean {
 // Component
 // ---------------------------------------------------------------------------
 
+// Difficulty-based scoring baselines (must match backend/config.py)
+const SCORING_BASELINES = {
+  easy: { time: 30.0, tokens: 200, turns: 2 },
+  medium: { time: 120.0, tokens: 500, turns: 4 },
+  hard: { time: 300.0, tokens: 1000, turns: 8 },
+} as const;
+
 export default function ChallengePage() {
   const params = useParams();
   const router = useRouter();
@@ -155,6 +163,22 @@ export default function ChallengePage() {
   // Abort controller for cancelling generation
   const abortControllerRef = useRef<AbortController | null>(null);
 
+  // Timer pause refs
+  const totalPausedTimeRef = useRef(0);
+  const pauseStartTimeRef = useRef<number | null>(null);
+
+  // Execution state (tracks LLM streaming + subsequent test/code execution)
+  const [isExecuting, setIsExecuting] = useState(false);
+  const [showScore, setShowScore] = useState(false);
+  const [finalStats, setFinalStats] = useState<{
+    score: number;
+    accuracy: number;
+    timeSec: number;
+    turns: number;
+    tokens: number;
+    cost: number;
+  } | null>(null);
+
   // Initialize challenge
   useEffect(() => {
     let ignore = false;
@@ -176,13 +200,46 @@ export default function ChallengePage() {
     };
   }, [challengeId]);
 
+  // Handle Pause/Resume logic
+  useEffect(() => {
+    // Check for 100% accuracy
+    const isPerfect = testResults && testResults.total_count > 0 && testResults.passed_count === testResults.total_count;
+    
+    // Pause conditions:
+    // 1. Running tests (executing but not streaming)
+    // 2. Showing score screen
+    // 3. 100% Accuracy achieved (stop timer so user isn't penalized while looking at result)
+    const shouldPause = (isExecuting && !isStreaming) || showScore || isPerfect;
+
+    if (shouldPause) {
+      // Started pausing
+      if (!pauseStartTimeRef.current) {
+        pauseStartTimeRef.current = Date.now();
+      }
+    } else {
+      // Resumed
+      if (pauseStartTimeRef.current) {
+        const duration = Date.now() - pauseStartTimeRef.current;
+        totalPausedTimeRef.current += duration;
+        pauseStartTimeRef.current = null;
+      }
+    }
+  }, [isExecuting, isStreaming, showScore, testResults]);
+
   // Timer for efficiency stats
   useEffect(() => {
     const interval = setInterval(() => {
-      setElapsed((Date.now() - startTimeRef.current) / 1000);
+      const isPerfect = testResults && testResults.total_count > 0 && testResults.passed_count === testResults.total_count;
+      const shouldPause = (isExecuting && !isStreaming) || showScore || isPerfect;
+
+      if (!shouldPause) {
+        const now = Date.now();
+        const totalPaused = totalPausedTimeRef.current;
+        setElapsed((now - startTimeRef.current - totalPaused) / 1000);
+      }
     }, 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [isExecuting, isStreaming, showScore, testResults]);
 
   // Draggable resize for "Your output" panel (drag up = expand)
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
@@ -289,15 +346,20 @@ export default function ChallengePage() {
         setLatestCode(code);
         // Auto-run tests in persistent sandbox
         setRunningTests(true);
+        setIsExecuting(true); // Ensure execution state is active during tests
         runTests(code, challengeId, sandboxId)
           .then((results) => {
             setTestResults(results);
             setRunningTests(false);
+            setIsExecuting(false); // Finished
           })
           .catch((err) => {
             console.error("Test run failed:", err);
             setRunningTests(false);
+            setIsExecuting(false); // Finished (error)
           });
+      } else {
+        setIsExecuting(false); // No code found, stop execution state if it was somehow active
       }
     } else if (isDataChallenge && sandboxId) {
       // Auto-run code for data challenges
@@ -305,21 +367,29 @@ export default function ChallengePage() {
       if (code) {
         setRenderedCode(code); // Reuse renderedCode for data challenges to show in "Code" tab if needed
         setRunningCode(true);
+        setIsExecuting(true); // Ensure execution state is active
         setCodeResult(null);
         
         runCode(sandboxId, code)
           .then((result) => {
             setCodeResult(result);
             setRunningCode(false);
+            setIsExecuting(false); // Finished
           })
           .catch((e) => {
             console.error("Failed to run code:", e);
             setCodeResult({ stdout: "", stderr: `Error running code: ${e}`, returncode: 1 });
             setRunningCode(false);
+            setIsExecuting(false); // Finished (error)
           });
+      } else {
+        setIsExecuting(false);
       }
+    } else {
+      // Chat only or UI challenge (no backend execution needed after stream)
+      setIsExecuting(false);
     }
-  }, [messages, challenge, challengeId, sandboxId]);
+  }, [messages, challenge, challengeId, sandboxId, isStreaming]);
 
   const handleStop = () => {
     if (abortControllerRef.current) {
@@ -340,13 +410,14 @@ export default function ChallengePage() {
   };
 
   const handleSubmit = async (prompt: string, model: string) => {
-    if (!prompt.trim() || isStreaming) return;
+    if (!prompt.trim() || isStreaming || isExecuting) return;
     setSelectedModel(model);
 
     const userMessage: ChatMessage = { role: "user", content: prompt };
     const updatedMessages = [...messages, userMessage];
     setMessages(updatedMessages);
     setIsStreaming(true);
+    setIsExecuting(true); // Start execution state (stops timer, disables buttons)
     setCurrentStreamingMessage("");
     setTotalTurns((t) => t + 1);
 
@@ -434,6 +505,42 @@ export default function ChallengePage() {
 </body>
 </html>`;
 
+  const handleFinishChallenge = () => {
+    // Calculate final score
+    const accuracy = testResults ? testResults.passed_count / testResults.total_count : 0;
+    const tokens = Math.round(totalTokens + totalInputTokens + estimatedTokens);
+    const cost = totalCost + inputCost + ((estimatedTokens * (MODEL_PRICING[selectedModel]?.output || MODEL_PRICING["gpt-5.2"].output)) / 1_000_000);
+    
+    // Scoring Formula (matches backend logic)
+    // Score = Accuracy * (0.30 * Speed + 0.25 * Tokens + 0.45 * Turns)
+    // Normalized against median (based on difficulty)
+    
+    // Get baselines based on difficulty (default to medium)
+    const difficulty = (challenge?.difficulty || "medium").toLowerCase() as keyof typeof SCORING_BASELINES;
+    const baselines = SCORING_BASELINES[difficulty] || SCORING_BASELINES.medium;
+
+    // Capping component scores at 1.0 logic
+    const speedScore = Math.min((baselines.time / Math.max(elapsed, 1)), 2.0) / 2.0;
+    const tokenScore = Math.min((baselines.tokens / Math.max(tokens, 1)), 2.0) / 2.0;
+    const turnScore = Math.min((baselines.turns / Math.max(totalTurns, 1)), 2.0) / 2.0;
+    
+    const compositeScore = Math.round(1000 * accuracy * (
+        (0.30 * speedScore) +
+        (0.25 * tokenScore) +
+        (0.45 * turnScore)
+    ));
+
+    setFinalStats({
+        score: compositeScore,
+        accuracy,
+        timeSec: elapsed,
+        turns: totalTurns,
+        tokens,
+        cost
+    });
+    setShowScore(true);
+  };
+    
   if (initializing) {
     return (
       <div className="flex min-h-screen items-center justify-center">
@@ -443,7 +550,64 @@ export default function ChallengePage() {
   }
 
   return (
-    <div className="flex h-screen flex-col">
+    <div className="flex h-screen flex-col relative">
+      {/* Score Overlay */}
+      {showScore && finalStats && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/95 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-2xl rounded-2xl border border-border bg-card p-12 shadow-2xl text-center">
+            <div className="mb-8 flex justify-center">
+              <div className="rounded-full bg-accent/10 p-4">
+                <Trophy className="h-12 w-12 text-accent" />
+              </div>
+            </div>
+            
+            <h2 className="mb-2 text-3xl font-bold tracking-tight">Challenge Complete!</h2>
+            <p className="mb-8 text-muted">Great job! Here&apos;s how you performed.</p>
+
+            <div className="mb-10 flex justify-center">
+              <div className="text-center">
+                <div className="text-6xl font-black text-foreground font-mono tracking-tighter">
+                  {finalStats.score}
+                </div>
+                <div className="mt-2 text-sm font-medium text-muted uppercase tracking-widest">
+                  Final Score
+                </div>
+              </div>
+            </div>
+
+            <div className="mb-10 flex justify-center">
+              <ScoreBar 
+                accuracy={finalStats.accuracy}
+                turns={finalStats.turns}
+                tokens={finalStats.tokens}
+                elapsedSec={finalStats.timeSec}
+                cost={finalStats.cost}
+                // compositeScore is shown big above
+              />
+            </div>
+
+            <div className="mx-auto max-w-sm space-y-4">
+              <div className="flex gap-2">
+                <input 
+                  type="text" 
+                  placeholder="Enter your name" 
+                  className="flex-1 rounded-lg border border-input-border bg-input px-4 py-2 text-sm focus:border-accent focus:outline-none"
+                />
+                <button className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground hover:bg-accent/90">
+                  Submit
+                </button>
+              </div>
+              <button 
+                onClick={() => router.push("/play")}
+                className="text-sm text-muted hover:text-foreground underline underline-offset-4"
+              >
+                Return to All Challenges
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <header className="flex items-center justify-between border-b border-border px-6 py-3">
         <div className="flex items-center gap-3">
@@ -479,7 +643,9 @@ export default function ChallengePage() {
         />
         <button
           type="button"
-          className="shrink-0 rounded-lg bg-foreground px-4 py-2 text-xs font-medium text-background transition-opacity hover:opacity-90"
+          onClick={handleFinishChallenge}
+          disabled={isExecuting || isStreaming || !(testResults || codeResult || renderedCode)}
+          className="shrink-0 rounded-lg bg-foreground px-4 py-2 text-xs font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Submit solution
         </button>
@@ -896,7 +1062,7 @@ export default function ChallengePage() {
                 onStop={handleStop}
                 loading={isStreaming}
                 placeholder="Ask anything..."
-                disabled={isStreaming}
+                disabled={isStreaming || isExecuting}
               />
             </div>
           </div>
