@@ -151,7 +151,7 @@ class CalculateScoreRequest(BaseModel):
     elapsed_sec: float
     total_tokens: int
     total_turns: int
-
+    difficulty: str = "medium"
 
 # ---------------------------------------------------------------------------
 # Challenge endpoints
@@ -333,6 +333,7 @@ async def finish_session(session_id: str, request: Request):
         elapsed_sec=elapsed,
         total_tokens=session.total_tokens,
         total_turns=session.total_turns,
+        difficulty=challenge.difficulty or "medium",
     )
 
     completed = complete_session(session_id, scores)
@@ -382,6 +383,7 @@ async def calculate_score(req: CalculateScoreRequest):
         elapsed_sec=req.elapsed_sec,
         total_tokens=req.total_tokens,
         total_turns=req.total_turns,
+        difficulty=req.difficulty,
     )
     return scores
 

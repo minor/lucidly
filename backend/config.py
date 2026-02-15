@@ -23,6 +23,13 @@ class Settings(BaseSettings):
     median_tokens: int = 500
     median_turns: int = 4
 
+    # Difficulty-based baselines
+    SCORING_BASELINES: dict = {
+        "easy": {"time": 30.0, "tokens": 200, "turns": 2},
+        "medium": {"time": 120.0, "tokens": 500, "turns": 4},
+        "hard": {"time": 300.0, "tokens": 1000, "turns": 8},
+    }
+
     # Agent / Modal (for benchmark runs)
     agent_internal_secret: str = ""
     modal_app_name: str = "lucidly-agent"

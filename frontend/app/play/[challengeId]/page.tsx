@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { getChallenge, runTests, runCode, createSandbox, terminateSandbox, MODEL_PRICING, MODELS, calculateScore, evaluateUI } from "@/lib/api";
 import { PromptInput } from "@/components/PromptInput";
 import { ScoreBar } from "@/components/ScoreBar";
+import { SimpleMarkdown } from "@/components/SimpleMarkdown";
 import { streamChat, type ChatMessage, type TestCaseResult, type RunTestsResponse, type StreamDoneData, type RunCodeResponse } from "@/lib/api";
 import type { Challenge, Scores } from "@/lib/types";
 import {
@@ -17,6 +18,7 @@ import {
   XCircle,
   FlaskConical,
   GripHorizontal,
+  Trophy,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -25,12 +27,6 @@ import {
 
 /**
  * Extract the best Python code block from a markdown-formatted LLM response.
- * Strategy:
- *   1. Collect all code blocks from the response
- *   2. Among python-tagged blocks, prefer the one containing `def ` or `class `
- *      (the actual implementation, not a usage example)
- *   3. If multiple contain `def`, take the largest one
- *   4. Fall back to the last python block, then the last block overall
  */
 function extractPythonCode(text: string): string {
   const pattern = /```(\w*)\s*\n([\s\S]*?)```/g;
@@ -41,30 +37,26 @@ function extractPythonCode(text: string): string {
   }
   if (blocks.length === 0) return "";
 
-  // Filter to python blocks
   const pythonBlocks = blocks.filter(
     (b) => b.lang === "python" || b.lang === "py" || b.lang === ""
   );
   const candidates = pythonBlocks.length > 0 ? pythonBlocks : blocks;
 
-  // Prefer blocks that contain function/class definitions (actual implementations)
   const withDef = candidates.filter(
     (b) => /\bdef\s+\w+/.test(b.code) || /\bclass\s+\w+/.test(b.code)
   );
 
   if (withDef.length > 0) {
-    // Take the largest implementation block
     return withDef.reduce((a, b) =>
       a.code.length >= b.code.length ? a : b
     ).code;
   }
 
-  // Fall back to last candidate
   return candidates[candidates.length - 1].code;
 }
 
 /**
- * Extract all code blocks concatenated (for HTML).
+ * Extract all code blocks concatenated.
  */
 function extractAllCode(text: string): string {
   const pattern = /```(?:\w+)?\s*\n([\s\S]*?)```/g;
@@ -114,7 +106,7 @@ export default function ChallengePage() {
   const [totalCost, setTotalCost] = useState(0);
   const [inputCost, setInputCost] = useState(0);
 
-  // Your output panel: resizable height (small initially), Preview | Code toggle
+  // Output panel state
   const OUTPUT_PANEL_MIN = 120;
   const OUTPUT_PANEL_INITIAL = 200;
   const [outputPanelHeight, setOutputPanelHeight] = useState(OUTPUT_PANEL_INITIAL);
@@ -153,14 +145,16 @@ export default function ChallengePage() {
   const [sandboxError, setSandboxError] = useState<string | null>(null);
   const sandboxIdRef = useRef<string | null>(null);
   
-  // Abort controller for cancelling generation
+  // Abort controller
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Submit solution state
+  // Submit solution state (Merged from HEAD and Leaderboard)
   const [submitState, setSubmitState] = useState<"idle" | "pending" | "completed">("idle");
   const [finalScores, setFinalScores] = useState<Scores | null>(null);
   const [scoreBarFrozen, setScoreBarFrozen] = useState(false);
   const [scoreLoading, setScoreLoading] = useState(false);
+  
+  // Ref to hold stats when frozen (pending/completed)
   const frozenStatsRef = useRef<{
     elapsed: number;
     turns: number;
@@ -168,7 +162,14 @@ export default function ChallengePage() {
     accuracy: number | undefined;
     score: number | undefined;
     cost: number;
-  } | null>(null);
+  }>(null);
+
+  // Timer pause refs (from Leaderboard)
+  const totalPausedTimeRef = useRef(0);
+  const pauseStartTimeRef = useRef<number | null>(null);
+  
+  // Execution state (from Leaderboard - allows pausing during tests)
+  const [isExecuting, setIsExecuting] = useState(false);
 
   // Initialize challenge
   useEffect(() => {
@@ -191,18 +192,45 @@ export default function ChallengePage() {
     };
   }, [challengeId]);
 
-  // Timer for efficiency stats (freeze when pending or completed)
+  // Timer Logic (Merged)
+  useEffect(() => {
+    // Check for 100% accuracy to auto-pause timer
+    const isPerfect = testResults && testResults.total_count > 0 && testResults.passed_count === testResults.total_count;
+    
+    // Pause conditions:
+    // 1. Running tests or code (executing but not streaming chat)
+    // 2. Submitting or Finished (submitState !== 'idle')
+    // 3. 100% Accuracy achieved
+    const shouldPause = (isExecuting && !isStreaming) || submitState !== 'idle' || (isPerfect && submitState === 'idle');
+
+    if (shouldPause) {
+      if (!pauseStartTimeRef.current) {
+        pauseStartTimeRef.current = Date.now();
+      }
+    } else {
+      if (pauseStartTimeRef.current) {
+        const duration = Date.now() - pauseStartTimeRef.current;
+        totalPausedTimeRef.current += duration;
+        pauseStartTimeRef.current = null;
+      }
+    }
+  }, [isExecuting, isStreaming, submitState, testResults]);
+
   useEffect(() => {
     const interval = setInterval(() => {
-      // Don't update timer when pending or completed (frozen)
-      if (submitState === "idle") {
-        setElapsed((Date.now() - startTimeRef.current) / 1000);
+      const isPerfect = testResults && testResults.total_count > 0 && testResults.passed_count === testResults.total_count;
+      const shouldPause = (isExecuting && !isStreaming) || submitState !== 'idle' || (isPerfect && submitState === 'idle');
+
+      if (!shouldPause) {
+        const now = Date.now();
+        const totalPaused = totalPausedTimeRef.current;
+        setElapsed((now - startTimeRef.current - totalPaused) / 1000);
       }
     }, 1000);
     return () => clearInterval(interval);
-  }, [submitState]);
+  }, [isExecuting, isStreaming, submitState, testResults]);
 
-  // Draggable resize for "Your output" panel (drag up = expand)
+  // Resize handler
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     resizeStartYRef.current = e.clientY;
@@ -228,7 +256,7 @@ export default function ChallengePage() {
     scrollToBottom();
   }, [messages, currentStreamingMessage]);
 
-  // Ensure selectedModel is valid (handles removal of old models)
+  // Ensure selectedModel is valid
   useEffect(() => {
     const isValid = MODELS.some((m) => m.id === selectedModel);
     if (!isValid) {
@@ -236,12 +264,11 @@ export default function ChallengePage() {
     }
   }, [selectedModel]);
 
-  // Create sandbox when challenge loads (for function challenges with tests OR data challenges)
+  // Sandbox lifecycle
   useEffect(() => {
     if (!challenge) return;
     const hasFunctionTests = challenge.test_suite && challenge.test_suite.length > 0;
     const isDataChallenge = challenge.category === "data";
-    // Only create sandbox for function/data challenges
     if (!hasFunctionTests && !isDataChallenge) return;
 
     let ignore = false;
@@ -257,7 +284,6 @@ export default function ChallengePage() {
     }
     initSandbox();
 
-    // Terminate sandbox on cleanup (navigation away or close)
     return () => {
       ignore = true;
       if (sandboxIdRef.current) {
@@ -267,11 +293,9 @@ export default function ChallengePage() {
     };
   }, [challenge]);
 
-  // Also terminate sandbox on page close/refresh
   useEffect(() => {
     const handleBeforeUnload = () => {
       if (sandboxIdRef.current) {
-        // Use sendBeacon for reliable cleanup on page close
         const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
         navigator.sendBeacon(
           `${API_BASE}/api/sandbox/${sandboxIdRef.current}/terminate`,
@@ -283,7 +307,7 @@ export default function ChallengePage() {
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, []);
 
-  // Extract code and run tests when messages change (ONLY after streaming is done)
+  // Auto-run tests/code after streaming
   useEffect(() => {
     if (isStreaming) return;
 
@@ -297,7 +321,6 @@ export default function ChallengePage() {
     if (isUi) {
       const code = extractAllCode(latest.content);
       if (code && isHtmlCode(code)) {
-        // Just render the code, don't automatically evaluate
         setRenderedCode(code);
       }
     }
@@ -306,50 +329,58 @@ export default function ChallengePage() {
       const code = extractPythonCode(latest.content);
       if (code) {
         setLatestCode(code);
-        // Auto-run tests in persistent sandbox
         setRunningTests(true);
+        setIsExecuting(true);
         runTests(code, challengeId, sandboxId)
           .then((results) => {
             setTestResults(results);
             setRunningTests(false);
+            setIsExecuting(false);
           })
           .catch((err) => {
             console.error("Test run failed:", err);
             setRunningTests(false);
+            setIsExecuting(false);
           });
+      } else {
+        setIsExecuting(false);
       }
     } else if (isDataChallenge && sandboxId) {
-      // Auto-run code for data challenges
       const code = extractPythonCode(latest.content);
       if (code) {
-        setRenderedCode(code); // Reuse renderedCode for data challenges to show in "Code" tab if needed
+        setRenderedCode(code);
         setRunningCode(true);
+        setIsExecuting(true);
         setCodeResult(null);
         
         runCode(sandboxId, code)
           .then((result) => {
             setCodeResult(result);
             setRunningCode(false);
+            setIsExecuting(false);
           })
           .catch((e) => {
             console.error("Failed to run code:", e);
             setCodeResult({ stdout: "", stderr: `Error running code: ${e}`, returncode: 1 });
             setRunningCode(false);
+            setIsExecuting(false);
           });
+      } else {
+        setIsExecuting(false);
       }
+    } else {
+      setIsExecuting(false);
     }
-  }, [messages, challenge, challengeId, sandboxId]);
+  }, [messages, challenge, challengeId, sandboxId, isStreaming]);
 
   const handleStop = () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
       setIsStreaming(false);
-      // Persist estimated tokens and cost so far
       if (estimatedTokens > 0 || inputCost > 0) {
         setTotalTokens((t) => t + Math.round(estimatedTokens));
-        // Calculate estimated output cost dynamically
-        const pricing = MODEL_PRICING["claude-3-opus-20240229"];
+        const pricing = MODEL_PRICING["claude-3-opus-20240229"] || MODEL_PRICING["gpt-5.2"];
         const outputCost = (estimatedTokens * pricing.output) / 1_000_000;
         setTotalCost((c) => c + inputCost + outputCost);
         setEstimatedTokens(0);
@@ -357,6 +388,10 @@ export default function ChallengePage() {
       }
     }
   };
+
+  const isUiChallenge = challenge?.category === "ui";
+  const hasFunctionTests = challenge?.test_suite && challenge.test_suite.length > 0;
+  const isDataChallenge = challenge?.category === "data";
 
   const handleSubmitSolution = async () => {
     if (submitState !== "idle") return;
@@ -376,22 +411,16 @@ export default function ChallengePage() {
     setScoreLoading(true);
     
     try {
-      // Calculate accuracy based on challenge type
-      let accuracy = 0.0;
-      let evaluatedUiScore: number | undefined = undefined;
-      
       if (isUiChallenge) {
-        // For UI challenges, evaluate the rendered code to get the score
         if (renderedCode) {
           const result = await evaluateUI(challengeId, renderedCode);
-          accuracy = result.score / 100; // Convert percentage to 0-1
-          evaluatedUiScore = result.score; // Store for display
+          accuracy = result.score / 100;
+          evaluatedUiScore = result.score;
           setUiScore(result.score);
         }
       } else if (hasFunctionTests && testResults) {
         accuracy = testResults.passed_count / testResults.total_count;
       } else if (isDataChallenge && codeResult) {
-        // For data challenges, accuracy is based on return code (0 = success)
         accuracy = codeResult.returncode === 0 ? 1.0 : 0.0;
       }
       
@@ -405,12 +434,13 @@ export default function ChallengePage() {
         cost: currentCost,
       };
       
-      // Calculate composite score
+      // Calculate composite score using backend API with difficulty
       const scores = await calculateScore({
         accuracy,
         elapsed_sec: currentElapsed,
         total_tokens: currentTokens,
         total_turns: currentTurns,
+        difficulty: challenge?.difficulty || "medium",
       });
       
       setFinalScores(scores);
@@ -426,7 +456,7 @@ export default function ChallengePage() {
   };
 
   const handleRetry = () => {
-    // Reset all state to restart the challenge
+    // Reset all state to restart
     setMessages([]);
     setRenderedCode("");
     setTestResults(null);
@@ -446,20 +476,22 @@ export default function ChallengePage() {
     frozenStatsRef.current = null;
     startTimeRef.current = Date.now();
     setElapsed(0);
+    totalPausedTimeRef.current = 0;
+    pauseStartTimeRef.current = null;
   };
 
   const handleSubmit = async (prompt: string, model: string) => {
-    if (!prompt.trim() || isStreaming) return;
+    if (!prompt.trim() || isStreaming || isExecuting || submitState !== "idle") return;
     setSelectedModel(model);
 
     const userMessage: ChatMessage = { role: "user", content: prompt };
     const updatedMessages = [...messages, userMessage];
     setMessages(updatedMessages);
     setIsStreaming(true);
+    setIsExecuting(true); // Start execution state (stops timer for chat duration + execution)
     setCurrentStreamingMessage("");
     setTotalTurns((t) => t + 1);
 
-    // Create new abort controller
     if (abortControllerRef.current) abortControllerRef.current.abort();
     abortControllerRef.current = new AbortController();
 
@@ -468,7 +500,6 @@ export default function ChallengePage() {
       model,
       (chunk) => {
         setCurrentStreamingMessage((prev) => prev + chunk);
-        // Estimate tokens: roughly 1 token per 4 chars
         setEstimatedTokens((prev) => prev + chunk.length / 4);
       },
       (fullResponse) => {
@@ -483,7 +514,7 @@ export default function ChallengePage() {
         abortControllerRef.current = null;
       },
       (error) => {
-        if (error === "AbortError") return; // Ignore aborts
+        if (error === "AbortError") return;
         console.error("Chat error:", error);
         const errorMessage: ChatMessage = {
           role: "assistant",
@@ -507,7 +538,6 @@ export default function ChallengePage() {
       },
       (usage) => {
         if (usage.input_tokens) {
-          // Input cost: dynamic pricing based on selected model
           const pricing = MODEL_PRICING[model] || MODEL_PRICING["gpt-5.2"];
           setInputCost((usage.input_tokens * pricing.input) / 1_000_000);
           setTotalInputTokens((t) => t + usage.input_tokens);
@@ -517,18 +547,11 @@ export default function ChallengePage() {
     );
   };
 
-  const isUiChallenge = challenge?.category === "ui";
-  const hasFunctionTests =
-    challenge?.test_suite && challenge.test_suite.length > 0;
-  const isDataChallenge = challenge?.category === "data";
-
   const hasBottomPanel =
-
     isUiChallenge ||
     (hasFunctionTests && (testResults || runningTests)) ||
     (isDataChallenge && (codeResult || runningCode));
 
-  // Placeholder for "Your output" when no code generated yet (UI challenges)
   const OUTPUT_PLACEHOLDER_IMAGE =
     "https://placehold.co/800x400/f8fafc/94a3b8?text=Your+rendered+page";
   const OUTPUT_PLACEHOLDER_CODE = `<!DOCTYPE html>
@@ -552,7 +575,69 @@ export default function ChallengePage() {
   }
 
   return (
-    <div className="flex h-screen flex-col">
+    <div className="flex h-screen flex-col relative">
+      {/* Score Overlay */}
+      {submitState === "completed" && finalScores && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/95 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-2xl rounded-2xl border border-border bg-card p-12 shadow-2xl text-center">
+            <div className="mb-8 flex justify-center">
+              <div className="rounded-full bg-accent/10 p-4">
+                <Trophy className="h-12 w-12 text-accent" />
+              </div>
+            </div>
+            
+            <h2 className="mb-2 text-3xl font-bold tracking-tight">Challenge Complete!</h2>
+            <p className="mb-8 text-muted">Great job! Here&apos;s how you performed.</p>
+
+            <div className="mb-10 flex justify-center">
+              <div className="text-center">
+                <div className="text-6xl font-black text-foreground font-mono tracking-tighter">
+                  {finalScores.composite_score}
+                </div>
+                <div className="mt-2 text-sm font-medium text-muted uppercase tracking-widest">
+                  Final Score
+                </div>
+              </div>
+            </div>
+
+            <div className="mb-10 flex justify-center">
+              <ScoreBar 
+                accuracy={finalScores.accuracy_score / 1000} // Convert back to 0-1 for display
+                turns={frozenStatsRef.current?.turns || 0}
+                tokens={frozenStatsRef.current?.tokens || 0}
+                elapsedSec={frozenStatsRef.current?.elapsed || 0}
+                cost={frozenStatsRef.current?.cost || 0}
+              />
+            </div>
+
+            <div className="mx-auto max-w-sm space-y-4">
+              <div className="flex gap-2">
+                <input 
+                  type="text" 
+                  placeholder="Enter your name" 
+                  className="flex-1 rounded-lg border border-input-border bg-input px-4 py-2 text-sm focus:border-accent focus:outline-none"
+                />
+                <button className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground hover:bg-accent/90">
+                  Submit
+                </button>
+              </div>
+              <button 
+                onClick={() => router.push("/play")}
+                className="text-sm text-muted hover:text-foreground underline underline-offset-4"
+              >
+                Return to All Challenges
+              </button>
+              <button 
+                onClick={handleRetry}
+                className="block w-full text-center text-sm text-muted hover:text-foreground mt-2"
+              >
+                Retry Challenge
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <header className="flex items-center justify-between border-b border-border px-6 py-3">
         <div className="flex items-center gap-3">
@@ -600,26 +685,28 @@ export default function ChallengePage() {
           }
         />
         <button
-          type="button"
-          onClick={submitState === "completed" ? handleRetry : handleSubmitSolution}
-          disabled={submitState === "pending"}
-          className={`shrink-0 rounded-lg px-4 py-2 text-xs font-medium transition-opacity ${
-            submitState === "pending"
-              ? "bg-muted text-muted-foreground cursor-not-allowed italic"
-              : submitState === "completed"
-                ? "bg-foreground text-background hover:opacity-90 cursor-pointer"
+            type="button"
+            onClick={submitState === 'completed' ? handleRetry : handleSubmitSolution}
+            disabled={
+                submitState === 'pending' || 
+                isExecuting || 
+                isStreaming || 
+                (!testResults && !codeResult && !renderedCode)
+            }
+            className={`shrink-0 rounded-lg px-4 py-2 text-xs font-medium transition-opacity ${
+                submitState === 'pending' || (submitState === 'idle' && (isExecuting || isStreaming || (!testResults && !codeResult && !renderedCode)))
+                ? "bg-muted text-muted-foreground cursor-not-allowed italic"
                 : "bg-foreground text-background hover:opacity-90 cursor-pointer"
-          }`}
+            }`}
         >
-          {submitState === "pending" ? "Pending" : submitState === "completed" ? "Retry" : "Submit solution"}
+            {submitState === "pending" ? "Pending" : submitState === "completed" ? "Retry" : "Submit solution"}
         </button>
       </div>
 
       {/* Main content */}
       <div className="flex flex-1 min-h-0">
-        {/* Left panel: Challenge description + output */}
         <div className="flex-1 flex flex-col min-w-0 border-r border-border">
-          {/* Top: Challenge description (scrollable); flexes to fill space above output panel */}
+          {/* Top: Challenge description */}
           <div
             className={`${
               hasBottomPanel ? "min-h-0 flex-1" : "flex-1"
@@ -627,9 +714,8 @@ export default function ChallengePage() {
           >
             <div className="p-6">
               <h2 className="text-sm font-semibold mb-3">Challenge</h2>
-              <p className="text-sm text-muted leading-relaxed whitespace-pre-wrap mb-4">
-                {challenge?.description}
-              </p>
+              <SimpleMarkdown content={challenge?.description || ""} className="text-sm leading-relaxed mb-4" />
+              
               {challenge?.starter_code && (
                 <div className="rounded-lg border border-border bg-code-bg overflow-hidden mb-4">
                   <div className="px-3 py-1.5 border-b border-border">
@@ -648,7 +734,7 @@ export default function ChallengePage() {
                 <div className="rounded-lg border border-border overflow-hidden bg-muted/20 mb-4 h-[680px]">
                   <iframe
                     src={challenge.embed_url}
-                    title="Challenge reference (top of page only)"
+                    title="Challenge reference"
                     className="w-full h-[900px] border-0 rounded-lg pointer-events-none"
                     sandbox="allow-scripts allow-same-origin"
                   />
@@ -687,7 +773,7 @@ export default function ChallengePage() {
             </div>
           </div>
 
-          {/* Resize handle (drag up to expand output panel) */}
+          {/* Resize handle */}
           {hasBottomPanel && (
             <button
               type="button"
@@ -699,13 +785,12 @@ export default function ChallengePage() {
             </button>
           )}
 
-          {/* Bottom: Output panel (resizable height) */}
+          {/* Bottom: Output panel */}
           {hasBottomPanel && (
             <div
               className="flex shrink-0 flex-col border-t border-border bg-muted/5 overflow-hidden"
               style={{ height: outputPanelHeight }}
             >
-              {/* ---- Data Challenge Execution Output ---- */}
               {isDataChallenge && (
                 <div className="flex flex-col h-full bg-card">
                   <div className="px-4 py-2 border-b border-border bg-muted/30 flex justify-between items-center">
@@ -747,7 +832,6 @@ export default function ChallengePage() {
                 </div>
               )}
 
-              {/* ---- UI Preview (always shown for UI challenges; placeholder until code is generated) ---- */}
               {isUiChallenge && (
                 <>
                   <div className="flex items-center justify-between border-b border-border px-4 py-2.5 shrink-0 bg-background/80">
@@ -807,7 +891,6 @@ export default function ChallengePage() {
                 </>
               )}
 
-              {/* ---- Function Test Results ---- */}
               {hasFunctionTests && !isUiChallenge && (
                 <>
                   <div className="flex items-center justify-between border-b border-border px-4 py-2 shrink-0">
@@ -937,15 +1020,13 @@ export default function ChallengePage() {
           )}
         </div>
 
-        {/* Right: Chat panel with streaming */}
+        {/* Right: Chat panel */}
         <div className="flex flex-col w-1/2 shrink-0 border-l border-border">
-          {/* Chat Header */}
           <div className="border-b border-border px-6 py-3 flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-muted" />
             <h2 className="text-sm font-medium text-foreground">Chat</h2>
           </div>
 
-          {/* Messages Container */}
           <div
             ref={chatContainerRef}
             className="flex-1 overflow-y-auto"
@@ -967,7 +1048,6 @@ export default function ChallengePage() {
                 </div>
               )}
 
-              {/* Messages */}
               <div className="space-y-8">
                 {messages.map((message, index) => (
                   <div
@@ -996,7 +1076,6 @@ export default function ChallengePage() {
                   </div>
                 ))}
 
-                {/* Streaming Message */}
                 {isStreaming && (
                   <div className="flex gap-4 group">
                     <div className="flex-1 min-w-0">
@@ -1015,7 +1094,6 @@ export default function ChallengePage() {
             </div>
           </div>
 
-          {/* Input Area */}
           <div className="border-t border-border bg-background">
             <div className="px-6 py-4">
               <div className="flex justify-between items-center mb-2">
@@ -1024,9 +1102,11 @@ export default function ChallengePage() {
               <PromptInput
                 onSubmit={handleSubmit}
                 onStop={handleStop}
-                loading={isStreaming}
+                isStreaming={isStreaming}
+                selectedModel={selectedModel}
+                onModelChange={setSelectedModel}
                 placeholder="Ask anything..."
-                disabled={isStreaming || submitState === "pending" || submitState === "completed"}
+                disabled={isStreaming || isExecuting || submitState === "pending" || submitState === "completed"}
               />
             </div>
           </div>

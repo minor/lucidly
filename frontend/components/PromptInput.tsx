@@ -8,28 +8,46 @@ import { MODELS, MODEL_PRICING } from "@/lib/api";
 interface PromptInputProps {
   onSubmit: (prompt: string, model: string) => void;
   onStop?: () => void;
-  loading?: boolean;
+  loading?: boolean; // Kept for backward compat
+  isStreaming?: boolean; // Alias for loading
   placeholder?: string;
   disabled?: boolean;
   initialModel?: string;
+  selectedModel?: string; // Controlled mode
+  onModelChange?: (model: string) => void; // Controlled mode
 }
 
 export function PromptInput({
   onSubmit,
   onStop,
   loading = false,
+  isStreaming,
   placeholder = "Ask anything...",
   disabled = false,
   initialModel = "gpt-5.2",
+  selectedModel,
+  onModelChange,
 }: PromptInputProps) {
   const [value, setValue] = useState("");
-  const [model, setModel] = useState(initialModel);
+  // Use controlled model if provided, otherwise local state
+  const [internalModel, setInternalModel] = useState(initialModel);
+  
+  const activeModel = selectedModel !== undefined ? selectedModel : internalModel;
+  const isLoading = isStreaming !== undefined ? isStreaming : loading;
+
+  const handleModelChange = (newModel: string) => {
+    if (onModelChange) {
+      onModelChange(newModel);
+    } else {
+      setInternalModel(newModel);
+    }
+  };
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const handleSubmit = () => {
     const trimmed = value.trim();
-    if (!trimmed || loading || disabled) return;
-    onSubmit(trimmed, model);
+    if (!trimmed || isLoading || disabled) return;
+    onSubmit(trimmed, activeModel);
     setValue("");
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
@@ -63,9 +81,9 @@ export function PromptInput({
         {/* Model Picker Header */}
         <div className="flex items-center justify-between border-b border-input-border/50 pb-2">
           <select
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            disabled={loading || disabled}
+            value={activeModel}
+            onChange={(e) => handleModelChange(e.target.value)}
+            disabled={isLoading || disabled}
             className="bg-transparent text-xs font-medium text-muted hover:text-foreground focus:outline-none cursor-pointer"
           >
             {MODELS.map((m) => (
@@ -79,8 +97,8 @@ export function PromptInput({
           <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground bg-muted/30 px-2 py-1 rounded">
             <Info className="h-3 w-3 opacity-70" />
             <span>
-              In: <span className="font-mono text-foreground">${MODEL_PRICING[model]?.input.toFixed(2)}</span> / 
-              Out: <span className="font-mono text-foreground">${MODEL_PRICING[model]?.output.toFixed(2)}</span> per 1M
+              In: <span className="font-mono text-foreground">${MODEL_PRICING[activeModel]?.input.toFixed(2)}</span> / 
+              Out: <span className="font-mono text-foreground">${MODEL_PRICING[activeModel]?.output.toFixed(2)}</span> per 1M
             </span>
           </div>
         </div>
@@ -93,11 +111,11 @@ export function PromptInput({
           onKeyDown={handleKeyDown}
           onInput={handleInput}
           placeholder={placeholder}
-          disabled={disabled || (loading && !onStop)}
+          disabled={disabled || (isLoading && !onStop)}
           rows={1}
           className="flex-1 resize-none bg-transparent text-sm leading-relaxed text-foreground placeholder:text-muted/60 focus:outline-none disabled:opacity-50"
         />
-        {loading && onStop ? (
+        {isLoading && onStop ? (
           <button
             onClick={handleStop}
             className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-destructive text-destructive-foreground transition-opacity hover:opacity-90"
@@ -108,11 +126,11 @@ export function PromptInput({
         ) : (
           <button
             onClick={handleSubmit}
-            disabled={!value.trim() || loading || disabled}
+            disabled={!value.trim() || isLoading || disabled}
             className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-foreground text-background transition-opacity hover:opacity-90 disabled:opacity-30 disabled:cursor-not-allowed"
             aria-label="Submit prompt"
           >
-            {loading ? (
+            {isLoading ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
             ) : (
               <ArrowRight className="h-3.5 w-3.5" />
