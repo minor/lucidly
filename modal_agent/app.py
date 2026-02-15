@@ -1,6 +1,6 @@
 """
 Modal agent runner: runs a single agent on a challenge by calling the Lucidly backend.
-Supports simple loop (claude-direct, openai-cot), Claude Agent SDK (claude-sdk), and OpenAI Assistant (openai-assistant).
+Supports simple loop (claude-direct, openai-cot) and Claude Agent SDK (claude-sdk).
 Deploy: modal deploy app.py
 Run (for testing): modal run app.py --session-id <id> --challenge-id <id> --agent-id claude-direct
 """
@@ -80,14 +80,6 @@ async def run_agent(
             base_url=base,
             headers=headers,
             brief=brief,
-        )
-    if agent_id == "openai-assistant":
-        return await _run_openai_assistant(
-            session_id=session_id,
-            base_url=base,
-            headers=headers,
-            brief=brief,
-            challenge=challenge,
         )
 
     # Simple loop for claude-direct, openai-cot
@@ -196,116 +188,6 @@ async def _run_claude_sdk(
         await client.query(prompt)
         async for _ in client.receive_response():
             pass
-
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        r = await client.post(
-            f"{base_url}/api/sessions/{session_id}/complete",
-            headers=headers,
-        )
-        r.raise_for_status()
-
-    return {"session_id": session_id, "status": "completed"}
-
-
-async def _run_openai_assistant(
-    session_id: str,
-    base_url: str,
-    headers: dict,
-    brief: str,
-    challenge: dict,
-) -> dict:
-    """Run OpenAI Assistants API with submit_prompt function that POSTs to backend."""
-    import json
-    from openai import AsyncOpenAI
-
-    # Use OpenAI from env (Modal secret or env)
-    api_key = os.environ.get("OPENAI_API_KEY", "")
-    base_url_openai = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
-    model = os.environ.get("OPENAI_ASSISTANT_MODEL", "gpt-4o")
-    client = AsyncOpenAI(api_key=api_key, base_url=base_url_openai)
-
-    assistant = await client.beta.assistants.create(
-        name="Lucidly Challenge Agent",
-        instructions=(
-            "You are completing a coding challenge. Use the submit_prompt tool to send prompts to the code generation API. "
-            "Each call returns the model's response, generated code, and accuracy. Your first tool call must request runnable code. "
-            "Iterate until accuracy is 1.0 or you have tried enough. Then reply with DONE.\n\n"
-            f"{brief}"
-        ),
-        model=model,
-        tools=[
-            {
-                "type": "function",
-                "function": {
-                    "name": "submit_prompt",
-                    "description": "Send a prompt to the code generation API. Returns response, generated code excerpt, and accuracy (0-1).",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "prompt": {
-                                "type": "string",
-                                "description": "The prompt to send to the code API",
-                            }
-                        },
-                        "required": ["prompt"],
-                    },
-                },
-            }
-        ],
-    )
-
-    thread = await client.beta.threads.create()
-    await client.beta.threads.messages.create(
-        thread_id=thread.id,
-        role="user",
-        content=f"Complete this coding challenge using the submit_prompt tool. Challenge: {title}\n\n{description}",
-    )
-
-    run = await client.beta.threads.runs.create(
-        thread_id=thread.id,
-        assistant_id=assistant.id,
-    )
-    max_steps = 20
-    step = 0
-    while step < max_steps:
-        step += 1
-        run = await client.beta.threads.runs.retrieve(
-            thread_id=thread.id, run_id=run.id
-        )
-        if run.status == "completed":
-            break
-        if run.status == "failed":
-            break
-        if run.status == "requires_action":
-            tool_calls = run.required_action.submit_tool_outputs.tool_calls
-            outputs = []
-            async with httpx.AsyncClient(timeout=120.0) as http_client:
-                for tc in tool_calls:
-                    name = getattr(tc.function, "name", "") or ""
-                    if name != "submit_prompt":
-                        outputs.append({"tool_call_id": tc.id, "output": "Unknown tool"})
-                        continue
-                    args = json.loads(
-                        getattr(tc.function, "arguments", None) or "{}"
-                    )
-                    prompt = args.get("prompt", "")
-                    r = await http_client.post(
-                        f"{base_url}/api/sessions/{session_id}/prompt",
-                        headers=headers,
-                        json={"prompt": prompt},
-                    )
-                    r.raise_for_status()
-                    data = r.json()
-                    snippet = (data.get("generated_code") or "")[:1500]
-                    output = f"Response: {(data.get('response_text') or '')[:1000]}\n\nGenerated code (excerpt):\n{snippet}\n\nAccuracy: {data.get('accuracy', 0):.2f}"
-                    outputs.append({"tool_call_id": tc.id, "output": output})
-            run = await client.beta.threads.runs.submit_tool_outputs(
-                thread_id=thread.id,
-                run_id=run.id,
-                tool_outputs=outputs,
-            )
-            continue
-        await asyncio.sleep(1)
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         r = await client.post(

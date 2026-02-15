@@ -3,11 +3,21 @@
 import asyncio
 import json
 import logging
+import re
 import time
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 
 logger = logging.getLogger(__name__)
+
+# Ensure logger outputs to console
+if not logger.handlers:
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
+    logger.setLevel(logging.INFO)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel
@@ -903,90 +913,15 @@ class EvaluateUIResponse(BaseModel):
     similarity_score: float  # 0-1
     detailed_feedback: str | None = None
 
-
-async def capture_challenge_iframe(
-    request: Request,
-    challenge_id: str,
-    embed_url: str,
-) -> bytes:
-    """
-    Capture screenshot of the challenge reference iframe.
-    
-    Creates a simple HTML page with an iframe matching the frontend structure,
-    serves it locally, and captures the iframe content.
-    """
-    from screenshot_capture import ScreenshotCapture, ScreenshotOptions
-    import os
-    import tempfile
-    from http.server import HTTPServer, SimpleHTTPRequestHandler
-    import threading
-    import socket
-    
-    # Create reference page with iframe matching frontend structure
-    # Frontend: container h-[680px], iframe h-[900px] w-full
-    # We'll use a container that clips to 680px height to match frontend
-    reference_page_html = f'''<!DOCTYPE html>
-<html>
-<head><meta charset="UTF-8"></head>
-<body style="margin: 0; padding: 0; overflow: hidden; background: white;">
-<div id="challenge-container" style="width: 100%; height: 680px; overflow: hidden; position: relative; background: white;">
-  <iframe 
-    src="{embed_url}" 
-    style="width: 100%; height: 900px; border: none; position: absolute; top: 0; left: 0;"
-    sandbox="allow-scripts allow-same-origin"
-  ></iframe>
-</div>
-</body>
-</html>'''
-    
-    # Create temporary directory and HTML file
-    temp_dir = tempfile.mkdtemp()
-    temp_html_path = os.path.join(temp_dir, "reference.html")
-    with open(temp_html_path, 'w', encoding='utf-8') as f:
-        f.write(reference_page_html)
-    
-    # Find an available port
-    def find_free_port():
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.bind(('', 0))
-            return s.getsockname()[1]
-    
-    port = find_free_port()
-    server_url = f"http://localhost:{port}"
-    
-    # Start simple HTTP server in background
-    original_dir = os.getcwd()
-    os.chdir(temp_dir)
-    handler = SimpleHTTPRequestHandler
-    httpd = HTTPServer(('localhost', port), handler)
-    server_thread = threading.Thread(target=httpd.serve_forever, daemon=True)
-    server_thread.start()
-    
-    try:
-        options = ScreenshotOptions(width=1280, height=720, wait_timeout=8000)
-        
-        # Use capture_url_iframe to navigate to the served page and capture the iframe
-        async with ScreenshotCapture() as capture:
-            screenshot_bytes = await capture.capture_url_iframe(
-                page_url=f"{server_url}/reference.html",
-                iframe_selector="iframe",
-                container_selector="#challenge-container",  # Capture the container div (680px height) to match frontend clipping
-                options=options,
-                wait_time=5.0,  # Wait 5 seconds for iframe content to load
-            )
-        return screenshot_bytes
-    finally:
-        # Clean up: stop server and remove temp files
-        httpd.shutdown()
-        server_thread.join(timeout=2)
-        os.chdir(original_dir)
-        import shutil
-        shutil.rmtree(temp_dir, ignore_errors=True)
-
-
 @app.post("/api/evaluate-ui")
 async def evaluate_ui(req: EvaluateUIRequest, request: Request) -> EvaluateUIResponse:
-    """Evaluate UI challenge by comparing generated HTML with challenge reference."""
+    """Evaluate UI challenge by comparing generated HTML with challenge reference HTML code."""
+    print(f"\n{'='*60}")
+    print(f"[UI Evaluation] ===== EVALUATION REQUEST RECEIVED =====")
+    print(f"[UI Evaluation] Challenge ID: {req.challenge_id}")
+    print(f"[UI Evaluation] Generated HTML length: {len(req.generated_html)} characters")
+    print(f"{'='*60}\n")
+    
     logger.info(f"[UI Evaluation] Received request for challenge: {req.challenge_id}")
     logger.info(f"[UI Evaluation] Generated HTML length: {len(req.generated_html)} characters")
     
@@ -999,114 +934,164 @@ async def evaluate_ui(req: EvaluateUIRequest, request: Request) -> EvaluateUIRes
         logger.error(f"[UI Evaluation] Challenge is not UI category: {challenge.category}")
         raise HTTPException(status_code=400, detail="Challenge is not a UI challenge")
     
+    if not challenge.html_url:
+        logger.error("[UI Evaluation] Challenge has no html_url")
+        raise HTTPException(
+            status_code=400,
+            detail="Challenge must have html_url for UI evaluation"
+        )
+    
     logger.info(f"[UI Evaluation] Challenge found: {challenge.title}")
-    logger.info(f"[UI Evaluation] Reference type - embed_url: {challenge.embed_url}, image_url: {challenge.image_url}")
+    logger.info(f"[UI Evaluation] Using HTML code comparison method")
     
     try:
-        from evaluation.screenshot_vision_integration import (
-            capture_iframe_and_compare,
-            compare_with_challenge_reference,
-        )
+        # Load reference HTML from challenge's html_url
+        from pathlib import Path
+        project_root = Path(__file__).parent.parent
+        html_path = project_root / challenge.html_url
         
-        # Determine which comparison method to use based on challenge reference type
-        if challenge.embed_url:
-            logger.info(f"[UI Evaluation] Using iframe capture method with embed_url: {challenge.embed_url}")
-            logger.info("[UI Evaluation] Starting screenshot capture and comparison...")
-            logger.info("[UI Evaluation] Capturing reference: iframe with embed_url (matching challenge section)...")
-            logger.info("[UI Evaluation] Capturing generated: iframe with generated HTML (matching output section)...")
-            
-            from screenshot_capture import ScreenshotCapture, ScreenshotOptions
-            from datetime import datetime
-            import os
-            import html
-            
-            options = ScreenshotOptions(width=1280, height=720, wait_timeout=8000)
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            
-            # Capture reference iframe using the new helper function
-            reference_screenshot_bytes = await capture_challenge_iframe(
-                request=request,
-                challenge_id=req.challenge_id,
-                embed_url=challenge.embed_url,
-            )
-            reference_base64 = f"data:image/png;base64,{base64.b64encode(reference_screenshot_bytes).decode('utf-8')}"
-            logger.info(f"[UI Evaluation] Reference screenshot captured ({len(reference_base64)} chars)")
-            
-            # Save reference screenshot
-            os.makedirs("screenshots", exist_ok=True)
-            ref_path = f"screenshots/reference_{timestamp}.png"
-            with open(ref_path, "wb") as f:
-                f.write(reference_screenshot_bytes)
-            logger.info(f"[Screenshot] Reference screenshot saved to: {ref_path}")
-            
-            # Capture generated HTML in an iframe (like the output section)
-            escaped_html = html.escape(req.generated_html, quote=False)
-            generated_page_html = f'''<!DOCTYPE html>
-<html>
-<head><meta charset="UTF-8"></head>
-<body style="margin: 0; padding: 0; overflow: hidden;">
-<div style="width: 100%; height: 100vh; overflow: hidden; position: relative;">
-  <iframe 
-    srcdoc="{escaped_html}" 
-    style="width: 100%; height: 100vh; border: none; position: absolute; top: 0; left: 0;"
-    sandbox="allow-scripts"
-  ></iframe>
-</div>
-</body>
-</html>'''
-            
-            async with ScreenshotCapture() as capture:
-                generated_screenshot = await capture.capture_iframe_base64(
-                    generated_page_html,
-                    iframe_selector="iframe",
-                    options=options,
-                )
-                logger.info(f"[UI Evaluation] Generated screenshot captured ({len(generated_screenshot)} chars)")
-                
-                # Save generated screenshot
-                gen_path = f"screenshots/generated_{timestamp}.png"
-                if generated_screenshot.startswith("data:image"):
-                    base64_data = generated_screenshot.split(",")[1]
-                    with open(gen_path, "wb") as f:
-                        f.write(base64.b64decode(base64_data))
-                    logger.info(f"[Screenshot] Generated screenshot saved to: {gen_path}")
-            
-            # Compare using vision comparison
-            from evaluation.vision_comparison import VisionComparator
-            comparator = VisionComparator()
-            result = await comparator.compare_base64_images(
-                reference_image_base64=reference_base64,
-                generated_image_base64=generated_screenshot,
-                challenge_description=challenge.description,
-            )
-            logger.info(f"[UI Evaluation] Comparison completed. Similarity: {result.similarity_score:.2%}")
-            logger.info(f"[UI Evaluation] Comparing: Direct capture of embed_url vs Output section iframe (generated HTML)")
-        elif challenge.image_url:
-            logger.info(f"[UI Evaluation] Using image comparison method with image_url: {challenge.image_url}")
-            logger.info("[UI Evaluation] Starting screenshot capture and comparison...")
-            result = await compare_with_challenge_reference(
-                generated_html=req.generated_html,
-                challenge=challenge,
-            )
-            logger.info(f"[UI Evaluation] Image comparison completed. Similarity: {result.similarity_score:.2%}")
-        else:
-            logger.error("[UI Evaluation] Challenge has neither embed_url nor image_url")
+        if not html_path.exists():
             raise HTTPException(
-                status_code=400,
-                detail="Challenge must have either image_url or embed_url for UI evaluation"
+                status_code=404,
+                detail=f"Reference HTML file not found: {challenge.html_url}"
             )
         
-        # Convert similarity score (0-1) to percentage (0-100)
-        score = result.similarity_score * 100
-        logger.info(f"[UI Evaluation] Final score: {score:.1f}% (similarity: {result.similarity_score:.4f})")
-        logger.info(f"[UI Evaluation] Overall match: {result.overall_match}")
+        with open(html_path, "r", encoding="utf-8") as f:
+            reference_html = f.read()
         
-        return EvaluateUIResponse(
-            score=score,
-            similarity_score=result.similarity_score,
-            detailed_feedback=result.detailed_feedback,
+        logger.info(f"[UI Evaluation] Reference HTML loaded ({len(reference_html)} characters)")
+        logger.info(f"[UI Evaluation] Generated HTML length: {len(req.generated_html)} characters")
+        
+        # Use OpenAI to compare the HTML codes
+        from llm import LLM
+        
+        evaluation_prompt = f"""You are a kind and generous scoring expert when it comes to evaluating HTML code similarity. Compare the reference HTML code with the generated HTML code and provide a similarity score between 0-100.
+
+Consider the following aspects when evaluating:
+1. **Structure and Layout**: HTML structure, element hierarchy, semantic elements
+2. **Styling**: CSS styles, colors, fonts, spacing, layout properties
+3. **Content**: Text content, images, links, and other media
+4. **Overall Visual Match**: How closely the generated code would render compared to the reference
+
+**Reference HTML Code:**
+```html
+{reference_html}
+```
+
+**Generated HTML Code:**
+```html
+{req.generated_html}
+```
+
+**Challenge Description:**
+{challenge.description}
+
+Please evaluate the similarity and provide your response in the following JSON format:
+{{
+    "score": <number between 0-100>,
+    "reasoning": "<detailed explanation of the similarity score, including what matches well and what differs>"
+}}
+
+Be thorough in your evaluation. A score of 100 means the codes are essentially identical in structure, styling, content, and functionality. Lower scores indicate increasing differences."""
+        
+        # Use OpenAI model for evaluation
+        llm = LLM(
+            model=settings.default_model,
+            system_prompt="You are an expert HTML/CSS/JavaScript evaluator. Provide accurate and detailed similarity assessments.",
+            temperature=0.3,  # Lower temperature for more consistent evaluation
         )
+        
+        logger.info("[UI Evaluation] Calling OpenAI model for HTML comparison...")
+        print(f"[UI Evaluation] Calling OpenAI model: {settings.default_model}")
+        print(f"[UI Evaluation] Prompt length: {len(evaluation_prompt)} characters")
+        
+        response = await llm.generate(evaluation_prompt)
+        response_text = response.response_text.strip()
+        
+        # Log the full response for debugging
+        print(f"[UI Evaluation] OpenAI API Response received:")
+        print(f"[UI Evaluation] Response length: {len(response_text)} characters")
+        print(f"[UI Evaluation] Full response text:\n{response_text}")
+        logger.info(f"[UI Evaluation] OpenAI API Response received ({len(response_text)} chars)")
+        logger.info(f"[UI Evaluation] Full response: {response_text}")
+        
+        # Extract JSON from response (might be wrapped in markdown code block)
+        json_match = None
+        # Try to find JSON in code blocks first
+        json_pattern = r'```(?:json)?\s*(\{.*?\})\s*```'
+        json_match = re.search(json_pattern, response_text, re.DOTALL)
+        if json_match:
+            json_str = json_match.group(1)
+            print(f"[UI Evaluation] Found JSON in code block")
+        else:
+            # Try to find JSON object directly
+            json_pattern = r'\{.*?\}'
+            json_match = re.search(json_pattern, response_text, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(0)
+                print(f"[UI Evaluation] Found JSON object directly")
+            else:
+                # Fallback: try to parse the whole response
+                json_str = response_text
+                print(f"[UI Evaluation] Using entire response as JSON")
+        
+        print(f"[UI Evaluation] Extracted JSON string length: {len(json_str)} characters")
+        print(f"[UI Evaluation] Extracted JSON (first 500 chars): {json_str[:500]}")
+        
+        try:
+            evaluation_result = json.loads(json_str)
+            score = float(evaluation_result.get("score", 0))
+            reasoning = evaluation_result.get("reasoning", "No reasoning provided")
+            
+            # Clamp score to 0-100 range
+            score = max(0, min(100, score))
+            similarity_score = score / 100.0  # Convert to 0-1 range
+            
+            print(f"[UI Evaluation] ========================================")
+            print(f"[UI Evaluation] Evaluation Result:")
+            print(f"[UI Evaluation] Score: {score:.1f}/100")
+            print(f"[UI Evaluation] Similarity: {similarity_score:.4f}")
+            print(f"[UI Evaluation] Reasoning: {reasoning}")
+            print(f"[UI Evaluation] ========================================")
+            
+            logger.info(f"[UI Evaluation] Comparison completed. Score: {score:.1f}/100")
+            logger.info(f"[UI Evaluation] Similarity: {similarity_score:.4f}")
+            logger.info(f"[UI Evaluation] Full reasoning: {reasoning}")
+            
+            return EvaluateUIResponse(
+                score=score,
+                similarity_score=similarity_score,
+                detailed_feedback=reasoning,
+            )
+        except json.JSONDecodeError as e:
+            print(f"[UI Evaluation] ERROR: Failed to parse JSON from response")
+            print(f"[UI Evaluation] JSONDecodeError: {e}")
+            print(f"[UI Evaluation] Response text (first 1000 chars): {response_text[:1000]}")
+            logger.error(f"[UI Evaluation] Failed to parse JSON from response: {e}")
+            logger.error(f"[UI Evaluation] Response text: {response_text[:1000]}")
+            # Fallback: try to extract score from text
+            score_match = re.search(r'(\d+(?:\.\d+)?)', response_text)
+            if score_match:
+                score = float(score_match.group(1))
+                score = max(0, min(100, score))
+                print(f"[UI Evaluation] Fallback: Extracted score from text: {score}")
+                return EvaluateUIResponse(
+                    score=score,
+                    similarity_score=score / 100.0,
+                    detailed_feedback=f"Could not parse full response. Extracted score: {score}. Raw response: {response_text[:500]}",
+                )
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to parse evaluation response from OpenAI"
+            )
+        
+    except HTTPException:
+        raise
     except Exception as e:
+        print(f"[UI Evaluation] ERROR: Exception occurred: {e}")
+        print(f"[UI Evaluation] Exception type: {type(e).__name__}")
+        import traceback
+        print(f"[UI Evaluation] Traceback:\n{traceback.format_exc()}")
         logger.error(f"UI evaluation failed: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,

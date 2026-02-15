@@ -12,7 +12,6 @@ CODING_SYSTEM_PROMPT = (
     "You must output the code inside a single markdown code block (e.g. ```html then newline then your code then ```). "
     "The code should be complete, runnable, and match the user's requirements. "
     "For UI challenges, output one complete HTML document (inline CSS/JS is fine). "
-    "Before writing code, you should briefly think step-by-step about how to solve the problem."
 )
 
 REPLICATE_UI_SYSTEM_PROMPT = (
@@ -166,6 +165,11 @@ class LLM:
                 {"type": "image_url", "image_url": {"url": image_data_url}},
             ]
             messages.append({"role": "user", "content": user_content})
+            import logging
+            logging.getLogger(__name__).info(
+                "LLM vision: attaching image to user message, data_url len=%d",
+                len(image_data_url),
+            )
         else:
             messages.append({"role": "user", "content": prompt})
         return messages

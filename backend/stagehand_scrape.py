@@ -51,18 +51,73 @@ async def capture_url_screenshot_base64_browserbase(
             },
         )
 
-    session = await asyncio.to_thread(_create_session)
+    # #region agent log
+    try:
+        import json as _json
+        _lp = __import__("os").path.abspath(__import__("os").path.join(__import__("os").path.dirname(__file__), "..", ".cursor", "debug.log"))
+        with open(_lp, "a") as _f:
+            _f.write(_json.dumps({"id": "screenshot_browserbase_before_session_create", "timestamp": __import__("time").time() * 1000, "location": "stagehand_scrape.py:capture_url_screenshot_base64_browserbase", "message": "before Browserbase session create", "data": {"url_preview": url[:60], "has_api_key": bool(api_key), "has_project_id": bool(project_id)}, "hypothesisId": "H1"}) + "\n")
+    except Exception:
+        pass
+    # #endregion
+    logger.info("[Browserbase screenshot] Creating session for url=%s", url[:80])
+    try:
+        session = await asyncio.to_thread(_create_session)
+    except Exception as e_create:
+        # #region agent log
+        try:
+            import json as _json
+            _lp = __import__("os").path.abspath(__import__("os").path.join(__import__("os").path.dirname(__file__), "..", ".cursor", "debug.log"))
+            with open(_lp, "a") as _f:
+                _f.write(_json.dumps({"id": "screenshot_browserbase_error_at_session_create", "timestamp": __import__("time").time() * 1000, "location": "stagehand_scrape.py:capture_url_screenshot_base64_browserbase", "message": "exception at session create", "data": {"error_type": type(e_create).__name__, "error_msg": str(e_create)[:500]}, "hypothesisId": "H1"}) + "\n")
+        except Exception:
+            pass
+        # #endregion
+        raise
     connect_url = getattr(session, "connect_url", None) or getattr(session, "connectUrl", None)
+    # #region agent log
+    try:
+        import json as _json
+        _lp = __import__("os").path.abspath(__import__("os").path.join(__import__("os").path.dirname(__file__), "..", ".cursor", "debug.log"))
+        with open(_lp, "a") as _f:
+            _f.write(_json.dumps({"id": "screenshot_browserbase_after_session_create", "timestamp": __import__("time").time() * 1000, "location": "stagehand_scrape.py:capture_url_screenshot_base64_browserbase", "message": "after session create", "data": {"has_connect_url": bool(connect_url)}, "hypothesisId": "H1"}) + "\n")
+    except Exception:
+        pass
+    # #endregion
     if not connect_url:
         raise RuntimeError("Browserbase session did not return connect_url")
+    logger.info("[Browserbase screenshot] Session created, connecting via CDP")
 
     async with async_playwright() as p:
-        browser = await p.chromium.connect_over_cdp(connect_url)
+        # #region agent log
+        try:
+            import json as _json
+            _lp = __import__("os").path.abspath(__import__("os").path.join(__import__("os").path.dirname(__file__), "..", ".cursor", "debug.log"))
+            with open(_lp, "a") as _f:
+                _f.write(_json.dumps({"id": "screenshot_browserbase_before_cdp_connect", "timestamp": __import__("time").time() * 1000, "location": "stagehand_scrape.py:capture_url_screenshot_base64_browserbase", "message": "before CDP connect", "data": {}, "hypothesisId": "H2"}) + "\n")
+        except Exception:
+            pass
+        # #endregion
+        try:
+            browser = await p.chromium.connect_over_cdp(connect_url)
+        except Exception as e_cdp:
+            # #region agent log
+            try:
+                import json as _json
+                _lp = __import__("os").path.abspath(__import__("os").path.join(__import__("os").path.dirname(__file__), "..", ".cursor", "debug.log"))
+                with open(_lp, "a") as _f:
+                    _f.write(_json.dumps({"id": "screenshot_browserbase_error_at_cdp_connect", "timestamp": __import__("time").time() * 1000, "location": "stagehand_scrape.py:capture_url_screenshot_base64_browserbase", "message": "exception at CDP connect", "data": {"error_type": type(e_cdp).__name__, "error_msg": str(e_cdp)[:500]}, "hypothesisId": "H2"}) + "\n")
+            except Exception:
+                pass
+            # #endregion
+            raise
         try:
             context = browser.contexts[0] if browser.contexts else await browser.new_context()
             page = context.pages[0] if context.pages else await context.new_page()
-            await page.goto(url, wait_until="networkidle", timeout=25000)
+            logger.info("[Browserbase screenshot] Navigating to %s", url[:80])
+            await page.goto(url, wait_until="load", timeout=30000)
             await asyncio.sleep(wait_after_load)
+            logger.info("[Browserbase screenshot] Taking CDP screenshot (full_page=%s)", full_page)
             cdp = await context.new_cdp_session(page)
             screenshot_payload = await cdp.send(
                 "Page.captureScreenshot",
@@ -71,7 +126,9 @@ async def capture_url_screenshot_base64_browserbase(
             data_b64 = screenshot_payload.get("data") if isinstance(screenshot_payload, dict) else None
             if not data_b64:
                 raise RuntimeError("Page.captureScreenshot did not return data")
-            return f"data:image/png;base64,{data_b64}"
+            data_url = f"data:image/png;base64,{data_b64}"
+            logger.info("[Browserbase screenshot] Success, data_url len=%d", len(data_url))
+            return data_url
         finally:
             await browser.close()
 

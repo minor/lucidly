@@ -118,7 +118,7 @@ export function PromptInput({
         {isLoading && onStop ? (
           <button
             onClick={handleStop}
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-destructive text-destructive-foreground transition-opacity hover:opacity-90"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-destructive text-destructive-foreground transition-opacity hover:opacity-90 cursor-pointer"
             aria-label="Stop generating"
           >
             <Square className="h-3.5 w-3.5 fill-current" />
@@ -127,7 +127,7 @@ export function PromptInput({
           <button
             onClick={handleSubmit}
             disabled={!value.trim() || isLoading || disabled}
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-foreground text-background transition-opacity hover:opacity-90 disabled:opacity-30 disabled:cursor-not-allowed"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-foreground text-background transition-opacity hover:opacity-90 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
             aria-label="Submit prompt"
           >
             {isLoading ? (

@@ -337,6 +337,7 @@ export const MODEL_PRICING: Record<string, { input: number; output: number }> = 
   "gpt-5.2": { input: 1.75, output: 14.0 },
   "gpt-5-nano": { input: 0.05, output: 0.40 },
   "gpt-5-mini": { input: 0.25, output: 2.00 },
+  "gpt-4o": { input: 2.5, output: 10.0 },
 };
 
 export const MODELS = [

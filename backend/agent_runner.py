@@ -1,7 +1,7 @@
 """
 In-process agent runner: same logic as modal_agent/app.py but runs inside the backend.
 Used when USE_INPROCESS_AGENT=true or when Modal spawn fails (e.g. local dev without Modal).
-Supports simple loop (claude-direct, openai-cot), Claude Agent SDK (claude-sdk), and OpenAI Assistant (openai-assistant).
+Supports simple loop (claude-direct, openai-cot) and Claude Agent SDK (claude-sdk).
 """
 
 import asyncio
@@ -60,13 +60,16 @@ COT_SYSTEM_PROMPT = (
 
 
 def _challenge_brief(challenge: Any) -> str:
-    """Build full challenge context for the agent: title, description, reference URLs, output format."""
+    """Build challenge context matching what users see on the challenge page: title, description, reference, starter code."""
     title = getattr(challenge, "title", None) or (challenge.get("title") if isinstance(challenge, dict) else None) or "Challenge"
     description = getattr(challenge, "description", None) or (challenge.get("description") if isinstance(challenge, dict) else None) or ""
     embed_url = getattr(challenge, "embed_url", None) or (challenge.get("embed_url") if isinstance(challenge, dict) else None)
+    html_url = getattr(challenge, "html_url", None) or (challenge.get("html_url") if isinstance(challenge, dict) else None)
     image_url = getattr(challenge, "image_url", None) or (challenge.get("image_url") if isinstance(challenge, dict) else None)
     starter_code = getattr(challenge, "starter_code", None) or (challenge.get("starter_code") if isinstance(challenge, dict) else None)
     parts = [f"Challenge: {title}\n\n{description}"]
+    if html_url:
+        parts.append("Reference: an HTML page is shown on the challenge page (recreate that design).")
     if embed_url:
         parts.append(f"Reference page (recreate this design): {embed_url}")
     if image_url:
@@ -240,6 +243,10 @@ async def _run_agent_loop_claude_sdk(
         }
 
     embed_url = getattr(challenge, "embed_url", None) or (challenge.get("embed_url") if isinstance(challenge, dict) else None)
+    html_url = getattr(challenge, "html_url", None) or (challenge.get("html_url") if isinstance(challenge, dict) else None)
+    image_url = getattr(challenge, "image_url", None) or (challenge.get("image_url") if isinstance(challenge, dict) else None)
+    lucidly_app_url = (getattr(settings, "lucidly_app_url", "") or "").strip().rstrip("/")
+    has_reference = bool(embed_url or html_url or image_url)
     browserbase_configured = bool(
         getattr(settings, "browserbase_api_key", "") and getattr(settings, "browserbase_project_id", "")
     )
@@ -275,14 +282,15 @@ async def _run_agent_loop_claude_sdk(
 
     @tool(
         "generate_landing_page",
-        "Generate the landing page from a reference URL in one shot (like v0). Captures a screenshot of the URL and uses vision to produce matching HTML. "
-        "Use this as your first call when the challenge asks to recreate a reference page—it produces accurate, pixel-close output in one try. "
-        "Pass url (or leave empty to use the challenge reference URL).",
+        "Generate the landing page in one shot (like v0). Captures a screenshot of the reference URL from the task description and uses vision to produce matching HTML. "
+        "Use this as your first call when the challenge asks to recreate a reference page. "
+        "The reference URL is in the task description (e.g. 'Reference page (recreate this design): https://...'). Pass url only to override; otherwise leave empty to use the task's reference URL.",
         {"url": str},
     )
     async def generate_landing_page_tool(args: dict[str, Any]) -> dict[str, Any]:
+        # Use reference URL from the task description (challenge.embed_url). Agent can pass url to override.
         url = (args.get("url") or "").strip() or embed_url or ""
-        _agent_tool_log("generate_landing_page", args={"url": url or "(empty)"})
+        _agent_tool_log("generate_landing_page", args={"url": url or "(from task)"})
         if not url:
             return {
                 "content": [{"type": "text", "text": "No URL provided and this challenge has no reference URL. Use submit_prompt with a description instead."}]
@@ -299,13 +307,27 @@ async def _run_agent_loop_claude_sdk(
             )
         except Exception as e:
             logger.exception("Browserbase screenshot failed: %s", e)
-            return {"content": [{"type": "text", "text": f"Could not capture screenshot of {url}: {e}"}]}
-        _trace(session_id, "Screenshot captured, generating HTML", t0)
-        replicate_prompt = (
-            "Recreate this landing page exactly as shown in the screenshot. "
-            "Output one complete HTML document with inline CSS. Match layout, typography, colors, spacing, and all visible text. "
-            "Do not add placeholder content—replicate what you see."
-        )
+            err_msg = f"Could not capture screenshot of {url}: {e}"
+            if "401" in str(e) or "Unauthorized" in str(e):
+                err_msg += " Check BROWSERBASE_API_KEY and BROWSERBASE_PROJECT_ID in .env; the key must be valid and the project must belong to your Browserbase account."
+            if "ERR_CONNECTION_REFUSED" in str(e) and ("localhost" in url or "127.0.0.1" in url):
+                err_msg += " Browserbase runs in the cloud and cannot open localhost. Set LUCIDLY_APP_URL to a public URL (e.g. ngrok or deployed app) or leave it unset to use the challenge reference URL (e.g. embed_url) for the screenshot."
+            _agent_tool_log("generate_landing_page", result_preview=err_msg[:500], result_full=err_msg)
+            return {"content": [{"type": "text", "text": err_msg}]}
+        _trace(session_id, "Screenshot captured, generating HTML", t0, screenshot_len=len(screenshot_data_url or ""))
+        logger.info("[generate_landing_page] Screenshot captured, len=%d, calling vision model", len(screenshot_data_url or ""))
+        if lucidly_app_url and f"/agents/run/{session_id}" in (url or ""):
+            replicate_prompt = (
+                "The screenshot shows the Lucidly agent run page. Recreate only the reference design (the embedded landing page or reference block in the left task panel), not the Lucidly chrome or right-hand panels. "
+                "Output one complete HTML document with inline CSS that matches that reference: layout, typography, colors, spacing, and all visible text. "
+                "Do not add placeholder content—replicate the reference exactly."
+            )
+        else:
+            replicate_prompt = (
+                "Recreate this landing page exactly as shown in the screenshot. "
+                "Output one complete HTML document with inline CSS. Match layout, typography, colors, spacing, and all visible text. "
+                "Do not add placeholder content—replicate what you see."
+            )
         session_before = get_session(session_id)
         base_tokens = (session_before.total_tokens if session_before else 0)
 
@@ -323,7 +345,7 @@ async def _run_agent_loop_claude_sdk(
         if sess:
             await broadcast_session_event(session_id, {"type": "session_update", "session": sess.model_dump()})
         snippet = (data.get("generated_code") or "")[:2000]
-        result_text = f"Response: {data.get('response_text', '')[:1500]}\n\nGenerated code (excerpt):\n{snippet}\n\nAccuracy: {data.get('accuracy', 0):.2f}"
+        result_text = f"Response: {data.get('response_text', '')[:1500]}\n\nGenerated code (excerpt):\n{snippet}\n\nAccuracy: {data.get('accuracy', 0):.2f}\n\nDo not call submit_prompt. Reply with DONE now."
         _agent_tool_log("generate_landing_page", result_preview=f"accuracy={data.get('accuracy', 0):.2f}", result_full=result_text)
         if data.get("accuracy") is not None:
             _trace(session_id, "Landing page generated", t0, accuracy=round(float(data["accuracy"]), 2))
@@ -331,7 +353,7 @@ async def _run_agent_loop_claude_sdk(
 
     tools_list: list[Any] = [submit_prompt_tool]
     allowed_tools_list = ["mcp__lucidly-challenge__submit_prompt"]
-    if embed_url and browserbase_configured:
+    if has_reference and browserbase_configured:
         tools_list.append(generate_landing_page_tool)
         allowed_tools_list.append("mcp__lucidly-challenge__generate_landing_page")
         tools_list.append(view_reference_page_tool)
@@ -347,16 +369,16 @@ async def _run_agent_loop_claude_sdk(
     system_prompt_parts = [
         "You are completing a coding challenge. "
     ]
-    if embed_url and browserbase_configured:
+    if has_reference and browserbase_configured:
         system_prompt_parts.append(
-            "When the challenge has a reference URL (e.g. a landing page to recreate): use generate_landing_page first. "
-            "It uses Browserbase to capture a screenshot of the reference and generates matching HTML in one shot (like v0). "
-            "If accuracy is not 1.0, use submit_prompt with a short refinement (e.g. 'Fix the header color to match'). "
+            "When the challenge has a reference (landing page or design to recreate): use generate_landing_page once. "
+            "It captures a screenshot and generates matching HTML in one shot. "
+            "After you receive the generate_landing_page result (with code and accuracy), do NOT call submit_prompt. Reply immediately with DONE. "
         )
     system_prompt_parts.append(
-        "Use submit_prompt to send prompts to the code API; each call returns response, generated code, and accuracy. "
-        "Your first tool call must produce code (use generate_landing_page for reference-URL challenges, otherwise submit_prompt). "
-        "Iterate until accuracy is 1.0 or you have tried enough. Then reply with DONE.\n\n"
+        "Use submit_prompt to send prompts to the code API only when the challenge has no reference URL. "
+        "Your first tool call must produce code (use generate_landing_page for reference challenges, otherwise submit_prompt). "
+        "For reference challenges: one generate_landing_page call, then DONE. For others: iterate until accuracy is 1.0 or you have tried enough, then DONE.\n\n"
     )
     options = ClaudeAgentOptions(
         mcp_servers={"lucidly-challenge": custom_server},
@@ -407,7 +429,7 @@ async def _run_agent_loop_claude_sdk(
             # #endregion
             prompt = (
                 "Complete this coding challenge. "
-                + ("Use generate_landing_page first (Browserbase captures the reference; then vision generates accurate HTML in one shot), then submit_prompt only if you need to refine. " if (embed_url and browserbase_configured) else "Use the submit_prompt tool to generate and refine code. ")
+                + ("Call generate_landing_page once; after you get the result, reply with DONE only—do not call submit_prompt. " if (has_reference and browserbase_configured) else "Use the submit_prompt tool to generate and refine code. ")
                 + "Your first response must produce runnable code (HTML for UI challenges) in a markdown code block."
             )
             _trace(session_id, "Sending task to agent", t0)
@@ -478,133 +500,6 @@ async def _run_agent_loop_claude_sdk(
         # #endregion
         complete_agent_session(session_id)
         logger.info("Claude SDK agent run finished: session_id=%s", session_id)
-
-
-async def _run_agent_loop_openai_assistant(
-    session_id: str, challenge_id: str, agent_id: str
-) -> None:
-    """Run the OpenAI Assistants API with a submit_prompt function tool."""
-    from openai import AsyncOpenAI
-    from config import settings
-
-    session = get_session(session_id)
-    challenge = get_challenge_by_id(challenge_id)
-    if not session or not challenge or session.status != "active":
-        return
-    agent = get_agent_by_id(agent_id)
-    if not agent:
-        return
-
-    brief = _challenge_brief(challenge)
-    client = AsyncOpenAI(
-        api_key=settings.openai_api_key,
-        base_url=settings.openai_base_url,
-    )
-
-    assistant = await client.beta.assistants.create(
-        name="Lucidly Challenge Agent",
-        instructions=(
-            "You are completing a coding challenge. Use the submit_prompt tool to send prompts to the code generation API. "
-            "Each call returns the model's response, generated code, and accuracy. Your first tool call must request runnable code. "
-            "Iterate until accuracy is 1.0 or you have tried enough. Then reply with DONE.\n\n"
-            f"{brief}"
-        ),
-        model=agent.model or settings.default_model,
-        tools=[
-            {
-                "type": "function",
-                "function": {
-                    "name": "submit_prompt",
-                    "description": "Send a prompt to the code generation API. Returns response, generated code excerpt, and accuracy (0-1).",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "prompt": {
-                                "type": "string",
-                                "description": "The prompt to send to the code API",
-                            }
-                        },
-                        "required": ["prompt"],
-                    },
-                },
-            }
-        ],
-    )
-
-    title = getattr(challenge, "title", None) or "Challenge"
-    description = getattr(challenge, "description", None) or ""
-    thread = await client.beta.threads.create()
-    await client.beta.threads.messages.create(
-        thread_id=thread.id,
-        role="user",
-        content=f"Complete this coding challenge using the submit_prompt tool. Challenge: {title}\n\n{description}",
-    )
-
-    run = await client.beta.threads.runs.create(
-        thread_id=thread.id,
-        assistant_id=assistant.id,
-    )
-    max_steps = 20
-    step = 0
-    try:
-        while step < max_steps:
-            step += 1
-            run = await client.beta.threads.runs.retrieve(
-                thread_id=thread.id, run_id=run.id
-            )
-            if run.status == "completed":
-                break
-            if run.status == "failed":
-                logger.warning("OpenAI Assistant run failed: %s", run.last_error)
-                break
-            if run.status == "requires_action":
-                import json
-                tool_calls = run.required_action.submit_tool_outputs.tool_calls
-                outputs = []
-                for tc in tool_calls:
-                    name = getattr(tc.function, "name", "") or ""
-                    if name != "submit_prompt":
-                        outputs.append({"tool_call_id": tc.id, "output": "Unknown tool"})
-                        continue
-                    args = json.loads(getattr(tc.function, "arguments", None) or "{}")
-                    prompt = args.get("prompt", "")
-                    session_before = get_session(session_id)
-                    base_tokens = (session_before.total_tokens if session_before else 0)
-
-                    async def _on_progress(estimated_response_tokens: int) -> None:
-                        total_est = base_tokens + (len(prompt) // 4) + estimated_response_tokens
-                        await broadcast_session_event(
-                            session_id,
-                            {"type": "token_progress", "total_estimated_tokens": total_est},
-                        )
-
-                    data = await execute_prompt_turn(
-                        session_id,
-                        prompt,
-                        on_progress=_on_progress,
-                    )
-                    sess = get_session(session_id)
-                    if sess:
-                        await broadcast_session_event(
-                            session_id,
-                            {"type": "session_update", "session": sess.model_dump()},
-                        )
-                    snippet = (data.get("generated_code") or "")[:1500]
-                    output = f"Response: {(data.get('response_text') or '')[:1000]}\n\nGenerated code (excerpt):\n{snippet}\n\nAccuracy: {data.get('accuracy', 0):.2f}"
-                    outputs.append({"tool_call_id": tc.id, "output": output})
-                run = await client.beta.threads.runs.submit_tool_outputs(
-                    thread_id=thread.id,
-                    run_id=run.id,
-                    tool_outputs=outputs,
-                )
-                continue
-            # queued, in_progress, etc.
-            await asyncio.sleep(1)
-    except Exception as e:
-        logger.exception("OpenAI Assistant run failed: %s", e)
-    finally:
-        complete_agent_session(session_id)
-        logger.info("OpenAI Assistant run finished: session_id=%s", session_id)
 
 
 def _trace(session_id: str, step: str, t0: float, **kwargs: Any) -> None:
@@ -703,14 +598,6 @@ async def run_agent_loop(session_id: str, challenge_id: str, agent_id: str) -> N
         _trace(session_id, "Starting Claude Agent SDK", t0)
         await _run_agent_loop_claude_sdk(session_id, challenge_id, agent_id)
         return
-    if agent_id == "openai-assistant":
-        # #region agent log
-        _debug_log("run_agent_loop branch", {"branch": "openai-assistant"}, "H3,H4")
-        # #endregion
-        _trace(session_id, "Starting OpenAI Assistant", t0)
-        await _run_agent_loop_openai_assistant(session_id, challenge_id, agent_id)
-        return
-
     # #region agent log
     _debug_log("run_agent_loop branch", {"branch": "simple_loop"}, "H3,H4")
     # #endregion
