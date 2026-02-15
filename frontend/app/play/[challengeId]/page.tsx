@@ -21,6 +21,7 @@ import {
   GripHorizontal,
   Trophy,
   X,
+  FileText,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -52,6 +53,13 @@ export default function ChallengePage() {
   const [outputPanelHeight, setOutputPanelHeight] = useState(OUTPUT_PANEL_INITIAL);
   const resizeStartYRef = useRef<number>(0);
   const resizeStartHeightRef = useRef<number>(OUTPUT_PANEL_INITIAL);
+
+  // Product challenge: resizable Notepad/PRD panel (like coding output panel)
+  const PRODUCT_PANEL_MIN = 120;
+  const PRODUCT_PANEL_INITIAL = 220;
+  const [productPanelHeight, setProductPanelHeight] = useState(PRODUCT_PANEL_INITIAL);
+  const productResizeStartYRef = useRef<number>(0);
+  const productResizeStartHeightRef = useRef<number>(PRODUCT_PANEL_INITIAL);
 
   // Chat state
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -122,6 +130,12 @@ export default function ChallengePage() {
   
   // Execution state (from Leaderboard - allows pausing during tests)
   const [isExecuting, setIsExecuting] = useState(false);
+
+  // Product challenge state (Part 1: discovery chat, Part 2: PRD)
+  const [productPart, setProductPart] = useState<1 | 2>(1);
+  const [notes, setNotes] = useState("");
+  const [prdContent, setPrdContent] = useState("");
+  const [productBottomTab, setProductBottomTab] = useState<"notepad" | "prd">("notepad");
 
   // Initialize challenge
   useEffect(() => {
@@ -214,6 +228,25 @@ export default function ChallengePage() {
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
   }, [outputPanelHeight]);
+
+  // Product panel resize (Notepad/PRD)
+  const handleProductPanelResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    productResizeStartYRef.current = e.clientY;
+    productResizeStartHeightRef.current = productPanelHeight;
+    const onMove = (moveEvent: MouseEvent) => {
+      const delta = productResizeStartYRef.current - moveEvent.clientY;
+      const next = productResizeStartHeightRef.current + delta;
+      const max = typeof window !== "undefined" ? Math.max(400, window.innerHeight * 0.7) : 600;
+      setProductPanelHeight(Math.min(max, Math.max(PRODUCT_PANEL_MIN, next)));
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }, [productPanelHeight]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -413,6 +446,8 @@ export default function ChallengePage() {
   const isUiChallenge = challenge?.category === "ui";
   const hasFunctionTests = challenge?.test_suite && challenge.test_suite.length > 0;
   const isDataChallenge = challenge?.category === "data";
+  const isProductChallenge = challenge?.category === "product";
+  const productParts = challenge?.product_parts ?? [];
 
   const handleSubmitSolution = async () => {
     if (submitState !== "idle") return;
@@ -420,19 +455,26 @@ export default function ChallengePage() {
     // Calculate accuracy based on challenge type
     let accuracy = 0.0;
     let evaluatedUiScore: number | undefined = undefined;
-    
+    let messagesForScore = messages;
+
     // Freeze the score bar stats first
     const currentElapsed = elapsed;
     const currentTurns = totalTurns;
     const currentTokens = Math.round(totalTokens + totalInputTokens + estimatedTokens);
     const currentCost = totalCost + inputCost + ((estimatedTokens * (MODEL_PRICING[selectedModel]?.output || MODEL_PRICING["gpt-5.2"].output)) / 1_000_000);
-    
+
     setScoreBarFrozen(true);
     setSubmitState("pending");
     setScoreLoading(true);
-    
+
     try {
-      if (isUiChallenge) {
+      if (isProductChallenge) {
+        accuracy = 1.0; // No automated grading for PRD; completion counts
+        messagesForScore = [
+          ...messages,
+          { role: "assistant" as const, content: `## PRD\n\n${prdContent}` },
+        ];
+      } else if (isUiChallenge) {
         if (renderedCode) {
           const result = await evaluateUI(challengeId, renderedCode);
           accuracy = result.score / 100;
@@ -462,6 +504,9 @@ export default function ChallengePage() {
         total_tokens: currentTokens,
         total_turns: currentTurns,
         difficulty: challenge?.difficulty || "medium",
+        model: selectedModel,
+        messages: messagesForScore,
+        total_cost: currentCost,
       });
       
       setFinalScores(scores);
@@ -501,6 +546,13 @@ export default function ChallengePage() {
     setElapsed(0);
     totalPausedTimeRef.current = 0;
     pauseStartTimeRef.current = null;
+    setProductPart(1);
+    setNotes("");
+    setPrdContent("");
+    setProductBottomTab("notepad");
+    setProductPanelHeight(PRODUCT_PANEL_INITIAL);
+    setPlayerName("");
+    setScoreSubmitted(false);
 
     // Reset Vercel sandbox preview (write empty placeholder back)
     if (vercelSandboxId && vercelSandboxReady) {
@@ -510,6 +562,34 @@ export default function ChallengePage() {
       ).then(() => {
         setIframeKey((k) => k + 1);
       }).catch(() => {});
+    }
+  };
+
+  const handleFinalSubmit = async () => {
+    if (!playerName.trim() || scoreSubmitted || !finalScores || !frozenStatsRef.current) return;
+    
+    setScoreLoading(true);
+    try {
+      // Calculate again WITH username/messages to persist
+      // Since accuracy/etc didn't change, scores will be identical but saved
+      await calculateScore({
+        challenge_id: challengeId,
+        accuracy: frozenStatsRef.current.accuracy || 0,
+        elapsed_sec: frozenStatsRef.current.elapsed,
+        total_tokens: frozenStatsRef.current.tokens,
+        total_turns: frozenStatsRef.current.turns,
+        difficulty: challenge?.difficulty || "medium",
+        model: selectedModel,
+        username: playerName,
+        messages: isProductChallenge ? [...messages, { role: "assistant" as const, content: `## PRD\n\n${prdContent}` }] : messages,
+        total_cost: frozenStatsRef.current.cost,
+      });
+      setScoreSubmitted(true);
+    } catch (err) {
+      console.error("Failed to submit score:", err);
+      // Maybe show error toast?
+    } finally {
+      setScoreLoading(false);
     }
   };
 
@@ -576,14 +656,16 @@ export default function ChallengePage() {
           setTotalInputTokens((t) => t + usage.input_tokens);
         }
       },
-      abortControllerRef.current?.signal
+      abortControllerRef.current?.signal,
+      isProductChallenge && productPart === 1 ? challengeId : undefined
     );
   };
 
   const hasBottomPanel =
-    isUiChallenge ||
-    (hasFunctionTests && (testResults || runningTests)) ||
-    (isDataChallenge && (codeResult || runningCode));
+    !isProductChallenge &&
+    (isUiChallenge ||
+      (hasFunctionTests && (testResults || runningTests)) ||
+      (isDataChallenge && (codeResult || runningCode)));
 
   const OUTPUT_PLACEHOLDER_IMAGE =
     "https://placehold.co/800x400/f8fafc/94a3b8?text=Your+rendered+page";
@@ -747,35 +829,69 @@ export default function ChallengePage() {
             type="button"
             onClick={submitState === 'completed' ? handleRetry : handleSubmitSolution}
             disabled={
-                submitState === 'pending' || 
-                isExecuting || 
-                isStreaming || 
-                (!testResults && !codeResult && !renderedCode)
+                submitState === "pending" ||
+                isExecuting ||
+                isStreaming ||
+                (isProductChallenge
+                  ? productPart !== 2 || !prdContent.trim()
+                  : !testResults && !codeResult && !renderedCode)
             }
             className={`shrink-0 rounded-lg bg-foreground text-background px-4 py-2 text-xs font-medium transition-opacity ${
-                submitState === 'pending' || (submitState === 'idle' && (isExecuting || isStreaming || (!testResults && !codeResult && !renderedCode)))
+                submitState === "pending" ||
+                (submitState === "idle" &&
+                  (isExecuting ||
+                    isStreaming ||
+                    (isProductChallenge ? productPart !== 2 || !prdContent.trim() : !testResults && !codeResult && !renderedCode)))
                 ? "opacity-50 cursor-not-allowed"
                 : "hover:opacity-90 cursor-pointer"
             }`}
         >
-            {submitState === "pending" ? "Pending" : submitState === "completed" ? "Retry" : "Submit solution"}
+            {submitState === "pending" ? "Pending" : submitState === "completed" ? "Retry" : isProductChallenge && productPart === 2 ? "Submit PRD" : "Submit solution"}
         </button>
       </div>
 
       {/* Main content */}
       <div className="flex flex-1 min-h-0">
         <div className="flex-1 flex flex-col min-w-0 border-r border-border">
-          {/* Top: Challenge description */}
+          {/* Top: Challenge description (or product Part 1/2 + notepad) */}
           <div
             className={`${
               hasBottomPanel ? "min-h-0 flex-1" : "flex-1"
-            } overflow-y-auto border-b border-border`}
+            } overflow-y-auto border-b border-border flex flex-col min-h-0`}
           >
-            <div className="p-6">
+            <div className="p-6 flex-1 min-h-0">
               <h2 className="text-sm font-semibold mb-3">Challenge</h2>
               <SimpleMarkdown content={challenge?.description || ""} className="text-sm leading-relaxed mb-4" />
-              
-              {challenge?.starter_code && (
+
+              {isProductChallenge && productParts.length > 0 && (
+                <div className="mb-4 space-y-3">
+                  <div className="rounded-lg border border-border bg-muted/10 p-4">
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <span className="text-sm font-semibold text-foreground">
+                        {productParts[productPart - 1]?.title ?? `Part ${productPart}`}
+                      </span>
+                      {productPart === 1 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setProductPart(2);
+                            setMessages([]);
+                          }}
+                          className="shrink-0 rounded-lg bg-foreground text-background px-3 py-1.5 text-xs font-medium hover:opacity-90 cursor-pointer"
+                        >
+                          Next → Part 2
+                        </button>
+                      )}
+                    </div>
+                    <SimpleMarkdown
+                      content={productParts[productPart - 1]?.description ?? ""}
+                      className="text-sm leading-relaxed text-muted-foreground"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {!isProductChallenge && challenge?.starter_code && (
                 <div className="rounded-lg border border-border bg-code-bg overflow-hidden mb-4">
                   <div className="px-3 py-1.5 border-b border-border">
                     <span className="text-xs font-medium text-muted">
@@ -789,7 +905,7 @@ export default function ChallengePage() {
                   </pre>
                 </div>
               )}
-              {challenge?.html_url && referenceHtml && (
+              {!isProductChallenge && challenge?.html_url && referenceHtml && (
                 <div className="rounded-lg border border-border overflow-hidden bg-muted/20 mb-4 h-[680px]">
                   <iframe
                     srcDoc={referenceHtml}
@@ -799,7 +915,7 @@ export default function ChallengePage() {
                   />
                 </div>
               )}
-              {challenge?.image_url && !challenge?.html_url && (
+              {!isProductChallenge && challenge?.image_url && !challenge?.html_url && (
                 <div className="rounded-lg border border-border overflow-hidden bg-muted/20 mb-4">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
@@ -809,7 +925,7 @@ export default function ChallengePage() {
                   />
                 </div>
               )}
-              {challenge?.test_suite && challenge.test_suite.length > 0 && (
+              {!isProductChallenge && challenge?.test_suite && challenge.test_suite.length > 0 && (
                 <div className="mt-4">
                   <h3 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">
                     Test Cases
@@ -831,6 +947,72 @@ export default function ChallengePage() {
               )}
             </div>
           </div>
+
+          {/* Product challenge: resizable Notepad | PRD panel */}
+          {isProductChallenge && (
+            <>
+              <button
+                type="button"
+                onMouseDown={handleProductPanelResizeStart}
+                className="flex w-full cursor-n-resize items-center justify-center border-t border-border bg-muted/10 py-1.5 text-muted hover:bg-muted/20 hover:text-foreground focus:outline-none shrink-0"
+                aria-label="Resize notepad panel"
+              >
+                <GripHorizontal className="h-4 w-4" />
+              </button>
+              <div
+                className="flex shrink-0 flex-col border-t border-border overflow-hidden"
+                style={{ height: productPanelHeight }}
+              >
+                <div className="flex items-center justify-between border-b border-border px-4 py-2.5 shrink-0 bg-background/80">
+                <span className="text-sm font-semibold text-foreground">
+                  {productBottomTab === "notepad" ? "Notepad" : "PRD"}
+                </span>
+                <div className="flex items-center gap-1 rounded-lg border border-border bg-muted/30 p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setProductBottomTab("notepad")}
+                    className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer ${
+                      productBottomTab === "notepad"
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted hover:text-foreground"
+                    }`}
+                  >
+                    Notepad
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setProductBottomTab("prd")}
+                    className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer ${
+                      productBottomTab === "prd"
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted hover:text-foreground"
+                    }`}
+                  >
+                    <FileText className="h-3 w-3" />
+                    PRD
+                  </button>
+                </div>
+              </div>
+              <div className="flex-1 min-h-0 overflow-hidden rounded-b-lg border-x border-b border-border bg-code-bg/50 flex flex-col">
+                {productBottomTab === "notepad" ? (
+                  <textarea
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    placeholder="Take notes from your conversation with the CRO..."
+                    className="flex-1 min-h-0 w-full resize-none p-4 text-sm font-mono text-foreground bg-transparent border-0 focus:outline-none focus:ring-0 placeholder:text-muted"
+                  />
+                ) : (
+                  <textarea
+                    value={prdContent}
+                    onChange={(e) => setPrdContent(e.target.value)}
+                    placeholder="Write your PRD here. Use the right panel to chat with the assistant as you draft..."
+                    className="flex-1 min-h-0 w-full resize-none p-4 text-sm leading-relaxed text-foreground bg-transparent border-0 focus:outline-none focus:ring-0 placeholder:text-muted"
+                  />
+                )}
+              </div>
+              </div>
+            </>
+          )}
 
           {/* Resize handle */}
           {hasBottomPanel && (
@@ -1092,11 +1274,13 @@ export default function ChallengePage() {
           )}
         </div>
 
-        {/* Right: Chat panel */}
+        {/* Right: Chat panel (CRO in Part 1, general assistant in Part 2 for PRD help) */}
         <div className="flex flex-col w-1/2 shrink-0 border-l border-border">
           <div className="border-b border-border px-6 py-3 flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-muted" />
-            <h2 className="text-sm font-medium text-foreground">Workspace</h2>
+            <h2 className="text-sm font-medium text-foreground">
+              {isProductChallenge && productPart === 1 ? "Chat with the CRO" : isProductChallenge && productPart === 2 ? "General AI" : "Workspace"}
+            </h2>
           </div>
 
           <div
@@ -1111,10 +1295,14 @@ export default function ChallengePage() {
                       <Sparkles className="h-6 w-6 text-accent" />
                     </div>
                     <h3 className="text-lg font-medium text-foreground mb-2">
-                      Start a conversation
+                      {isProductChallenge && productPart === 1 ? "Ask the CRO questions" : "Start a conversation"}
                     </h3>
                     <p className="text-sm text-muted">
-                      Describe what you want built for this challenge
+                      {isProductChallenge && productPart === 1
+                        ? "Ask clarifying questions to understand the problem, pain points, and constraints. Take notes in the notepad."
+                        : isProductChallenge && productPart === 2
+                          ? "Chat with the assistant to draft your PRD. Use the Notepad / PRD tabs on the left to write."
+                          : "Describe what you want built for this challenge"}
                     </p>
                   </div>
                 </div>
@@ -1177,7 +1365,7 @@ export default function ChallengePage() {
                 isStreaming={isStreaming}
                 selectedModel={selectedModel}
                 onModelChange={setSelectedModel}
-                placeholder="Ask anything..."
+                placeholder={isProductChallenge && productPart === 1 ? "Ask the CRO..." : "Ask anything..."}
                 disabled={isStreaming || isExecuting || submitState === "pending" || submitState === "completed"}
               />
             </div>

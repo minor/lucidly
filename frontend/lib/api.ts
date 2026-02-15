@@ -199,14 +199,15 @@ export async function streamChat(
   onError?: (error: string) => void,
   onDone?: (data: StreamDoneData) => void,
   onUsage?: (usage: { input_tokens: number }) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  challengeId?: string
 ): Promise<void> {
   let response: Response;
   try {
     response = await fetch(`${API_BASE}/api/chat/stream`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages, model }),
+      body: JSON.stringify({ messages, model, challenge_id: challengeId ?? undefined }),
       signal,
     });
   } catch (err: unknown) {

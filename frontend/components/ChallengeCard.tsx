@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Code, Layout, Bug, Database, Server } from "lucide-react";
+import { Code, Layout, Bug, Database, Server, FileText } from "lucide-react";
 import type { Challenge } from "@/lib/types";
 
 const CATEGORY_ICONS: Record<string, typeof Code> = {
@@ -10,6 +10,7 @@ const CATEGORY_ICONS: Record<string, typeof Code> = {
   debug: Bug,
   data: Database,
   system: Server,
+  product: FileText,
 };
 
 const DIFFICULTY_COLORS: Record<string, string> = {

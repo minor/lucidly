@@ -118,6 +118,7 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     messages: list[ChatMessage]
     model: str | None = None
+    challenge_id: str | None = None  # When set, backend may inject challenge-specific system prompt (e.g. product CRO agent)
 
 
 class PromptResponse(BaseModel):
@@ -611,6 +612,13 @@ async def chat_stream(req: ChatRequest):
     
     if not anthropic_messages or anthropic_messages[-1]["role"] != "user":
         raise HTTPException(status_code=400, detail="Last message must be from user")
+
+    # Resolve system prompt: use product challenge agent context when applicable
+    system_message = "You are a helpful AI assistant. Provide clear, concise, and helpful responses."
+    if req.challenge_id:
+        challenge = get_challenge_by_id(req.challenge_id)
+        if challenge and getattr(challenge, "category", None) == "product" and getattr(challenge, "agent_context", None):
+            system_message = challenge.agent_context
     
     # Determine if we should use Anthropic API directly based on model name
     # Default to OpenAI if model is not explicitly Claude
@@ -648,10 +656,7 @@ async def chat_stream(req: ChatRequest):
                         "content-type": "application/json",
                     }
                     
-                    # Extract system message if present, otherwise use default
-                    system_message = "You are a helpful AI assistant. Provide clear, concise, and helpful responses."
                     messages_for_api = anthropic_messages.copy()
-                    
                     payload = {
                         "model": model,
                         "max_tokens": settings.max_tokens,
@@ -749,7 +754,7 @@ async def chat_stream(req: ChatRequest):
                     base_url=settings.openai_base_url,
                     api_key=settings.openai_api_key,
                     model=model,
-                    system_prompt="You are a helpful AI assistant. Provide clear, concise, and helpful responses.",
+                    system_prompt=system_message,
                 )
                 
                 
