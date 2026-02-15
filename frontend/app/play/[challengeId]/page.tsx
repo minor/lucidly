@@ -2,17 +2,16 @@
 
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { getChallenge, runTests, runCode, createSandbox, terminateSandbox, MODEL_PRICING, MODELS } from "@/lib/api";
+import { getChallenge, runTests, runCode, createSandbox, terminateSandbox, MODEL_PRICING, MODELS, calculateScore, evaluateUI } from "@/lib/api";
 import { PromptInput } from "@/components/PromptInput";
 import { ScoreBar } from "@/components/ScoreBar";
 import { streamChat, type ChatMessage, type TestCaseResult, type RunTestsResponse, type StreamDoneData, type RunCodeResponse } from "@/lib/api";
-import type { Challenge } from "@/lib/types";
+import type { Challenge, Scores } from "@/lib/types";
 import {
   Loader2,
   ArrowLeft,
   Sparkles,
   Eye,
-  ImageIcon,
   Code,
   CheckCircle2,
   XCircle,
@@ -119,7 +118,6 @@ export default function ChallengePage() {
   const OUTPUT_PANEL_MIN = 120;
   const OUTPUT_PANEL_INITIAL = 200;
   const [outputPanelHeight, setOutputPanelHeight] = useState(OUTPUT_PANEL_INITIAL);
-  const [outputView, setOutputView] = useState<"preview" | "code">("preview");
   const resizeStartYRef = useRef<number>(0);
   const resizeStartHeightRef = useRef<number>(OUTPUT_PANEL_INITIAL);
 
@@ -140,6 +138,9 @@ export default function ChallengePage() {
   const [latestCode, setLatestCode] = useState<string>("");
   const [runningTests, setRunningTests] = useState(false);
 
+  // UI evaluation score state
+  const [uiScore, setUiScore] = useState<number | undefined>(undefined);
+
   // Code execution state (data challenges)
   const [codeResult, setCodeResult] = useState<RunCodeResponse | null>(null);
   const [runningCode, setRunningCode] = useState(false);
@@ -154,6 +155,20 @@ export default function ChallengePage() {
   
   // Abort controller for cancelling generation
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Submit solution state
+  const [submitState, setSubmitState] = useState<"idle" | "pending" | "completed">("idle");
+  const [finalScores, setFinalScores] = useState<Scores | null>(null);
+  const [scoreBarFrozen, setScoreBarFrozen] = useState(false);
+  const [scoreLoading, setScoreLoading] = useState(false);
+  const frozenStatsRef = useRef<{
+    elapsed: number;
+    turns: number;
+    tokens: number;
+    accuracy: number | undefined;
+    score: number | undefined;
+    cost: number;
+  } | null>(null);
 
   // Initialize challenge
   useEffect(() => {
@@ -176,13 +191,16 @@ export default function ChallengePage() {
     };
   }, [challengeId]);
 
-  // Timer for efficiency stats
+  // Timer for efficiency stats (freeze when pending)
   useEffect(() => {
     const interval = setInterval(() => {
-      setElapsed((Date.now() - startTimeRef.current) / 1000);
+      // Don't update timer when pending (frozen)
+      if (submitState !== "pending") {
+        setElapsed((Date.now() - startTimeRef.current) / 1000);
+      }
     }, 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [submitState]);
 
   // Draggable resize for "Your output" panel (drag up = expand)
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
@@ -279,6 +297,7 @@ export default function ChallengePage() {
     if (isUi) {
       const code = extractAllCode(latest.content);
       if (code && isHtmlCode(code)) {
+        // Just render the code, don't automatically evaluate
         setRenderedCode(code);
       }
     }
@@ -337,6 +356,96 @@ export default function ChallengePage() {
         setInputCost(0);
       }
     }
+  };
+
+  const handleSubmitSolution = async () => {
+    if (submitState !== "idle") return;
+
+    // Calculate accuracy based on challenge type
+    let accuracy = 0.0;
+    let evaluatedUiScore: number | undefined = undefined;
+    
+    // Freeze the score bar stats first
+    const currentElapsed = elapsed;
+    const currentTurns = totalTurns;
+    const currentTokens = Math.round(totalTokens + totalInputTokens + estimatedTokens);
+    const currentCost = totalCost + inputCost + ((estimatedTokens * (MODEL_PRICING[selectedModel]?.output || MODEL_PRICING["gpt-5.2"].output)) / 1_000_000);
+    
+    setScoreBarFrozen(true);
+    setSubmitState("pending");
+    setScoreLoading(true);
+    
+    try {
+      // Calculate accuracy based on challenge type
+      let accuracy = 0.0;
+      let evaluatedUiScore: number | undefined = undefined;
+      
+      if (isUiChallenge) {
+        // For UI challenges, evaluate the rendered code to get the score
+        if (renderedCode) {
+          const result = await evaluateUI(challengeId, renderedCode);
+          accuracy = result.score / 100; // Convert percentage to 0-1
+          evaluatedUiScore = result.score; // Store for display
+          setUiScore(result.score);
+        }
+      } else if (hasFunctionTests && testResults) {
+        accuracy = testResults.passed_count / testResults.total_count;
+      } else if (isDataChallenge && codeResult) {
+        // For data challenges, accuracy is based on return code (0 = success)
+        accuracy = codeResult.returncode === 0 ? 1.0 : 0.0;
+      }
+      
+      // Update frozen stats with calculated values
+      frozenStatsRef.current = {
+        elapsed: currentElapsed,
+        turns: currentTurns,
+        tokens: currentTokens,
+        accuracy: isUiChallenge ? accuracy : (testResults ? testResults.passed_count / testResults.total_count : undefined),
+        score: isUiChallenge ? evaluatedUiScore : (testResults ? (testResults.passed_count / testResults.total_count) * 100 : undefined),
+        cost: currentCost,
+      };
+      
+      // Calculate composite score
+      const scores = await calculateScore({
+        accuracy,
+        elapsed_sec: currentElapsed,
+        total_tokens: currentTokens,
+        total_turns: currentTurns,
+      });
+      
+      setFinalScores(scores);
+      setScoreLoading(false);
+      setSubmitState("completed");
+    } catch (err) {
+      console.error("Failed to calculate score:", err);
+      setScoreBarFrozen(false);
+      setScoreLoading(false);
+      frozenStatsRef.current = null;
+      setSubmitState("idle");
+    }
+  };
+
+  const handleRetry = () => {
+    // Reset all state to restart the challenge
+    setMessages([]);
+    setRenderedCode("");
+    setTestResults(null);
+    setLatestCode("");
+    setUiScore(undefined);
+    setCodeResult(null);
+    setTotalTurns(0);
+    setTotalTokens(0);
+    setTotalInputTokens(0);
+    setEstimatedTokens(0);
+    setTotalCost(0);
+    setInputCost(0);
+    setSubmitState("idle");
+    setFinalScores(null);
+    setScoreBarFrozen(false);
+    setScoreLoading(false);
+    frozenStatsRef.current = null;
+    startTimeRef.current = Date.now();
+    setElapsed(0);
   };
 
   const handleSubmit = async (prompt: string, model: string) => {
@@ -467,21 +576,42 @@ export default function ChallengePage() {
       {/* Efficiency stats + Submit solution */}
       <div className="flex items-center justify-between gap-4 border-b border-border px-6 py-2">
         <ScoreBar
-          turns={totalTurns}
-          tokens={Math.round(totalTokens + totalInputTokens + estimatedTokens)}
-          elapsedSec={elapsed}
-          accuracy={testResults ? testResults.passed_count / testResults.total_count : undefined}
+          turns={scoreBarFrozen && frozenStatsRef.current ? frozenStatsRef.current.turns : totalTurns}
+          tokens={scoreBarFrozen && frozenStatsRef.current ? frozenStatsRef.current.tokens : Math.round(totalTokens + totalInputTokens + estimatedTokens)}
+          elapsedSec={scoreBarFrozen && frozenStatsRef.current ? frozenStatsRef.current.elapsed : elapsed}
+          accuracy={scoreBarFrozen && frozenStatsRef.current ? frozenStatsRef.current.accuracy : (testResults ? testResults.passed_count / testResults.total_count : undefined)}
+          score={
+            scoreBarFrozen && frozenStatsRef.current
+              ? frozenStatsRef.current.score
+              : isUiChallenge && uiScore !== undefined
+                ? uiScore
+                : testResults
+                  ? (testResults.passed_count / testResults.total_count) * 100
+                  : undefined
+          }
+          scoreLoading={scoreLoading && !scoreBarFrozen}
+          compositeScore={finalScores ? finalScores.composite_score : undefined}
           cost={
-            totalCost +
-            inputCost +
-            ((estimatedTokens * (MODEL_PRICING[selectedModel]?.output || MODEL_PRICING["gpt-5.2"].output)) / 1_000_000)
+            scoreBarFrozen && frozenStatsRef.current
+              ? frozenStatsRef.current.cost
+              : totalCost +
+                inputCost +
+                ((estimatedTokens * (MODEL_PRICING[selectedModel]?.output || MODEL_PRICING["gpt-5.2"].output)) / 1_000_000)
           }
         />
         <button
           type="button"
-          className="shrink-0 rounded-lg bg-foreground px-4 py-2 text-xs font-medium text-background transition-opacity hover:opacity-90"
+          onClick={submitState === "completed" ? handleRetry : handleSubmitSolution}
+          disabled={submitState === "pending"}
+          className={`shrink-0 rounded-lg px-4 py-2 text-xs font-medium transition-opacity ${
+            submitState === "pending"
+              ? "bg-muted text-muted-foreground cursor-not-allowed italic"
+              : submitState === "completed"
+                ? "bg-foreground text-background hover:opacity-90 cursor-pointer"
+                : "bg-foreground text-background hover:opacity-90 cursor-pointer"
+          }`}
         >
-          Submit solution
+          {submitState === "pending" ? "Pending" : submitState === "completed" ? "Retry" : "Submit solution"}
         </button>
       </div>
 
@@ -896,7 +1026,7 @@ export default function ChallengePage() {
                 onStop={handleStop}
                 loading={isStreaming}
                 placeholder="Ask anything..."
-                disabled={isStreaming}
+                disabled={isStreaming || submitState === "pending"}
               />
             </div>
           </div>

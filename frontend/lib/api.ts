@@ -267,6 +267,45 @@ export async function runCode(
   });
 }
 
+// ---- UI Evaluation ----
+
+export interface EvaluateUIResponse {
+  score: number; // 0-100
+  similarity_score: number; // 0-1
+  detailed_feedback?: string;
+}
+
+export async function evaluateUI(
+  challengeId: string,
+  generatedHtml: string
+): Promise<EvaluateUIResponse> {
+  return fetchJSON<EvaluateUIResponse>("/api/evaluate-ui", {
+    method: "POST",
+    body: JSON.stringify({
+      challenge_id: challengeId,
+      generated_html: generatedHtml,
+    }),
+  });
+}
+
+// ---- Score Calculation ----
+
+export interface CalculateScoreRequest {
+  accuracy: number;
+  elapsed_sec: number;
+  total_tokens: number;
+  total_turns: number;
+}
+
+export async function calculateScore(
+  req: CalculateScoreRequest
+): Promise<Scores> {
+  return fetchJSON<Scores>("/api/calculate-score", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
 
 export const MODEL_PRICING: Record<string, { input: number; output: number }> = {
   "claude-opus-4-6": { input: 5.0, output: 25.0 },
