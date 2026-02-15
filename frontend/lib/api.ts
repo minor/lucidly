@@ -71,6 +71,8 @@ export async function getSession(sessionId: string): Promise<Session> {
 export type SessionEvent =
   | { type: "token_progress"; total_estimated_tokens: number }
   | { type: "session_update"; session: Session }
+  | { type: "timer_paused" }
+  | { type: "timer_resumed"; paused_seconds?: number }
   | { type: "ping" };
 
 /**
