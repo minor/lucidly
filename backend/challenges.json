@@ -20,7 +20,7 @@
     {
         "id": "build-landing-page",
         "title": "Build this UI: Landing Page",
-        "description": "Recreate this landing page UI.",
+        "description": "Recreate this landing page UI using HTML.",
         "category": "ui",
         "difficulty": "medium",
         "embed_url": "https://openai.com/",
