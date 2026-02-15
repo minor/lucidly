@@ -153,7 +153,7 @@ export function Sidebar() {
             className="h-7 w-7 shrink-0"
           />
           {!collapsed && (
-            <span className="font-serif text-lg font-semibold tracking-tight whitespace-nowrap overflow-hidden">
+            <span className="font-heading text-lg font-semibold tracking-tight whitespace-nowrap overflow-hidden">
               No Shot
             </span>
           )}

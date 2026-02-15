@@ -212,7 +212,7 @@ export default function LeaderboardPage() {
                               (entry.accuracy || 0) >= 0.8
                                 ? "bg-green-500"
                                 : (entry.accuracy || 0) >= 0.5
-                                ? "bg-yellow-500"
+                                ? "bg-orange-500"
                                 : "bg-red-500"
                             }`}
                           />
