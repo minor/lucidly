@@ -116,7 +116,10 @@ export default function ObserveDashboardPage() {
   useEffect(() => {
     const abort = subscribeInterviewObserver(roomId, (event) => {
       const ev = event as unknown as LiveEvent;
-      setEvents((prev) => [...prev.slice(-200), ev]); // keep last 200
+      // Don't log response_chunk events – the response is visible in the live view
+      if (ev.type !== "response_chunk") {
+        setEvents((prev) => [...prev.slice(-200), ev]); // keep last 200
+      }
 
       switch (ev.type) {
         case "session_started":
