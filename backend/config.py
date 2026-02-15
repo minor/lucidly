@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_base_url: str = "https://api.openai.com/v1"
     default_model: str = "gpt-5.2"
-    """Model used for vision-based UI replication (screenshot → code). Should be vision-capable (e.g. gpt-4o, claude-3-5-sonnet)."""
+    """Model used for vision-based UI replication. Should be vision-capable (e.g. gpt-4o, claude-3-5-sonnet)."""
     vision_model: str = "gpt-4o"
     max_tokens: int = 16384
     
@@ -44,9 +44,8 @@ class Settings(BaseSettings):
     browserbase_api_key: str = ""
     browserbase_project_id: str = ""
 
-    # Lucidly app URL (optional: for agent to screenshot the run page as reference)
-    # When set, generate_landing_page screenshots /agents/run/{session_id} (the page you watch the run on).
-    # e.g. https://app.lucidly.com or http://localhost:3000 (Browserbase must be able to reach it).
+    # Lucidly app URL (optional: for agent to view the run page as reference)
+    # e.g. https://app.lucidly.com or http://localhost:3000
     lucidly_app_url: str = ""
 
     # Agent / Modal (for benchmark runs)
