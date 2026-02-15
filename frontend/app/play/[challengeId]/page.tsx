@@ -633,7 +633,7 @@ export default function ChallengePage() {
           challenge_description: challenge.description || "",
           challenge_category: challenge.category || "",
           challenge_difficulty: challenge.difficulty || "",
-          reference_html: challenge.reference_html || "",
+          reference_html: referenceHtml || "",
           accuracy: frozenStatsRef.current.accuracy || 0,
           total_turns: frozenStatsRef.current.turns,
           total_tokens: frozenStatsRef.current.tokens,

@@ -8,5 +8,8 @@
   },
   "devDependencies": {
     "concurrently": "latest"
+  },
+  "dependencies": {
+    "@auth0/auth0-react": "2.x"
   }
 }
