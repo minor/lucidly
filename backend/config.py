@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     browserbase_api_key: str = ""
     browserbase_project_id: str = ""
 
+    # Supabase (Leaderboard & Logs)
+    supabase_url: str = ""
+    supabase_service_key: str = ""
+
     # Lucidly app URL (optional: for agent to screenshot the run page as reference)
     # When set, generate_landing_page screenshots /agents/run/{session_id} (the page you watch the run on).
     # e.g. https://app.lucidly.com or http://localhost:3000 (Browserbase must be able to reach it).

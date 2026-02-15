@@ -79,15 +79,19 @@ export interface Scores {
 }
 
 export interface LeaderboardEntry {
+  id?: string; // Optional if not always returned by all endpoints, but db has it
   username: string;
   composite_score: number;
   accuracy_score: number;
   speed_score: number;
   challenge_id: string;
-  challenge_title: string;
+  challenge_title?: string;
   total_turns: number;
   total_tokens: number;
-  completed_at: number;
+  completed_at: number | string; // Supabase returns string
+  accuracy?: number; // Raw accuracy
+  time_seconds?: number;
+  total_cost?: number;
 }
 
 export interface Agent {

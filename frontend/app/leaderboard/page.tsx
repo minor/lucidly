@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { 
   ArrowLeft, 
@@ -16,88 +16,78 @@ import {
   Activity
 } from "lucide-react";
 
-// Mock Challenge Data (Should eventually come from API)
-const CHALLENGES = [
-  { id: "cpp-lockfree-stack", title: "Debug: Lock-Free Stack Race Conditions" },
-  { id: "build-landing-page", title: "Build this UI: Landing Page" },
-  { id: "fizzbuzz", title: "FizzBuzz" },
-  { id: "two-sum", title: "Two Sum" },
-  { id: "cpp-sum", title: "Sum of Two Integers (C++)" },
-];
+// Removed dummy data generator and hardcoded CHALLENGES
 
-interface LeaderboardEntry {
-  id: string;
-  rank: number;
-  name: string;
-  challengeId: string;
-  score: number;
-  accuracy: number;
-  timeSec: number;
-  turns: number;
-  tokens: number;
-  cost: number;
-  date: string;
-}
+import { getChallenges, getLeaderboard } from "@/lib/api";
+import type { Challenge, LeaderboardEntry as ApiLeaderboardEntry } from "@/lib/types";
 
-// Dummy Data Generator
-const generateDummyData = (challengeId: string): LeaderboardEntry[] => {
-  const count = 10;
-  return Array.from({ length: count }).map((_, i) => ({
-    id: `entry-${i}`,
-    rank: i + 1,
-    name: "test", // User requested "test" for now
-    challengeId,
-    score: Math.floor(Math.random() * 50) + 50, // 50-100
-    accuracy: Math.random() * 0.5 + 0.5, // 50-100%
-    timeSec: Math.floor(Math.random() * 300) + 30, // 30s - 5m
-    turns: Math.floor(Math.random() * 10) + 1,
-    tokens: Math.floor(Math.random() * 5000) + 500,
-    cost: Math.random() * 0.1,
-    date: new Date().toISOString(),
-  }));
-};
-
-type SortKey = keyof Omit<LeaderboardEntry, "id" | "challengeId" | "date" | "name">;
+type SortKey = "composite_score" | "accuracy" | "time_seconds" | "total_turns" | "total_tokens" | "total_cost";
 type SortDirection = "asc" | "desc";
 
 export default function LeaderboardPage() {
   const router = useRouter();
-  const [selectedChallengeId, setSelectedChallengeId] = useState(CHALLENGES[0].id);
-  const [sortKey, setSortKey] = useState<SortKey>("score");
-  // Sort direction is now derived from the key, no state needed
+  const [challenges, setChallenges] = useState<Challenge[]>([]);
+  const [selectedChallengeId, setSelectedChallengeId] = useState("");
+  const [entries, setEntries] = useState<ApiLeaderboardEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [sortKey, setSortKey] = useState<SortKey>("composite_score");
 
-  // In a real app, we'd fetch data here based on selectedChallengeId
-  // For now, we generate stable dummy data based on the ID (re-generated on change simplifies this demo)
-  const entries = useMemo(() => generateDummyData(selectedChallengeId), [selectedChallengeId]);
+  // Fetch challenges on mount
+  useEffect(() => {
+    getChallenges().then(data => {
+      setChallenges(data);
+      if (data.length > 0) {
+        setSelectedChallengeId(data[0].id);
+      }
+    }).catch(err => console.error("Failed to load challenges", err));
+  }, []);
 
-  // Fixed sort directions for each metric
-  const METRIC_SORT_DIRECTIONS: Record<SortKey, SortDirection> = {
-    rank: "asc",
-    score: "desc",
+  // Fetch leaderboard when challenge changes
+  useEffect(() => {
+    if (!selectedChallengeId) return;
+    
+    setLoading(true);
+    setEntries([]);
+    
+    getLeaderboard({ challenge_id: selectedChallengeId })
+      .then((data) => {
+        setEntries(Array.isArray(data) ? data : []);
+      })
+      .catch(err => {
+        console.error("Failed to load leaderboard", err);
+        setEntries([]);
+      })
+      .finally(() => setLoading(false));
+  }, [selectedChallengeId]);
+
+  const METRIC_SORT_DIRECTIONS: Record<string, SortDirection> = {
+    rank: "asc", 
+    composite_score: "desc",
     accuracy: "desc",
-    timeSec: "asc",
-    turns: "asc",
-    tokens: "asc",
-    cost: "asc",
+    time_seconds: "asc",
+    total_turns: "asc",
+    total_tokens: "asc",
+    total_cost: "asc",
   };
 
+  // Client-side sorting of fetched results
   const sortedEntries = useMemo(() => {
     return [...entries].sort((a, b) => {
-      const aValue = a[sortKey];
-      const bValue = b[sortKey];
-
-      // Use the fixed direction for the current sort key
-      const direction = METRIC_SORT_DIRECTIONS[sortKey];
-
-      if (aValue < bValue) return direction === "asc" ? -1 : 1;
-      if (aValue > bValue) return direction === "asc" ? 1 : -1;
+      // Handle missing keys safely
+      const valA = (a as any)[sortKey] ?? 0;
+      const valB = (b as any)[sortKey] ?? 0;
+      
+      const direction = METRIC_SORT_DIRECTIONS[sortKey] || "desc";
+      
+      if (valA < valB) return direction === "asc" ? -1 : 1;
+      if (valA > valB) return direction === "asc" ? 1 : -1;
       return 0;
     });
   }, [entries, sortKey]);
 
-  const handleSort = (key: SortKey) => {
-    setSortKey(key);
-    // Direction is implicitly handled by the updated sortedEntries logic
+  const handleSort = (key: string) => {
+      // Cast to SortKey if valid
+      setSortKey(key as SortKey);
   };
 
   const getSortIcon = (key: SortKey) => {
@@ -149,7 +139,7 @@ export default function LeaderboardPage() {
                 onChange={(e) => setSelectedChallengeId(e.target.value)}
                 className="h-10 w-[300px] rounded-lg border border-border bg-card px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
               >
-                {CHALLENGES.map((c) => (
+                {challenges.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.title}
                   </option>
@@ -162,18 +152,18 @@ export default function LeaderboardPage() {
           <div className="rounded-xl border border-border bg-card overflow-auto shadow-sm max-h-[600px]">
             <table className="w-full text-left text-sm whitespace-nowrap">
               <thead className="sticky top-0 z-10">
-                <tr className="border-b border-border bg-muted/90 backdrop-blur-sm">
+                <tr className="border-b border-border bg-card">
                   <th className="px-6 py-4 font-medium text-muted w-16">#</th>
                   <th className="px-6 py-4 font-medium text-muted w-1/4">Name</th>
                   
                   {/* Sortable Headers */}
                   {[
-                    { key: "score", label: "Score", icon: Zap },
+                    { key: "composite_score", label: "Score", icon: Zap },
                     { key: "accuracy", label: "Accuracy", icon: Activity },
-                    { key: "timeSec", label: "Time", icon: Clock },
-                    { key: "turns", label: "Turns", icon: RefreshCw },
-                    { key: "tokens", label: "Tokens", icon: Coins },
-                    { key: "cost", label: "Cost", icon: DollarSign },
+                    { key: "time_seconds", label: "Time", icon: Clock },
+                    { key: "total_turns", label: "Turns", icon: RefreshCw },
+                    { key: "total_tokens", label: "Tokens", icon: Coins },
+                    { key: "total_cost", label: "Cost", icon: DollarSign },
                   ].map(({ key, label, icon: Icon }) => (
                     <th
                       key={key}
@@ -190,46 +180,60 @@ export default function LeaderboardPage() {
                 </tr>
               </thead>
               <tbody>
-                {sortedEntries.map((entry, index) => (
-                  <tr
-                    key={entry.id}
-                    className="border-b border-border last:border-0 hover:bg-muted/5 transition-colors"
-                  >
-                    <td className="px-6 py-4 text-muted font-mono">{index + 1}</td>
-                    <td className="px-6 py-4 font-medium">{entry.name}</td>
-                    
-                    {/* Metrics */}
-                    <td className="px-6 py-4 font-mono font-bold text-accent">
-                      {entry.score}
-                    </td>
-                    <td className="px-6 py-4 font-mono">
-                      <div className="flex items-center gap-2">
-                        <div
-                          className={`h-1.5 w-1.5 rounded-full ${
-                            entry.accuracy >= 0.8
-                              ? "bg-green-500"
-                              : entry.accuracy >= 0.5
-                              ? "bg-yellow-500"
-                              : "bg-red-500"
-                          }`}
-                        />
-                        {Math.round(entry.accuracy * 100)}%
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 font-mono text-muted">
-                      {formatTime(entry.timeSec)}
-                    </td>
-                    <td className="px-6 py-4 font-mono text-muted">
-                      {entry.turns}
-                    </td>
-                    <td className="px-6 py-4 font-mono text-muted">
-                      {entry.tokens.toLocaleString()}
-                    </td>
-                    <td className="px-6 py-4 font-mono text-muted">
-                      ${entry.cost.toFixed(4)}
+                {loading ? (
+                  <tr>
+                    <td colSpan={8} className="px-6 py-12 text-center text-muted">
+                      Loading…
                     </td>
                   </tr>
-                ))}
+                ) : sortedEntries.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="px-6 py-12 text-center text-muted">
+                      No entries yet. Be the first to submit a score!
+                    </td>
+                  </tr>
+                ) : (
+                  sortedEntries.map((entry, index) => (
+                    <tr
+                      key={entry.id || index}
+                      className="border-b border-border last:border-0 hover:bg-muted/5 transition-colors"
+                    >
+                      <td className="px-6 py-4 text-muted font-mono">{index + 1}</td>
+                      <td className="px-6 py-4 font-medium">{entry.username}</td>
+                      
+                      {/* Metrics */}
+                      <td className="px-6 py-4 font-mono font-bold text-accent">
+                        {entry.composite_score}
+                      </td>
+                      <td className="px-6 py-4 font-mono">
+                        <div className="flex items-center gap-2">
+                          <div
+                            className={`h-1.5 w-1.5 rounded-full ${
+                              (entry.accuracy || 0) >= 0.8
+                                ? "bg-green-500"
+                                : (entry.accuracy || 0) >= 0.5
+                                ? "bg-yellow-500"
+                                : "bg-red-500"
+                            }`}
+                          />
+                          {Math.round((entry.accuracy || 0) * 100)}%
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 font-mono text-muted">
+                        {formatTime(entry.time_seconds || 0)}
+                      </td>
+                      <td className="px-6 py-4 font-mono text-muted">
+                        {entry.total_turns}
+                      </td>
+                      <td className="px-6 py-4 font-mono text-muted">
+                        {(entry.total_tokens || 0).toLocaleString()}
+                      </td>
+                      <td className="px-6 py-4 font-mono text-muted">
+                        ${(entry.total_cost || 0).toFixed(4)}
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>

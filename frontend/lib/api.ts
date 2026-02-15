@@ -1,7 +1,6 @@
 import type {
   Challenge,
   Session,
-  PromptResponse,
   Scores,
   LeaderboardEntry,
   Agent,
@@ -42,21 +41,6 @@ export async function getChallenge(id: string): Promise<Challenge> {
 }
 
 // ---- Sessions ----
-
-export async function createSession(
-  challengeId: string,
-  model?: string,
-  username?: string
-): Promise<{ session_id: string; challenge: Challenge }> {
-  return fetchJSON("/api/sessions", {
-    method: "POST",
-    body: JSON.stringify({
-      challenge_id: challengeId,
-      model,
-      username: username || "anonymous",
-    }),
-  });
-}
 
 export async function getSession(sessionId: string): Promise<Session> {
   return fetchJSON<Session>(`/api/sessions/${sessionId}`);
@@ -119,25 +103,6 @@ export function subscribeSessionEvents(
   return abort;
 }
 
-export async function submitPrompt(
-  sessionId: string,
-  prompt: string,
-  model?: string
-): Promise<PromptResponse> {
-  return fetchJSON<PromptResponse>(`/api/sessions/${sessionId}/prompt`, {
-    method: "POST",
-    body: JSON.stringify({ prompt, model }),
-  });
-}
-
-export async function completeSession(
-  sessionId: string
-): Promise<{ session: Session; scores: Scores }> {
-  return fetchJSON(`/api/sessions/${sessionId}/complete`, {
-    method: "POST",
-  });
-}
-
 // ---- Agents ----
 
 export async function getAgents(): Promise<Agent[]> {
@@ -160,21 +125,16 @@ export async function startAgentRun(agentId: string, challengeId: string): Promi
 export async function getLeaderboard(params?: {
   limit?: number;
   category?: string;
+  challenge_id?: string;
 }): Promise<LeaderboardEntry[]> {
   const searchParams = new URLSearchParams();
   if (params?.limit) searchParams.set("limit", String(params.limit));
   if (params?.category) searchParams.set("category", params.category);
+  if (params?.challenge_id) searchParams.set("challenge_id", params.challenge_id);
   const query = searchParams.toString();
   return fetchJSON<LeaderboardEntry[]>(
     `/api/leaderboard${query ? `?${query}` : ""}`
   );
-}
-
-// ---- WebSocket ----
-
-export function createSessionWebSocket(sessionId: string): WebSocket {
-  const wsBase = API_BASE.replace(/^http/, "ws");
-  return new WebSocket(`${wsBase}/ws/session/${sessionId}`);
 }
 
 // ---- Chat ----
@@ -365,11 +325,16 @@ export async function evaluateUI(
 // ---- Score Calculation ----
 
 export interface CalculateScoreRequest {
+  challenge_id: string;
   accuracy: number;
   elapsed_sec: number;
   total_tokens: number;
   total_turns: number;
   difficulty?: string;
+  model?: string;
+  username?: string;
+  messages?: ChatMessage[];
+  total_cost?: number;
 }
 
 export async function calculateScore(
