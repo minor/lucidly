@@ -15,6 +15,8 @@ interface PromptInputProps {
   initialModel?: string;
   selectedModel?: string; // Controlled mode
   onModelChange?: (model: string) => void; // Controlled mode
+  /** When set, hide the model dropdown and always use this model (e.g. "Chat with the CRO" uses GPT only) */
+  fixedModel?: string;
 }
 
 export function PromptInput({
@@ -27,12 +29,14 @@ export function PromptInput({
   initialModel = "gpt-5.2",
   selectedModel,
   onModelChange,
+  fixedModel,
 }: PromptInputProps) {
   const [value, setValue] = useState("");
   // Use controlled model if provided, otherwise local state
   const [internalModel, setInternalModel] = useState(initialModel);
   
-  const activeModel = selectedModel !== undefined ? selectedModel : internalModel;
+  const activeModel = fixedModel ?? (selectedModel !== undefined ? selectedModel : internalModel);
+  const hideModelSelector = fixedModel != null;
   const isLoading = isStreaming !== undefined ? isStreaming : loading;
 
   const handleModelChange = (newModel: string) => {
@@ -78,30 +82,32 @@ export function PromptInput({
   return (
     <div className="relative w-full">
       <div className="flex flex-col gap-2 rounded-lg border border-input-border bg-input px-3 py-2.5 transition-colors focus-within:border-accent/50">
-        {/* Model Picker Header */}
-        <div className="flex items-center justify-between border-b border-input-border/50 pb-2">
-          <select
-            value={activeModel}
-            onChange={(e) => handleModelChange(e.target.value)}
-            disabled={isLoading || disabled}
-            className="bg-transparent text-xs font-medium text-muted hover:text-foreground focus:outline-none cursor-pointer"
-          >
-            {MODELS.map((m) => (
-              <option key={m.id} value={m.id} className="bg-popover text-popover-foreground">
-                {m.name}
-              </option>
-            ))}
-          </select>
+        {/* Model Picker Header (hidden when fixedModel is set, e.g. Chat with the CRO) */}
+        {!hideModelSelector && (
+          <div className="flex items-center justify-between border-b border-input-border/50 pb-2">
+            <select
+              value={activeModel}
+              onChange={(e) => handleModelChange(e.target.value)}
+              disabled={isLoading || disabled}
+              className="bg-transparent text-xs font-medium text-muted hover:text-foreground focus:outline-none cursor-pointer"
+            >
+              {MODELS.map((m) => (
+                <option key={m.id} value={m.id} className="bg-popover text-popover-foreground">
+                  {m.name}
+                </option>
+              ))}
+            </select>
 
-          {/* Pricing Display */}
-          <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground bg-muted/30 px-2 py-1 rounded">
-            <Info className="h-3 w-3 opacity-70" />
-            <span>
-              In: <span className="font-mono text-foreground">${MODEL_PRICING[activeModel]?.input.toFixed(2)}</span> / 
-              Out: <span className="font-mono text-foreground">${MODEL_PRICING[activeModel]?.output.toFixed(2)}</span> per 1M
-            </span>
+            {/* Pricing Display */}
+            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground bg-muted/30 px-2 py-1 rounded">
+              <Info className="h-3 w-3 opacity-70" />
+              <span>
+                In: <span className="font-mono text-foreground">${MODEL_PRICING[activeModel]?.input.toFixed(2)}</span> / 
+                Out: <span className="font-mono text-foreground">${MODEL_PRICING[activeModel]?.output.toFixed(2)}</span> per 1M
+              </span>
+            </div>
           </div>
-        </div>
+        )}
 
         <div className="flex items-end gap-2">
           <textarea

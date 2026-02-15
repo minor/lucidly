@@ -1552,6 +1552,7 @@ export default function ChallengePage() {
                 isStreaming={isStreaming}
                 selectedModel={selectedModel}
                 onModelChange={setSelectedModel}
+                fixedModel={isProductChallenge && productPart === 1 ? "gpt-5.2" : undefined}
                 placeholder={isProductChallenge && productPart === 1 ? "Ask the CRO..." : "Ask anything..."}
                 disabled={isStreaming || isExecuting || submitState === "pending" || submitState === "completed"}
               />
