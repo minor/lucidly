@@ -44,6 +44,7 @@ export function PromptInput({
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
+      e.stopPropagation();
       handleSubmit();
     }
   };

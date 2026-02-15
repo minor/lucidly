@@ -1,6 +1,7 @@
 """Lucidly backend — FastAPI application."""
 
 import asyncio
+import base64
 import json
 import logging
 import time
@@ -143,6 +144,13 @@ class PromptResponse(BaseModel):
 class AgentRunRequest(BaseModel):
     agent_id: str
     challenge_id: str
+
+
+class CalculateScoreRequest(BaseModel):
+    accuracy: float
+    elapsed_sec: float
+    total_tokens: int
+    total_turns: int
 
 
 # ---------------------------------------------------------------------------
@@ -359,6 +367,23 @@ async def finish_session(session_id: str, request: Request):
 @app.get("/api/leaderboard")
 async def leaderboard(limit: int = 50, category: str | None = None):
     return get_leaderboard(limit=limit, category=category)
+
+
+# ---------------------------------------------------------------------------
+# Score calculation endpoint (for direct score calculation without session)
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/calculate-score")
+async def calculate_score(req: CalculateScoreRequest):
+    """Calculate composite score from challenge stats."""
+    scores = compute_composite_score(
+        accuracy=req.accuracy,
+        elapsed_sec=req.elapsed_sec,
+        total_tokens=req.total_tokens,
+        total_turns=req.total_turns,
+    )
+    return scores
 
 
 # ---------------------------------------------------------------------------
@@ -850,6 +875,229 @@ async def run_tests(req: RunTestsRequest) -> RunTestsResponse:
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "model": settings.default_model}
+
+
+class EvaluateUIRequest(BaseModel):
+    challenge_id: str
+    generated_html: str
+
+
+class EvaluateUIResponse(BaseModel):
+    score: float  # 0-100
+    similarity_score: float  # 0-1
+    detailed_feedback: str | None = None
+
+
+async def capture_challenge_iframe(
+    request: Request,
+    challenge_id: str,
+    embed_url: str,
+) -> bytes:
+    """
+    Capture screenshot of the challenge reference iframe.
+    
+    Creates a simple HTML page with an iframe matching the frontend structure,
+    serves it locally, and captures the iframe content.
+    """
+    from screenshot_capture import ScreenshotCapture, ScreenshotOptions
+    import os
+    import tempfile
+    from http.server import HTTPServer, SimpleHTTPRequestHandler
+    import threading
+    import socket
+    
+    # Create reference page with iframe matching frontend structure
+    # Frontend: container h-[680px], iframe h-[900px] w-full
+    # We'll use a container that clips to 680px height to match frontend
+    reference_page_html = f'''<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"></head>
+<body style="margin: 0; padding: 0; overflow: hidden; background: white;">
+<div id="challenge-container" style="width: 100%; height: 680px; overflow: hidden; position: relative; background: white;">
+  <iframe 
+    src="{embed_url}" 
+    style="width: 100%; height: 900px; border: none; position: absolute; top: 0; left: 0;"
+    sandbox="allow-scripts allow-same-origin"
+  ></iframe>
+</div>
+</body>
+</html>'''
+    
+    # Create temporary directory and HTML file
+    temp_dir = tempfile.mkdtemp()
+    temp_html_path = os.path.join(temp_dir, "reference.html")
+    with open(temp_html_path, 'w', encoding='utf-8') as f:
+        f.write(reference_page_html)
+    
+    # Find an available port
+    def find_free_port():
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(('', 0))
+            return s.getsockname()[1]
+    
+    port = find_free_port()
+    server_url = f"http://localhost:{port}"
+    
+    # Start simple HTTP server in background
+    original_dir = os.getcwd()
+    os.chdir(temp_dir)
+    handler = SimpleHTTPRequestHandler
+    httpd = HTTPServer(('localhost', port), handler)
+    server_thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    server_thread.start()
+    
+    try:
+        options = ScreenshotOptions(width=1280, height=720, wait_timeout=8000)
+        
+        # Use capture_url_iframe to navigate to the served page and capture the iframe
+        async with ScreenshotCapture() as capture:
+            screenshot_bytes = await capture.capture_url_iframe(
+                page_url=f"{server_url}/reference.html",
+                iframe_selector="iframe",
+                container_selector="#challenge-container",  # Capture the container div (680px height) to match frontend clipping
+                options=options,
+                wait_time=5.0,  # Wait 5 seconds for iframe content to load
+            )
+        return screenshot_bytes
+    finally:
+        # Clean up: stop server and remove temp files
+        httpd.shutdown()
+        server_thread.join(timeout=2)
+        os.chdir(original_dir)
+        import shutil
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+@app.post("/api/evaluate-ui")
+async def evaluate_ui(req: EvaluateUIRequest, request: Request) -> EvaluateUIResponse:
+    """Evaluate UI challenge by comparing generated HTML with challenge reference."""
+    logger.info(f"[UI Evaluation] Received request for challenge: {req.challenge_id}")
+    logger.info(f"[UI Evaluation] Generated HTML length: {len(req.generated_html)} characters")
+    
+    challenge = get_challenge_by_id(req.challenge_id)
+    if challenge is None:
+        logger.error(f"[UI Evaluation] Challenge not found: {req.challenge_id}")
+        raise HTTPException(status_code=404, detail="Challenge not found")
+    
+    if challenge.category != "ui":
+        logger.error(f"[UI Evaluation] Challenge is not UI category: {challenge.category}")
+        raise HTTPException(status_code=400, detail="Challenge is not a UI challenge")
+    
+    logger.info(f"[UI Evaluation] Challenge found: {challenge.title}")
+    logger.info(f"[UI Evaluation] Reference type - embed_url: {challenge.embed_url}, image_url: {challenge.image_url}")
+    
+    try:
+        from evaluation.screenshot_vision_integration import (
+            capture_iframe_and_compare,
+            compare_with_challenge_reference,
+        )
+        
+        # Determine which comparison method to use based on challenge reference type
+        if challenge.embed_url:
+            logger.info(f"[UI Evaluation] Using iframe capture method with embed_url: {challenge.embed_url}")
+            logger.info("[UI Evaluation] Starting screenshot capture and comparison...")
+            logger.info("[UI Evaluation] Capturing reference: iframe with embed_url (matching challenge section)...")
+            logger.info("[UI Evaluation] Capturing generated: iframe with generated HTML (matching output section)...")
+            
+            from screenshot_capture import ScreenshotCapture, ScreenshotOptions
+            from datetime import datetime
+            import os
+            import html
+            
+            options = ScreenshotOptions(width=1280, height=720, wait_timeout=8000)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            
+            # Capture reference iframe using the new helper function
+            reference_screenshot_bytes = await capture_challenge_iframe(
+                request=request,
+                challenge_id=req.challenge_id,
+                embed_url=challenge.embed_url,
+            )
+            reference_base64 = f"data:image/png;base64,{base64.b64encode(reference_screenshot_bytes).decode('utf-8')}"
+            logger.info(f"[UI Evaluation] Reference screenshot captured ({len(reference_base64)} chars)")
+            
+            # Save reference screenshot
+            os.makedirs("screenshots", exist_ok=True)
+            ref_path = f"screenshots/reference_{timestamp}.png"
+            with open(ref_path, "wb") as f:
+                f.write(reference_screenshot_bytes)
+            logger.info(f"[Screenshot] Reference screenshot saved to: {ref_path}")
+            
+            # Capture generated HTML in an iframe (like the output section)
+            escaped_html = html.escape(req.generated_html, quote=False)
+            generated_page_html = f'''<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"></head>
+<body style="margin: 0; padding: 0; overflow: hidden;">
+<div style="width: 100%; height: 100vh; overflow: hidden; position: relative;">
+  <iframe 
+    srcdoc="{escaped_html}" 
+    style="width: 100%; height: 100vh; border: none; position: absolute; top: 0; left: 0;"
+    sandbox="allow-scripts"
+  ></iframe>
+</div>
+</body>
+</html>'''
+            
+            async with ScreenshotCapture() as capture:
+                generated_screenshot = await capture.capture_iframe_base64(
+                    generated_page_html,
+                    iframe_selector="iframe",
+                    options=options,
+                )
+                logger.info(f"[UI Evaluation] Generated screenshot captured ({len(generated_screenshot)} chars)")
+                
+                # Save generated screenshot
+                gen_path = f"screenshots/generated_{timestamp}.png"
+                if generated_screenshot.startswith("data:image"):
+                    base64_data = generated_screenshot.split(",")[1]
+                    with open(gen_path, "wb") as f:
+                        f.write(base64.b64decode(base64_data))
+                    logger.info(f"[Screenshot] Generated screenshot saved to: {gen_path}")
+            
+            # Compare using vision comparison
+            from evaluation.vision_comparison import VisionComparator
+            comparator = VisionComparator()
+            result = await comparator.compare_base64_images(
+                reference_image_base64=reference_base64,
+                generated_image_base64=generated_screenshot,
+                challenge_description=challenge.description,
+            )
+            logger.info(f"[UI Evaluation] Comparison completed. Similarity: {result.similarity_score:.2%}")
+            logger.info(f"[UI Evaluation] Comparing: Direct capture of embed_url vs Output section iframe (generated HTML)")
+        elif challenge.image_url:
+            logger.info(f"[UI Evaluation] Using image comparison method with image_url: {challenge.image_url}")
+            logger.info("[UI Evaluation] Starting screenshot capture and comparison...")
+            result = await compare_with_challenge_reference(
+                generated_html=req.generated_html,
+                challenge=challenge,
+            )
+            logger.info(f"[UI Evaluation] Image comparison completed. Similarity: {result.similarity_score:.2%}")
+        else:
+            logger.error("[UI Evaluation] Challenge has neither embed_url nor image_url")
+            raise HTTPException(
+                status_code=400,
+                detail="Challenge must have either image_url or embed_url for UI evaluation"
+            )
+        
+        # Convert similarity score (0-1) to percentage (0-100)
+        score = result.similarity_score * 100
+        logger.info(f"[UI Evaluation] Final score: {score:.1f}% (similarity: {result.similarity_score:.4f})")
+        logger.info(f"[UI Evaluation] Overall match: {result.overall_match}")
+        
+        return EvaluateUIResponse(
+            score=score,
+            similarity_score=result.similarity_score,
+            detailed_feedback=result.detailed_feedback,
+        )
+    except Exception as e:
+        logger.error(f"UI evaluation failed: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to evaluate UI: {str(e)}"
+        )
+
+
 @app.post("/api/run-code")
 async def run_code(req: RunCodeRequest):
     """Run arbitrary code in a sandbox (for data challenges)."""

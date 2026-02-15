@@ -11,11 +11,22 @@ from pathlib import Path
 from typing import Optional
 from dataclasses import dataclass
 
+def _check_playwright_available():
+    """Check if playwright is available by trying to import it."""
+    try:
+        from playwright.async_api import async_playwright, Browser, Page
+        return True, None
+    except ImportError as e:
+        return False, str(e)
+
+# Try to import at module load time
 try:
     from playwright.async_api import async_playwright, Browser, Page
     PLAYWRIGHT_AVAILABLE = True
-except ImportError:
+    PLAYWRIGHT_IMPORT_ERROR = None
+except ImportError as e:
     PLAYWRIGHT_AVAILABLE = False
+    PLAYWRIGHT_IMPORT_ERROR = str(e)
 
 
 @dataclass
@@ -32,11 +43,18 @@ class ScreenshotCapture:
     """Captures screenshots from HTML/CSS/JS code."""
     
     def __init__(self):
-        if not PLAYWRIGHT_AVAILABLE:
-            raise ImportError(
+        # Re-check at runtime in case import was cached incorrectly
+        available, error = _check_playwright_available()
+        if not available:
+            error_msg = (
                 "Playwright is required for screenshot capture. "
                 "Install it with: pip install playwright && playwright install chromium"
             )
+            if error:
+                error_msg += f"\n\nImport error: {error}"
+            raise ImportError(error_msg)
+        # Re-import at runtime to ensure it's available
+        from playwright.async_api import async_playwright, Browser, Page
         self.browser: Optional[Browser] = None
     
     async def __aenter__(self):
@@ -133,6 +151,14 @@ class ScreenshotCapture:
         
         try:
             await page.goto(url, wait_until='networkidle')
+            frames = await page.locator("iframe").all()
+            print("Total iframes found:", len(frames))
+
+            for i, frame in enumerate(frames):
+                title = await frame.get_attribute("title")
+                src = await frame.get_attribute("src")
+                print(i, "title:", title, "src:", src)
+                
             await asyncio.sleep(options.wait_timeout / 1000)
             
             screenshot_bytes = await page.screenshot(
@@ -282,12 +308,33 @@ class ScreenshotCapture:
             if iframe_element is None:
                 raise ValueError(f"Iframe with selector '{iframe_selector}' not found")
             
+            # Wait for iframe to be fully loaded
+            # For cross-origin iframes, we need to wait longer
+            await asyncio.sleep(2)  # Additional wait for iframe content to load
+            
             # For iframes with srcdoc or same-origin content, we can screenshot the element directly
             # Playwright will capture the iframe's rendered content
             try:
-                screenshot_bytes = await iframe_element.screenshot(type='png')
+                # First try to get the frame content (works for same-origin and srcdoc)
+                iframe_frame = await iframe_element.content_frame()
+                
+                if iframe_frame is not None:
+                    # Same-origin or srcdoc iframe - screenshot the frame's page directly
+                    # This captures the actual iframe content, not just the frame element
+                    # Wait for the frame to be ready
+                    try:
+                        await iframe_frame.wait_for_load_state('networkidle', timeout=10000)
+                    except:
+                        pass  # Continue even if networkidle times out
+                    screenshot_bytes = await iframe_frame.screenshot(type='png', full_page=False)
+                else:
+                    # Cross-origin iframe - we need to capture the iframe element itself
+                    # Wait a bit more for cross-origin content to render
+                    await asyncio.sleep(1)
+                    # For cross-origin iframes, screenshot the element (captures what's visible)
+                    screenshot_bytes = await iframe_element.screenshot(type='png')
             except Exception as e:
-                # If that fails, try to get the frame and screenshot its page
+                # If that fails, try alternative method
                 iframe_frame = await iframe_element.content_frame()
                 
                 if iframe_frame is None:
@@ -358,6 +405,115 @@ class ScreenshotCapture:
         screenshot_bytes = await self.capture_iframe(html_content, iframe_selector, options)
         image_base64 = base64.b64encode(screenshot_bytes).decode('utf-8')
         return f"data:image/png;base64,{image_base64}"
+    
+    async def capture_url_iframe(
+        self,
+        page_url: str,
+        iframe_selector: str = 'iframe',
+        container_selector: Optional[str] = None,
+        options: Optional[ScreenshotOptions] = None,
+        wait_time: float = 3.0,
+    ) -> bytes:
+        """
+        Capture screenshot of an iframe from a live URL.
+        
+        This is useful when you need to screenshot an iframe that's embedded in a webpage,
+        especially when the iframe loads external content (like challenge.embed_url).
+        
+        Args:
+            page_url: URL of the page containing the iframe
+            iframe_selector: CSS selector for the iframe (default: 'iframe')
+            container_selector: Optional CSS selector for the container div to screenshot
+                               instead of the iframe itself. Useful when the container
+                               has overflow/clipping (like your 680px height container).
+            options: Screenshot options
+            wait_time: Additional time to wait for iframe content to load (seconds)
+        
+        Returns:
+            PNG image bytes
+        """
+        if not self.browser:
+            await self.start()
+        
+        options = options or ScreenshotOptions()
+        
+        page = await self.browser.new_page(
+            viewport={'width': options.width, 'height': options.height},
+            device_scale_factor=options.device_scale_factor,
+        )
+        
+        try:
+            # Navigate to the page
+            await page.goto(page_url, wait_until='networkidle', timeout=30000)
+            
+            # Wait for iframe to be present
+            await page.wait_for_selector(iframe_selector, state='attached', timeout=10000)
+            
+            # Wait additional time for iframe content to load
+            # This is important for external embed URLs
+            await asyncio.sleep(wait_time)
+            
+            # Determine what to screenshot
+            if container_selector:
+                # Screenshot the container (useful for clipped/overflow containers)
+                element = await page.query_selector(container_selector)
+                if element is None:
+                    raise ValueError(f"Container with selector '{container_selector}' not found")
+                screenshot_bytes = await element.screenshot(type='png')
+            else:
+                # Screenshot the iframe element itself
+                iframe_element = await page.query_selector(iframe_selector)
+                if iframe_element is None:
+                    raise ValueError(f"Iframe with selector '{iframe_selector}' not found")
+                
+                # Try to access iframe content if same-origin
+                try:
+                    iframe_frame = await iframe_element.content_frame()
+                    
+                    if iframe_frame is not None:
+                        # Same-origin iframe - can screenshot the frame content
+                        try:
+                            await iframe_frame.wait_for_load_state('networkidle', timeout=5000)
+                        except:
+                            pass  # Continue even if timeout
+                        screenshot_bytes = await iframe_frame.screenshot(type='png', full_page=False)
+                    else:
+                        # Cross-origin iframe - screenshot the element
+                        screenshot_bytes = await iframe_element.screenshot(type='png')
+                except Exception:
+                    # Fallback: just screenshot the iframe element
+                    screenshot_bytes = await iframe_element.screenshot(type='png')
+            
+            return screenshot_bytes
+        finally:
+            await page.close()
+    
+    async def capture_url_iframe_base64(
+        self,
+        page_url: str,
+        iframe_selector: str = 'iframe',
+        container_selector: Optional[str] = None,
+        options: Optional[ScreenshotOptions] = None,
+        wait_time: float = 3.0,
+    ) -> str:
+        """
+        Capture screenshot of an iframe from a live URL and return as base64.
+        
+        Args:
+            page_url: URL of the page containing the iframe
+            iframe_selector: CSS selector for the iframe
+            container_selector: Optional CSS selector for the container div
+            options: Screenshot options
+            wait_time: Additional wait time for iframe content (seconds)
+        
+        Returns:
+            Base64 data URL
+        """
+        screenshot_bytes = await self.capture_url_iframe(
+            page_url, iframe_selector, container_selector, options, wait_time
+        )
+        image_base64 = base64.b64encode(screenshot_bytes).decode('utf-8')
+        return f"data:image/png;base64,{image_base64}"
 
 
 async def capture_ui_screenshot(
@@ -402,4 +558,3 @@ async def capture_ui_screenshot_base64(
     
     async with ScreenshotCapture() as capture:
         return await capture.capture_to_base64(html_code, options)
-

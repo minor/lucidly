@@ -9,3 +9,6 @@ node_modules
 *$py.class
 *.so
 .Python
+
+# Screenshots (saved during evaluation)
+screenshots/
