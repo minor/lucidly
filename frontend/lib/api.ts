@@ -201,12 +201,21 @@ export async function streamChat(
   onUsage?: (usage: { input_tokens: number }) => void,
   signal?: AbortSignal
 ): Promise<void> {
-  const response = await fetch(`${API_BASE}/api/chat/stream`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages, model }),
-    signal,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/api/chat/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages, model }),
+      signal,
+    });
+  } catch (err: unknown) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      onError?.("AbortError");
+      return;
+    }
+    throw err;
+  }
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: response.statusText }));
@@ -261,6 +270,14 @@ export async function streamChat(
         }
       }
     }
+  } catch (err: unknown) {
+    // AbortError is expected when the user stops the stream early
+    if (err instanceof DOMException && err.name === "AbortError") {
+      onComplete?.(fullResponse);
+      onError?.("AbortError");
+      return;
+    }
+    throw err;
   } finally {
     reader.releaseLock();
   }
@@ -383,3 +400,54 @@ export const MODELS = [
   { id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5" },
   { id: "claude-haiku-4-5", name: "Claude Haiku 4.5" },
 ];
+
+// ---- Vercel Sandbox (UI preview) ----
+
+export interface VercelSandboxInfo {
+  sandboxId: string;
+  previewUrl: string;
+}
+
+/**
+ * Create a Vercel Sandbox with an HTTP server for live UI preview.
+ * Returns the sandbox ID and a publicly accessible preview URL.
+ */
+export async function createVercelSandbox(): Promise<VercelSandboxInfo> {
+  const res = await fetch("/api/sandbox", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error || "Failed to create Vercel sandbox");
+  }
+  return res.json();
+}
+
+/**
+ * Write HTML code to a Vercel Sandbox. The sandbox's HTTP server will
+ * serve the updated HTML on the next request / iframe refresh.
+ */
+export async function updateVercelSandboxCode(
+  sandboxId: string,
+  code: string
+): Promise<void> {
+  const res = await fetch(`/api/sandbox/${sandboxId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error || "Failed to update sandbox code");
+  }
+}
+
+/**
+ * Stop and clean up a Vercel Sandbox.
+ */
+export async function stopVercelSandbox(sandboxId: string): Promise<void> {
+  await fetch(`/api/sandbox/${sandboxId}`, { method: "DELETE" }).catch(
+    () => {}
+  );
+}

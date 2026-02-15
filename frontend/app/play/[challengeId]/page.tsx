@@ -2,11 +2,12 @@
 
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { getChallenge, runTests, runCode, createSandbox, terminateSandbox, MODEL_PRICING, MODELS, calculateScore, evaluateUI } from "@/lib/api";
+import { getChallenge, runTests, runCode, createSandbox, terminateSandbox, MODEL_PRICING, MODELS, calculateScore, evaluateUI, createVercelSandbox, updateVercelSandboxCode, stopVercelSandbox } from "@/lib/api";
 import { PromptInput } from "@/components/PromptInput";
 import { ScoreBar } from "@/components/ScoreBar";
 import { SimpleMarkdown } from "@/components/SimpleMarkdown";
 import { streamChat, type ChatMessage, type TestCaseResult, type RunTestsResponse, type StreamDoneData, type RunCodeResponse } from "@/lib/api";
+import { extractPythonCode, extractRenderableUI } from "@/lib/codeExtract";
 import type { Challenge, Scores } from "@/lib/types";
 import {
   Loader2,
@@ -21,68 +22,6 @@ import {
   Trophy,
   X,
 } from "lucide-react";
-
-// ---------------------------------------------------------------------------
-// Code extraction helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Extract the best Python code block from a markdown-formatted LLM response.
- */
-function extractPythonCode(text: string): string {
-  const pattern = /```(\w*)\s*\n([\s\S]*?)```/g;
-  const blocks: { lang: string; code: string }[] = [];
-  let m: RegExpExecArray | null;
-  while ((m = pattern.exec(text)) !== null) {
-    blocks.push({ lang: m[1].toLowerCase(), code: m[2].trim() });
-  }
-  if (blocks.length === 0) return "";
-
-  const pythonBlocks = blocks.filter(
-    (b) => b.lang === "python" || b.lang === "py" || b.lang === ""
-  );
-  const candidates = pythonBlocks.length > 0 ? pythonBlocks : blocks;
-
-  const withDef = candidates.filter(
-    (b) => /\bdef\s+\w+/.test(b.code) || /\bclass\s+\w+/.test(b.code)
-  );
-
-  if (withDef.length > 0) {
-    return withDef.reduce((a, b) =>
-      a.code.length >= b.code.length ? a : b
-    ).code;
-  }
-
-  return candidates[candidates.length - 1].code;
-}
-
-/**
- * Extract all code blocks concatenated.
- */
-function extractAllCode(text: string): string {
-  const pattern = /```(?:\w+)?\s*\n([\s\S]*?)```/g;
-  const matches: string[] = [];
-  let m: RegExpExecArray | null;
-  while ((m = pattern.exec(text)) !== null) {
-    matches.push(m[1].trim());
-  }
-  return matches.length > 0 ? matches.join("\n\n") : "";
-}
-
-/**
- * Check if code looks like renderable HTML.
- */
-function isHtmlCode(code: string): boolean {
-  const trimmed = code.trim().toLowerCase();
-  return (
-    trimmed.startsWith("<!doctype html") ||
-    trimmed.startsWith("<html") ||
-    trimmed.startsWith("<head") ||
-    trimmed.startsWith("<body") ||
-    (trimmed.includes("<div") && trimmed.includes("</div>")) ||
-    (trimmed.includes("<style") && trimmed.includes("</style>"))
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Component
@@ -149,6 +88,14 @@ export default function ChallengePage() {
   const [sandboxError, setSandboxError] = useState<string | null>(null);
   const sandboxIdRef = useRef<string | null>(null);
   
+  // Vercel Sandbox state (for UI challenges)
+  const [vercelSandboxId, setVercelSandboxId] = useState<string | null>(null);
+  const [vercelPreviewUrl, setVercelPreviewUrl] = useState<string | null>(null);
+  const [vercelSandboxReady, setVercelSandboxReady] = useState(false);
+  const [vercelSandboxLoading, setVercelSandboxLoading] = useState(false);
+  const vercelSandboxIdRef = useRef<string | null>(null);
+  const [iframeKey, setIframeKey] = useState(0); // bump to force iframe reload
+
   // Abort controller
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -283,7 +230,7 @@ export default function ChallengePage() {
     }
   }, [selectedModel]);
 
-  // Sandbox lifecycle
+  // Modal Sandbox lifecycle (for Python/C++ code execution)
   useEffect(() => {
     if (!challenge) return;
     const hasFunctionTests = challenge.test_suite && challenge.test_suite.length > 0;
@@ -312,6 +259,39 @@ export default function ChallengePage() {
     };
   }, [challenge]);
 
+  // Vercel Sandbox lifecycle (for UI challenges — live preview)
+  useEffect(() => {
+    if (!challenge || challenge.category !== "ui") return;
+
+    let ignore = false;
+    setVercelSandboxLoading(true);
+
+    async function initVercelSandbox() {
+      try {
+        const { sandboxId: sbId, previewUrl } = await createVercelSandbox();
+        if (ignore) return;
+        setVercelSandboxId(sbId);
+        setVercelPreviewUrl(previewUrl);
+        setVercelSandboxReady(true);
+        vercelSandboxIdRef.current = sbId;
+      } catch (err) {
+        console.error("Failed to create Vercel sandbox:", err);
+        // Fall back to srcDoc rendering — vercelPreviewUrl stays null
+      } finally {
+        if (!ignore) setVercelSandboxLoading(false);
+      }
+    }
+    initVercelSandbox();
+
+    return () => {
+      ignore = true;
+      if (vercelSandboxIdRef.current) {
+        stopVercelSandbox(vercelSandboxIdRef.current).catch(() => {});
+        vercelSandboxIdRef.current = null;
+      }
+    };
+  }, [challenge]);
+
   useEffect(() => {
     const handleBeforeUnload = () => {
       if (sandboxIdRef.current) {
@@ -321,10 +301,31 @@ export default function ChallengePage() {
           ""
         );
       }
+      // Also clean up Vercel sandbox
+      if (vercelSandboxIdRef.current) {
+        navigator.sendBeacon(
+          `/api/sandbox/${vercelSandboxIdRef.current}`,
+          ""
+        );
+      }
     };
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, []);
+
+  // Push rendered code to Vercel Sandbox when it changes
+  useEffect(() => {
+    if (!renderedCode || !vercelSandboxId || !vercelSandboxReady) return;
+
+    updateVercelSandboxCode(vercelSandboxId, renderedCode)
+      .then(() => {
+        // Bump key to force iframe to reload with new content
+        setIframeKey((k) => k + 1);
+      })
+      .catch((err) => {
+        console.error("Failed to update sandbox code:", err);
+      });
+  }, [renderedCode, vercelSandboxId, vercelSandboxReady]);
 
   // Auto-run tests/code after streaming
   useEffect(() => {
@@ -338,9 +339,9 @@ export default function ChallengePage() {
     const hasFunctionTests = challenge?.test_suite && challenge.test_suite.length > 0;
 
     if (isUi) {
-      const code = extractAllCode(latest.content);
-      if (code && isHtmlCode(code)) {
-        setRenderedCode(code);
+      const extracted = extractRenderableUI(latest.content);
+      if (extracted) {
+        setRenderedCode(extracted.html);
       }
     }
 
@@ -500,6 +501,16 @@ export default function ChallengePage() {
     setElapsed(0);
     totalPausedTimeRef.current = 0;
     pauseStartTimeRef.current = null;
+
+    // Reset Vercel sandbox preview (write empty placeholder back)
+    if (vercelSandboxId && vercelSandboxReady) {
+      updateVercelSandboxCode(
+        vercelSandboxId,
+        '<html><body style="display:flex;align-items:center;justify-content:center;height:100vh;margin:0;font-family:system-ui;color:#94a3b8;"><p>Waiting for code...</p></body></html>'
+      ).then(() => {
+        setIframeKey((k) => k + 1);
+      }).catch(() => {});
+    }
   };
 
   const handleSubmit = async (prompt: string, model: string) => {
@@ -913,7 +924,20 @@ export default function ChallengePage() {
                   </div>
                   <div className="flex-1 min-h-0 overflow-hidden rounded-b-lg mx-2 mb-2 border border-border bg-code-bg/50">
                     {previewTab === "preview" ? (
-                      renderedCode ? (
+                      vercelSandboxLoading ? (
+                        <div className="h-full flex flex-col items-center justify-center bg-muted/20 gap-2">
+                          <Loader2 className="h-5 w-5 animate-spin text-muted" />
+                          <span className="text-xs text-muted">Spinning up sandbox…</span>
+                        </div>
+                      ) : vercelPreviewUrl ? (
+                        <iframe
+                          key={iframeKey}
+                          src={vercelPreviewUrl}
+                          className="h-full w-full border-0 bg-white"
+                          title="Rendered output (Vercel Sandbox)"
+                          sandbox="allow-scripts allow-same-origin"
+                        />
+                      ) : renderedCode ? (
                         <iframe
                           srcDoc={renderedCode}
                           className="h-full w-full border-0 bg-white"
@@ -1072,7 +1096,7 @@ export default function ChallengePage() {
         <div className="flex flex-col w-1/2 shrink-0 border-l border-border">
           <div className="border-b border-border px-6 py-3 flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-muted" />
-            <h2 className="text-sm font-medium text-foreground">Chat</h2>
+            <h2 className="text-sm font-medium text-foreground">Workspace</h2>
           </div>
 
           <div
