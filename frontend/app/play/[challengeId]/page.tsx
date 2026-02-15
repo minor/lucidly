@@ -123,6 +123,9 @@ export default function ChallengePage() {
   // UI preview state
   const [renderedCode, setRenderedCode] = useState<string>("");
   const [previewTab, setPreviewTab] = useState<"preview" | "code">("preview");
+  
+  // Reference HTML state (for html_url)
+  const [referenceHtml, setReferenceHtml] = useState<string>("");
 
   // Test results state
   const [testResults, setTestResults] = useState<RunTestsResponse | null>(null);
@@ -180,6 +183,20 @@ export default function ChallengePage() {
         if (ignore) return;
         setChallenge(challengeData);
         startTimeRef.current = Date.now();
+        
+        // Fetch HTML content if html_url exists
+        if (challengeData.html_url) {
+          try {
+            const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+            const response = await fetch(`${API_BASE}/api/challenges/${challengeId}/html`);
+            if (!ignore && response.ok) {
+              const htmlContent = await response.text();
+              setReferenceHtml(htmlContent);
+            }
+          } catch (err) {
+            console.error("Failed to fetch reference HTML:", err);
+          }
+        }
       } catch (err) {
         if (!ignore) setError((err as Error).message);
       } finally {
@@ -380,7 +397,8 @@ export default function ChallengePage() {
       setIsStreaming(false);
       if (estimatedTokens > 0 || inputCost > 0) {
         setTotalTokens((t) => t + Math.round(estimatedTokens));
-        const pricing = MODEL_PRICING["claude-3-opus-20240229"] || MODEL_PRICING["gpt-5.2"];
+        // Calculate estimated output cost dynamically
+        const pricing = MODEL_PRICING[selectedModel] || MODEL_PRICING["gpt-5.2"];
         const outputCost = (estimatedTokens * pricing.output) / 1_000_000;
         setTotalCost((c) => c + inputCost + outputCost);
         setEstimatedTokens(0);
@@ -643,7 +661,7 @@ export default function ChallengePage() {
         <div className="flex items-center gap-3">
           <button
             onClick={() => router.push("/play")}
-            className="text-muted hover:text-foreground transition-colors"
+            className="text-muted hover:text-foreground transition-colors cursor-pointer"
           >
             <ArrowLeft className="h-4 w-4" />
           </button>
@@ -730,17 +748,17 @@ export default function ChallengePage() {
                   </pre>
                 </div>
               )}
-              {challenge?.embed_url && (
+              {challenge?.html_url && referenceHtml && (
                 <div className="rounded-lg border border-border overflow-hidden bg-muted/20 mb-4 h-[680px]">
                   <iframe
-                    src={challenge.embed_url}
-                    title="Challenge reference"
+                    srcDoc={referenceHtml}
+                    title="Challenge reference (top of page only)"
                     className="w-full h-[900px] border-0 rounded-lg pointer-events-none"
                     sandbox="allow-scripts allow-same-origin"
                   />
                 </div>
               )}
-              {challenge?.image_url && !challenge?.embed_url && (
+              {challenge?.image_url && !challenge?.html_url && (
                 <div className="rounded-lg border border-border overflow-hidden bg-muted/20 mb-4">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
