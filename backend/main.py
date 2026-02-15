@@ -732,16 +732,25 @@ async def chat_stream(req: ChatRequest):
     is_grok_model = req.model is not None and req.model.startswith("grok")
     use_xai = bool(settings.xai_api_key) and is_grok_model
     
+    # Determine if we should use Perplexity Sonar API
+    is_perplexity_model = req.model is not None and (req.model.startswith("sonar") or req.model == "sonar-pro")
+    use_perplexity = bool(settings.perplexity_api_key) and is_perplexity_model
+    
     # Validate that we have at least one API key configured
-    if not use_anthropic and not use_xai and not settings.openai_api_key:
+    if not use_anthropic and not use_xai and not use_perplexity and not settings.openai_api_key:
         raise HTTPException(
             status_code=500,
-            detail="No API key configured. Please set ANTHROPIC_API_KEY, XAI_API_KEY, or OPENAI_API_KEY in your .env file."
+            detail="No API key configured. Please set ANTHROPIC_API_KEY, XAI_API_KEY, PERPLEXITY_API_KEY, or OPENAI_API_KEY in your .env file."
         )
     if use_xai and not settings.xai_api_key:
         raise HTTPException(
             status_code=500,
             detail="XAI_API_KEY is not configured. Please set it in your .env file to use Grok models."
+        )
+    if use_perplexity and not settings.perplexity_api_key:
+        raise HTTPException(
+            status_code=500,
+            detail="PERPLEXITY_API_KEY is not configured. Please set it in your .env file to use Perplexity Sonar."
         )
     
     # Use correct Anthropic model names
@@ -892,6 +901,47 @@ async def chat_stream(req: ChatRequest):
 
                 cost = (est_input_tokens * pricing["input"] + est_output_tokens * pricing["output"]) / 1_000_000
                 
+                yield f"data: {json.dumps({'type': 'done', 'content': full_response, 'input_tokens': est_input_tokens, 'output_tokens': est_output_tokens, 'cost': cost})}\n\n"
+            elif use_perplexity:
+                # Use Perplexity Sonar API (OpenAI-compatible)
+                conversation_history = []
+                current_prompt = ""
+                for msg in anthropic_messages:
+                    if msg["role"] == "user":
+                        if current_prompt:
+                            conversation_history.append({"role": "user", "content": current_prompt})
+                        current_prompt = msg["content"]
+                    elif msg["role"] == "assistant":
+                        if current_prompt:
+                            conversation_history.append({"role": "user", "content": current_prompt})
+                            current_prompt = ""
+                        conversation_history.append({"role": "assistant", "content": msg["content"]})
+                perplexity_llm = LLM(
+                    base_url=settings.perplexity_base_url,
+                    api_key=settings.perplexity_api_key,
+                    model=model,
+                    system_prompt=system_message,
+                )
+                full_response = ""
+                async for chunk in perplexity_llm.stream(
+                    current_prompt,
+                    conversation_history=conversation_history if conversation_history else None,
+                ):
+                    full_response += chunk
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
+                est_input_tokens = len(current_prompt.split()) * 2
+                est_output_tokens = len(full_response.split()) * 2
+                yield f"data: {json.dumps({'type': 'usage', 'input_tokens': est_input_tokens})}\n\n"
+                from config import MODEL_PRICING
+                pricing = MODEL_PRICING.get(model)
+                if not pricing:
+                    for key, p in MODEL_PRICING.items():
+                        if model.startswith(key):
+                            pricing = p
+                            break
+                if not pricing:
+                    pricing = {"input": 3.0, "output": 15.0}
+                cost = (est_input_tokens * pricing["input"] + est_output_tokens * pricing["output"]) / 1_000_000
                 yield f"data: {json.dumps({'type': 'done', 'content': full_response, 'input_tokens': est_input_tokens, 'output_tokens': est_output_tokens, 'cost': cost})}\n\n"
             else:
                 # Use OpenAI-compatible API (e.g., OpenRouter)
@@ -1311,7 +1361,37 @@ PROMPT_FEEDBACK_PRD_SYSTEM_PROMPT = (
 )
 
 
-def _build_prd_feedback_prompt(req: PromptFeedbackRequest) -> str:
+async def _fetch_research_insights(problem_statement: str) -> str:
+    """
+    Use Perplexity Sonar API to search the problem statement and return key research
+    insights that would strengthen a PRD. Returns empty string if Perplexity is not
+    configured or the call fails.
+    """
+    if not (problem_statement or "").strip() or not settings.perplexity_api_key:
+        return ""
+    try:
+        research_llm = LLM(
+            base_url=settings.perplexity_base_url,
+            api_key=settings.perplexity_api_key,
+            model="sonar-pro",
+            system_prompt=(
+                "You are a research assistant. Given a business problem statement, search for and summarize "
+                "5–7 key industry insights, regulatory considerations, best practices, or factual points that "
+                "would strengthen a Product Requirements Document addressing this problem. Be concise; use "
+                "bullet points. Cite only the most relevant points. Output plain text bullets, no preamble."
+            ),
+        )
+        response = await research_llm.generate(
+            f"Problem statement:\n\n{problem_statement.strip()[:4000]}",
+            temperature=0.3,
+        )
+        return (response.response_text or "").strip()
+    except Exception as e:
+        logger.warning("Perplexity research fetch failed: %s", e)
+        return ""
+
+
+def _build_prd_feedback_prompt(req: PromptFeedbackRequest, research_insights: str = "") -> str:
     """Build the analysis prompt for product/PRD challenges: grade PRD on feasibility, expertise, etc."""
     prd_text = (req.prd_content or "")[:8000]
     if len(req.prd_content or "") > 8000:
@@ -1325,6 +1405,42 @@ def _build_prd_feedback_prompt(req: PromptFeedbackRequest) -> str:
         )
     else:
         conversation_text = "(No discovery conversation provided.)"
+
+    research_section = ""
+    score_instructions = """### Summary
+(No score here — one sentence only.)
+
+### Feasibility (N)
+(One sentence. N = 0–10.)
+
+### Expertise (N)
+(One sentence. N = 0–10.)
+
+### Clarity & Actionability (N)
+(One sentence. N = 0–10.)
+
+### Alignment with Discovery (N)
+(One sentence. N = 0–10.)"""
+
+    if research_insights.strip():
+        research_section = f"""
+## Key research insights (from web search)
+The following points are relevant industry/regulatory/best-practice insights for this problem. Use them to evaluate how well the PRD incorporates research.
+
+{research_insights.strip()[:3000]}
+"""
+        score_instructions += """
+
+### Research (N)
+(One sentence. How well did the PRD incorporate the key research insights above? N = 0–10.)"""
+
+    score_instructions += """
+
+### One improvement
+(No score — one sentence.)
+"""
+    total_note = "Total score = (sum of the five dimension scores) × 100 ÷ 50, so total is out of 100." if research_insights.strip() else "Total score = (sum of the four dimension scores) × 10 ÷ 4, so total is out of 100."
+    score_instructions += f"\n{total_note} Use strict 0–10 for each dimension."
 
     return f"""Evaluate this Product Requirements Document (PRD) and the discovery conversation that preceded it.
 
@@ -1340,7 +1456,7 @@ def _build_prd_feedback_prompt(req: PromptFeedbackRequest) -> str:
 The user chatted with a stakeholder (e.g. CRO) to gather requirements before writing the PRD.
 
 {conversation_text}
-
+{research_section}
 ## Submitted PRD (Part 2)
 
 {prd_text}
@@ -1348,40 +1464,27 @@ The user chatted with a stakeholder (e.g. CRO) to gather requirements before wri
 ---
 
 Reply in **markdown**. For each dimension, give a score 0–10 in parentheses in the heading, then one sentence. Use ONLY these section headers (with score in the heading):
-
-### Summary
-(No score here — one sentence only.)
-
-### Feasibility (N)
-(One sentence. N = 0–10.)
-
-### Expertise (N)
-(One sentence. N = 0–10.)
-
-### Clarity & Actionability (N)
-(One sentence. N = 0–10.)
-
-### Alignment with Discovery (N)
-(One sentence. N = 0–10.)
-
-### One improvement
-(No score — one sentence.)
-
-Total score = (sum of the four dimension scores) × 10 ÷ 4, so total is out of 100. Use strict 0–10 for each.
+{score_instructions}
 """
 
 
 def _parse_prd_section_scores(text: str) -> tuple[list[tuple[str, int]], int]:
-    """Parse ### Dimension (N) lines; total = sum × 10 ÷ 4 (0–100)."""
-    pattern = re.compile(r"^###\s+(Feasibility|Expertise|Clarity\s*&\s*Actionability|Alignment with Discovery)\s*\((\d+)\)", re.IGNORECASE | re.MULTILINE)
+    """Parse ### Dimension (N) lines. Four dimensions: total = sum × 10 ÷ 4. Five (with Research): total = sum × 100 ÷ 50."""
+    pattern = re.compile(
+        r"^###\s+(Feasibility|Expertise|Clarity\s*&\s*Actionability|Alignment with Discovery|Research)\s*\((\d+)\)",
+        re.IGNORECASE | re.MULTILINE,
+    )
     matches = pattern.findall(text)
     scores: list[tuple[str, int]] = []
     for name, num_str in matches:
         n = min(10, max(0, int(num_str)))
         scores.append((name.strip(), n))
     total_raw = sum(s for _, s in scores)
-    # Total = (sum of four scores) × 10 ÷ 4 → 0–100
-    total_100 = round(total_raw * 10 / 4) if scores else 0
+    num_dims = len(scores)
+    if num_dims == 5:
+        total_100 = round(total_raw * 100 / 50) if scores else 0
+    else:
+        total_100 = round(total_raw * 10 / 4) if scores else 0
     total_100 = min(100, max(0, total_100))
     return scores, total_100
 
@@ -1394,7 +1497,11 @@ def _append_prd_score_block(feedback_text: str) -> str:
     lines = ["\n\n---\n\n### PRD Score: **{} / 100**\n".format(total_100)]
     for name, score in scores:
         lines.append("- {}: {}/10\n".format(name, score))
-    lines.append("\n(Sum of four dimensions × 10 ÷ 4 = total out of 100.)")
+    n = len(scores)
+    if n == 5:
+        lines.append("\n(Sum of five dimensions × 100 ÷ 50 = total out of 100.)")
+    else:
+        lines.append("\n(Sum of four dimensions × 10 ÷ 4 = total out of 100.)")
     return feedback_text + "".join(lines)
 
 
@@ -1477,12 +1584,19 @@ async def prompt_feedback(req: PromptFeedbackRequest):
 
     is_product_prd = req.challenge_category == "product" and (req.prd_content or "").strip()
 
-    analysis_prompt = _build_feedback_analysis_prompt(req)
     system_prompt = PROMPT_FEEDBACK_PRD_SYSTEM_PROMPT if is_product_prd else PROMPT_FEEDBACK_SYSTEM_PROMPT
     db_session_id = req.db_session_id
 
     async def generate():
         try:
+            # For PRD feedback, fetch key research via Perplexity and inject into prompt
+            analysis_prompt: str
+            if is_product_prd:
+                research_insights = await _fetch_research_insights(req.challenge_description or "")
+                analysis_prompt = _build_prd_feedback_prompt(req, research_insights=research_insights)
+            else:
+                analysis_prompt = _build_feedback_analysis_prompt(req)
+
             feedback_llm = LLM(
                 base_url=settings.openai_base_url,
                 api_key=settings.openai_api_key,
