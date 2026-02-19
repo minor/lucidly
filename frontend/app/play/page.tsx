@@ -38,7 +38,7 @@ export default function PlayPage() {
   }, [category, difficulty]);
 
   return (
-    <div className="mx-auto max-w-4xl px-6 py-10">
+    <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-10">
       {/* Header */}
       <div className="mb-8">
         <h1 className="font-heading text-3xl font-semibold tracking-tight">
@@ -50,14 +50,14 @@ export default function PlayPage() {
       </div>
 
       {/* Filters */}
-      <div className="mb-6 flex flex-wrap items-center gap-3">
+      <div className="mb-6 flex flex-wrap items-center gap-2 sm:gap-3">
         <Filter className="h-4 w-4 text-muted" />
-        <div className="flex gap-1">
+        <div className="flex flex-wrap gap-1">
           {CATEGORIES.map((cat) => (
             <button
               key={cat}
               onClick={() => setCategory(cat)}
-              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors cursor-pointer ${
+              className={`rounded-full px-2.5 py-1 sm:px-3 text-xs font-medium transition-colors cursor-pointer ${
                 category === cat
                   ? "bg-foreground text-background"
                   : "bg-card border border-border text-muted hover:text-foreground"
@@ -67,13 +67,13 @@ export default function PlayPage() {
             </button>
           ))}
         </div>
-        <div className="h-4 w-px bg-border" />
-        <div className="flex gap-1">
+        <div className="hidden sm:block h-4 w-px bg-border" />
+        <div className="flex flex-wrap gap-1">
           {DIFFICULTIES.map((diff) => (
             <button
               key={diff}
               onClick={() => setDifficulty(diff)}
-              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors cursor-pointer ${
+              className={`rounded-full px-2.5 py-1 sm:px-3 text-xs font-medium transition-colors cursor-pointer ${
                 difficulty === diff
                   ? "bg-foreground text-background"
                   : "bg-card border border-border text-muted hover:text-foreground"
@@ -104,7 +104,7 @@ export default function PlayPage() {
           </p>
         </div>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-3 sm:gap-4 sm:grid-cols-2">
           {challenges.map((challenge) => (
             <ChallengeCard key={challenge.id} challenge={challenge} />
           ))}

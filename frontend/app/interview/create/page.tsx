@@ -216,7 +216,7 @@ export default function CreateInterviewPage() {
   return (
     <div className="flex h-screen flex-col">
       {/* Header */}
-      <header className="flex items-center gap-3 border-b border-border px-6 py-4">
+      <header className="flex items-center gap-3 border-b border-border px-4 sm:px-6 py-3 sm:py-4">
         <button
           onClick={() =>
             step === 1
@@ -242,7 +242,7 @@ export default function CreateInterviewPage() {
       </header>
 
       {/* Step indicator */}
-      <div className="flex items-center gap-2 px-6 py-3 border-b border-border">
+      <div className="flex items-center gap-2 px-4 sm:px-6 py-3 border-b border-border">
         {[1, 2, 3].map((s) => (
           <div key={s} className="flex items-center gap-2">
             <div
@@ -269,7 +269,7 @@ export default function CreateInterviewPage() {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-2xl px-6 py-8">
+          <div className="mx-auto max-w-2xl px-4 py-6 sm:px-6 sm:py-8">
           {/* ================= STEP 1 ================= */}
           {step === 1 && (
             <div className="space-y-6">
@@ -295,7 +295,7 @@ export default function CreateInterviewPage() {
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium mb-1.5">
                       Company Name
@@ -448,7 +448,7 @@ export default function CreateInterviewPage() {
                     <label className="block text-sm font-medium mb-1.5">
                       Category *
                     </label>
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2">
                       {(
                         ["coding", "frontend", "system_design"] as const
                       ).map((cat) => {

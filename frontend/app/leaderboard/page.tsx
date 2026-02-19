@@ -1,9 +1,7 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useMemo, useEffect } from "react"
 import { 
-  ArrowLeft, 
   ArrowUpDown, 
   ArrowUp, 
   ArrowDown,
@@ -25,7 +23,6 @@ type SortKey = "composite_score" | "accuracy" | "time_seconds" | "total_turns" |
 type SortDirection = "asc" | "desc";
 
 export default function LeaderboardPage() {
-  const router = useRouter();
   const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [selectedChallengeId, setSelectedChallengeId] = useState("");
   const [entries, setEntries] = useState<ApiLeaderboardEntry[]>([]);
@@ -111,13 +108,7 @@ export default function LeaderboardPage() {
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
       {/* Header */}
-      <header className="flex items-center gap-4 border-b border-border px-8 py-4">
-        <button
-          onClick={() => router.push("/")}
-          className="text-muted hover:text-foreground transition-colors p-2 rounded-full hover:bg-muted/10 cursor-pointer"
-        >
-          <ArrowLeft className="h-5 w-5" />
-        </button>
+      <header className="flex items-center justify-center px-4 sm:px-8 py-4 sm:py-5">
         <div className="flex items-center gap-2">
           <Trophy className="h-6 w-6 text-accent" />
           <h1 className="text-xl font-bold tracking-tight">Leaderboard</h1>
@@ -125,10 +116,10 @@ export default function LeaderboardPage() {
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-auto p-8">
+      <main className="flex-1 overflow-auto p-4 sm:p-8">
         <div className="mx-auto max-w-5xl">
           {/* Controls */}
-          <div className="mb-8 flex items-center justify-between">
+          <div className="mb-6 sm:mb-8">
             <div className="flex flex-col gap-2">
               <label htmlFor="challenge-select" className="text-sm font-medium text-muted">
                 Select Challenge
@@ -137,7 +128,7 @@ export default function LeaderboardPage() {
                 id="challenge-select"
                 value={selectedChallengeId}
                 onChange={(e) => setSelectedChallengeId(e.target.value)}
-                className="h-10 w-[300px] rounded-lg border border-border bg-card px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+                className="h-10 w-full sm:w-[300px] rounded-lg border border-border bg-card px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
               >
                 {challenges.map((c) => (
                   <option key={c.id} value={c.id}>
@@ -153,8 +144,8 @@ export default function LeaderboardPage() {
             <table className="w-full text-left text-sm whitespace-nowrap">
               <thead className="sticky top-0 z-10">
                 <tr className="border-b border-border bg-card">
-                  <th className="px-6 py-4 font-medium text-muted w-16">#</th>
-                  <th className="px-6 py-4 font-medium text-muted w-1/4">Name</th>
+                  <th className="px-3 sm:px-6 py-3 sm:py-4 font-medium text-muted w-10 sm:w-16">#</th>
+                  <th className="px-3 sm:px-6 py-3 sm:py-4 font-medium text-muted">Name</th>
                   
                   {/* Sortable Headers */}
                   {[
@@ -167,7 +158,7 @@ export default function LeaderboardPage() {
                   ].map(({ key, label, icon: Icon }) => (
                     <th
                       key={key}
-                      className="px-6 py-4 font-medium text-muted cursor-pointer hover:bg-muted/10 transition-colors select-none"
+                      className="px-3 sm:px-6 py-3 sm:py-4 font-medium text-muted cursor-pointer hover:bg-muted/10 transition-colors select-none"
                       onClick={() => handleSort(key as SortKey)}
                     >
                       <div className="flex items-center gap-2">
@@ -198,14 +189,14 @@ export default function LeaderboardPage() {
                       key={entry.id || index}
                       className="border-b border-border last:border-0 hover:bg-muted/5 transition-colors"
                     >
-                      <td className="px-6 py-4 text-muted font-mono">{index + 1}</td>
-                      <td className="px-6 py-4 font-medium">{entry.username}</td>
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-muted font-mono">{index + 1}</td>
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 font-medium">{entry.username}</td>
                       
                       {/* Metrics */}
-                      <td className="px-6 py-4 font-mono font-bold text-accent">
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 font-mono font-bold text-accent">
                         {entry.composite_score}
                       </td>
-                      <td className="px-6 py-4 font-mono">
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 font-mono">
                         <div className="flex items-center gap-2">
                           <div
                             className={`h-1.5 w-1.5 rounded-full ${
@@ -219,16 +210,16 @@ export default function LeaderboardPage() {
                           {Math.round((entry.accuracy || 0) * 100)}%
                         </div>
                       </td>
-                      <td className="px-6 py-4 font-mono text-muted">
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 font-mono text-muted">
                         {formatTime(entry.time_seconds || 0)}
                       </td>
-                      <td className="px-6 py-4 font-mono text-muted">
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 font-mono text-muted">
                         {entry.total_turns}
                       </td>
-                      <td className="px-6 py-4 font-mono text-muted">
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 font-mono text-muted">
                         {(entry.total_tokens || 0).toLocaleString()}
                       </td>
-                      <td className="px-6 py-4 font-mono text-muted">
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 font-mono text-muted">
                         ${(entry.total_cost || 0).toFixed(4)}
                       </td>
                     </tr>

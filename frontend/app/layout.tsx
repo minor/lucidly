@@ -3,9 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { Lora, DM_Sans } from "next/font/google";
 import "./globals.css";
 import { Auth0Provider } from "@/components/Auth0Provider";
-import { Sidebar } from "@/components/Sidebar";
-import { TopAuthBar } from "@/components/TopAuthBar";
-import { UsernameGate } from "@/components/UsernameGate";
+import { LayoutShell } from "@/components/LayoutShell";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -50,14 +48,7 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} ${lora.variable} ${dmSans.variable} antialiased`}
       >
         <Auth0Provider>
-          <div className="flex h-screen overflow-hidden">
-            <Sidebar />
-            <main className="flex-1 overflow-y-auto relative">
-              <TopAuthBar />
-              <UsernameGate />
-              {children}
-            </main>
-          </div>
+          <LayoutShell>{children}</LayoutShell>
         </Auth0Provider>
       </body>
     </html>

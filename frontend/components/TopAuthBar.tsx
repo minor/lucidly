@@ -17,7 +17,7 @@ export function TopAuthBar() {
   if (isAuthenticated) return null;
 
   return (
-    <div className="fixed top-4 right-5 z-50 flex items-center gap-2">
+    <div className="fixed top-[11px] sm:top-4 right-5 z-50 flex items-center gap-2">
       <button
         type="button"
         onClick={() => loginWithRedirect()}
