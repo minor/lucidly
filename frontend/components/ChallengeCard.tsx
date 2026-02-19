@@ -51,7 +51,7 @@ export function ChallengeCard({ challenge }: ChallengeCardProps) {
       <h3 className="text-base font-semibold text-foreground group-hover:text-accent transition-colors">
         {challenge.title}
       </h3>
-      <p className="mt-1.5 text-sm text-muted leading-relaxed line-clamp-2">
+      <p className="mt-1.5 text-sm text-muted leading-relaxed overflow-y-auto max-h-16 scrollbar-thin">
         {challenge.description}
       </p>
     </Link>

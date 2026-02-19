@@ -39,7 +39,12 @@ const DEFAULT_WIDTH = 240; // 60 * 4 = 240px (w-60)
 const COLLAPSED_WIDTH = 64;
 
 
-export function Sidebar() {
+interface SidebarProps {
+  onNavigate?: () => void;
+  isMobile?: boolean;
+}
+
+export function Sidebar({ onNavigate, isMobile }: SidebarProps = {}) {
   const pathname = usePathname();
   const router = useRouter();
   const { isAuthenticated, user, logout } = useAuth0();
@@ -146,13 +151,13 @@ export function Sidebar() {
   const collapsed = isCollapsed || width <= COLLAPSED_WIDTH;
 
   return (
-    <div className="relative h-screen" style={{ width: `${width}px` }}>
+    <div className={isMobile ? "w-full h-full" : "relative h-screen"} style={isMobile ? undefined : { width: `${width}px` }}>
       <aside
         ref={sidebarRef}
         className={`flex flex-col h-full border-r border-border bg-sidebar ${
           !isResizing ? "transition-all duration-200" : ""
         }`}
-        style={{ width: `${width}px` }}
+        style={isMobile ? undefined : { width: `${width}px` }}
       >
       {/* Brand — same height expanded/collapsed; logo centered when collapsed */}
         <div
@@ -175,15 +180,17 @@ export function Sidebar() {
               </span>
             )}
           </Link>
-          <button
-            onClick={toggleCollapse}
-            className={`text-muted hover:text-foreground transition-colors shrink-0 cursor-pointer ${collapsed ? "absolute right-2 top-1/2 -translate-y-1/2" : "ml-auto mr-0"}`}
-            aria-label={collapsed ? "Expand sidebar" : "Toggle sidebar"}
-          >
-            <ChevronDown
-              className={`h-4 w-4 ${collapsed ? "-rotate-90" : ""}`}
-            />
-          </button>
+          {!isMobile && (
+            <button
+              onClick={toggleCollapse}
+              className={`text-muted hover:text-foreground transition-colors shrink-0 cursor-pointer ${collapsed ? "absolute right-2 top-1/2 -translate-y-1/2" : "ml-auto mr-0"}`}
+              aria-label={collapsed ? "Expand sidebar" : "Toggle sidebar"}
+            >
+              <ChevronDown
+                className={`h-4 w-4 ${collapsed ? "-rotate-90" : ""}`}
+              />
+            </button>
+          )}
         </div>
 
       {/* Mode selector — same row styling as nav, visible when collapsed (icon only) */}
@@ -228,7 +235,10 @@ export function Sidebar() {
                           key={mode.id}
                           onClick={() => {
                             setModeOpen(false);
-                            if (!isActive) router.push(mode.href);
+                            if (!isActive) {
+                              router.push(mode.href);
+                              onNavigate?.();
+                            }
                           }}
                           className={`flex items-center gap-2 w-full px-3 py-2.5 text-sm transition-colors cursor-pointer ${
                             isActive
@@ -255,7 +265,10 @@ export function Sidebar() {
                       key={mode.id}
                       onClick={() => {
                         setModeOpen(false);
-                        if (!isActive) router.push(mode.href);
+                        if (!isActive) {
+                          router.push(mode.href);
+                          onNavigate?.();
+                        }
                       }}
                       className={`flex items-center gap-2 w-full px-3 py-2.5 text-sm transition-colors cursor-pointer ${
                         isActive
@@ -287,6 +300,7 @@ export function Sidebar() {
                 <Link
                   key={item.href}
                   href={item.href}
+                  onClick={onNavigate}
                   className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors min-w-0 ${
                     isActive
                       ? "bg-accent-bg text-foreground font-medium"
@@ -342,16 +356,18 @@ export function Sidebar() {
         </div>
       )}
       </aside>
-      {/* Resize handle */}
-      <div
-        onMouseDown={handleMouseDown}
-        className={`absolute right-0 top-0 bottom-0 w-1 cursor-col-resize transition-all ${
-          isResizing ? "bg-accent w-1" : "bg-transparent hover:bg-accent/40"
-        }`}
-        style={{ zIndex: 10 }}
-        aria-label="Resize sidebar"
-        title="Drag to resize"
-      />
+      {/* Resize handle — desktop only */}
+      {!isMobile && (
+        <div
+          onMouseDown={handleMouseDown}
+          className={`absolute right-0 top-0 bottom-0 w-1 cursor-col-resize transition-all ${
+            isResizing ? "bg-accent w-1" : "bg-transparent hover:bg-accent/40"
+          }`}
+          style={{ zIndex: 10 }}
+          aria-label="Resize sidebar"
+          title="Drag to resize"
+        />
+      )}
     </div>
   );
 }
