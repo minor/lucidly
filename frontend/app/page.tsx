@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { Trophy, ArrowRight, Code, Layout, Bug, FileText, ClipboardList } from "lucide-react";
+import { ArrowRight, Code, Layout, Bug, FileText, ClipboardList } from "lucide-react";
 
 const CATEGORIES = [
   { label: "Function", icon: Code, count: 1 },
@@ -17,26 +17,19 @@ export default function Home() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center px-4 relative">
       {/* Header */}
-      <header className="absolute top-0 left-0 right-0 flex items-center justify-between px-6 py-5">
+      <header className="absolute top-0 left-0 right-0 flex items-center justify-center px-6 py-5">
         <div className="flex items-center gap-2">
           <Image
             src="/logo.svg"
-            alt="NoShot"
-            width={28}
-            height={28}
-            className="h-7 w-7"
+            alt="No Shot"
+            width={80}
+            height={80}
+            className="h-20 w-20"
           />
-          <span className="font-heading text-lg font-semibold tracking-tight">
-            NoShot
+          <span className="font-heading text-4xl font-semibold tracking-tight sm:text-5xl">
+            No Shot
           </span>
         </div>
-        <button
-          onClick={() => router.push("/leaderboard")}
-          className="flex items-center gap-2 text-sm font-medium text-muted hover:text-foreground transition-colors cursor-pointer"
-        >
-          <Trophy className="h-4 w-4" />
-          Leaderboard
-        </button>
       </header>
 
       {/* Hero — centered, understated */}

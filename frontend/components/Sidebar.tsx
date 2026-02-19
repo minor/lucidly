@@ -51,6 +51,7 @@ export function Sidebar() {
   const [logoutOpen, setLogoutOpen] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
   const userBlockRef = useRef<HTMLDivElement>(null);
+  const modeBlockRef = useRef<HTMLDivElement>(null);
   const startXRef = useRef<number>(0);
   const startWidthRef = useRef<number>(0);
 
@@ -119,6 +120,17 @@ export function Sidebar() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [logoutOpen]);
 
+  useEffect(() => {
+    if (!modeOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (modeBlockRef.current && !modeBlockRef.current.contains(e.target as Node)) {
+        setModeOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [modeOpen]);
+
   const toggleCollapse = () => {
     if (isCollapsed) {
       // Expand to default width or last saved width
@@ -142,50 +154,99 @@ export function Sidebar() {
         }`}
         style={{ width: `${width}px` }}
       >
-      {/* Brand */}
-      <div className="flex items-center gap-2 border-b border-border px-4 py-4 shrink-0">
-        <Link href="/" className="flex items-center gap-2 min-w-0">
-          <Image
-            src="/logo.svg"
-            alt="NoShot"
-            width={28}
-            height={28}
-            className="h-7 w-7 shrink-0"
-          />
-          {!collapsed && (
-            <span className="font-heading text-lg font-semibold tracking-tight whitespace-nowrap overflow-hidden">
-              NoShot
-            </span>
-          )}
-        </Link>
-        <button
-          onClick={toggleCollapse}
-          className="ml-auto text-muted hover:text-foreground transition-colors shrink-0 cursor-pointer"
-          aria-label="Toggle sidebar"
+      {/* Brand — same height expanded/collapsed; logo centered when collapsed */}
+        <div
+          className={`flex items-center border-b border-border shrink-0 relative min-h-[60px] py-4 ${collapsed ? "justify-center pl-0 pr-2" : "gap-1 pl-4 pr-2"}`}
         >
-          <ChevronDown
-            className={`h-4 w-4 transition-transform ${collapsed ? "-rotate-90" : ""}`}
-          />
-        </button>
-      </div>
+          <Link
+            href="/"
+            className={`flex items-center min-w-0 ${collapsed ? "flex-none justify-center" : "gap-1.5"}`}
+          >
+            <Image
+              src="/logo.svg"
+              alt="No Shot"
+              width={28}
+              height={28}
+              className="h-7 w-7 shrink-0"
+            />
+            {!collapsed && (
+              <span className="font-heading text-lg font-semibold tracking-tight whitespace-nowrap overflow-hidden">
+                No Shot
+              </span>
+            )}
+          </Link>
+          <button
+            onClick={toggleCollapse}
+            className={`text-muted hover:text-foreground transition-colors shrink-0 cursor-pointer ${collapsed ? "absolute right-2 top-1/2 -translate-y-1/2" : "ml-auto mr-0"}`}
+            aria-label={collapsed ? "Expand sidebar" : "Toggle sidebar"}
+          >
+            <ChevronDown
+              className={`h-4 w-4 ${collapsed ? "-rotate-90" : ""}`}
+            />
+          </button>
+        </div>
 
-      {/* Mode selector */}
-      {!collapsed && (() => {
+      {/* Mode selector — same row styling as nav, visible when collapsed (icon only) */}
+      {(() => {
         const isInterviewMode = pathname.startsWith("/interview");
         const currentMode = isInterviewMode ? MODES[1] : MODES[0];
         const CurrentIcon = currentMode.icon;
         return (
-          <div className="px-4 py-3 border-b border-border shrink-0 relative">
-            <button
-              onClick={() => setModeOpen(!modeOpen)}
-              className="flex items-center gap-1.5 text-sm font-medium text-muted hover:text-foreground transition-colors w-full min-w-0 cursor-pointer"
-            >
-              <CurrentIcon className="h-3.5 w-3.5 shrink-0" />
-              <span className="whitespace-nowrap overflow-hidden min-w-0 flex-1 text-left">{currentMode.label}</span>
-              <ChevronDown className={`h-3 w-3 shrink-0 transition-transform ${modeOpen ? "rotate-180" : ""}`} />
-            </button>
-            {modeOpen && (
-              <div className="absolute left-3 right-3 top-full mt-1 rounded-lg border border-border bg-card shadow-lg z-20 overflow-hidden">
+          <div
+            ref={modeBlockRef}
+            className="pl-2 pr-2 py-3 border-b border-border shrink-0 relative"
+          >
+            {collapsed ? (
+              <button
+                onClick={() => setModeOpen(!modeOpen)}
+                className="flex items-center gap-3 rounded-lg px-3 py-2 min-h-[40px] text-muted hover:text-foreground transition-colors cursor-pointer w-full min-w-0"
+                title={currentMode.label}
+              >
+                <CurrentIcon className="h-4 w-4 shrink-0" />
+              </button>
+            ) : (
+              <>
+                <button
+                  onClick={() => setModeOpen(!modeOpen)}
+                  className="flex items-center gap-3 rounded-lg px-3 py-2 min-h-[40px] text-sm font-medium text-muted hover:text-foreground transition-colors w-full min-w-0 cursor-pointer"
+                >
+                  <CurrentIcon className="h-4 w-4 shrink-0" />
+                  <span className="whitespace-nowrap overflow-hidden min-w-0 flex-1 text-left">
+                    {currentMode.label}
+                  </span>
+                  <ChevronDown
+                    className={`h-3 w-3 shrink-0 transition-transform ${modeOpen ? "rotate-180" : ""}`}
+                  />
+                </button>
+                {modeOpen && (
+                  <div className="absolute left-2 right-2 top-full mt-1 rounded-lg border border-border bg-card shadow-lg z-20 overflow-hidden">
+                    {MODES.map((mode) => {
+                      const Icon = mode.icon;
+                      const isActive = mode.id === currentMode.id;
+                      return (
+                        <button
+                          key={mode.id}
+                          onClick={() => {
+                            setModeOpen(false);
+                            if (!isActive) router.push(mode.href);
+                          }}
+                          className={`flex items-center gap-2 w-full px-3 py-2.5 text-sm transition-colors cursor-pointer ${
+                            isActive
+                              ? "bg-accent/10 text-foreground font-medium"
+                              : "text-muted hover:text-foreground hover:bg-muted/10"
+                          }`}
+                        >
+                          <Icon className="h-3.5 w-3.5 shrink-0" />
+                          {mode.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            )}
+            {collapsed && modeOpen && (
+              <div className="absolute left-full top-0 ml-1 rounded-lg border border-border bg-card shadow-lg z-20 overflow-hidden min-w-[180px]">
                 {MODES.map((mode) => {
                   const Icon = mode.icon;
                   const isActive = mode.id === currentMode.id;
