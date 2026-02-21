@@ -3,10 +3,15 @@
 import asyncio
 import json
 import logging
+import os
 import re
 import time
 import httpx
 import traceback
+
+import sentry_sdk
+from sentry_sdk.integrations.fastapi import FastApiIntegration
+from sentry_sdk.integrations.starlette import StarletteIntegration
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 
@@ -25,6 +30,19 @@ from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel
 
 from config import settings
+
+if settings.sentry_dsn:
+    sentry_sdk.init(
+        dsn=settings.sentry_dsn,
+        integrations=[
+            StarletteIntegration(transaction_style="endpoint"),
+            FastApiIntegration(transaction_style="endpoint"),
+        ],
+        traces_sample_rate=0.1,
+        environment=settings.environment,
+        debug=True,
+    )
+
 from llm import LLM
 from challenges import get_all_challenges, get_challenge_by_id
 from agents import get_all_agents, get_agent_by_id
