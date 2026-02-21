@@ -149,39 +149,41 @@ export default function CandidateInterviewPage() {
   }, [messages, currentStreamingMessage]);
 
   // ---- Vercel Sandbox for frontend challenges ----
-  useEffect(() => {
-    if (!activeChallenge || activeChallenge.category !== "frontend") return;
+  // DISABLED: using plain srcDoc HTML rendering instead. Re-enable these
+  // useEffects to restore Vercel Sandbox.
+  // useEffect(() => {
+  //   if (!activeChallenge || activeChallenge.category !== "frontend") return;
+  //
+  //   let ignore = false;
+  //   async function initSandbox() {
+  //     try {
+  //       const { sandboxId, previewUrl } = await createVercelSandbox();
+  //       if (ignore) return;
+  //       setVercelSandboxId(sandboxId);
+  //       setVercelPreviewUrl(previewUrl);
+  //       setVercelSandboxReady(true);
+  //       vercelSandboxIdRef.current = sandboxId;
+  //     } catch {
+  //       // fallback to srcDoc
+  //     }
+  //   }
+  //   initSandbox();
+  //   return () => {
+  //     ignore = true;
+  //     if (vercelSandboxIdRef.current) {
+  //       stopVercelSandbox(vercelSandboxIdRef.current).catch(() => {});
+  //       vercelSandboxIdRef.current = null;
+  //     }
+  //   };
+  // }, [activeChallenge]);
 
-    let ignore = false;
-    async function initSandbox() {
-      try {
-        const { sandboxId, previewUrl } = await createVercelSandbox();
-        if (ignore) return;
-        setVercelSandboxId(sandboxId);
-        setVercelPreviewUrl(previewUrl);
-        setVercelSandboxReady(true);
-        vercelSandboxIdRef.current = sandboxId;
-      } catch {
-        // fallback to srcDoc
-      }
-    }
-    initSandbox();
-    return () => {
-      ignore = true;
-      if (vercelSandboxIdRef.current) {
-        stopVercelSandbox(vercelSandboxIdRef.current).catch(() => {});
-        vercelSandboxIdRef.current = null;
-      }
-    };
-  }, [activeChallenge]);
-
-  // Push code to sandbox
-  useEffect(() => {
-    if (!renderedCode || !vercelSandboxId || !vercelSandboxReady) return;
-    updateVercelSandboxCode(vercelSandboxId, renderedCode)
-      .then(() => setIframeKey((k) => k + 1))
-      .catch(() => {});
-  }, [renderedCode, vercelSandboxId, vercelSandboxReady]);
+  // Push code to sandbox (disabled — srcDoc rendering handles updates)
+  // useEffect(() => {
+  //   if (!renderedCode || !vercelSandboxId || !vercelSandboxReady) return;
+  //   updateVercelSandboxCode(vercelSandboxId, renderedCode)
+  //     .then(() => setIframeKey((k) => k + 1))
+  //     .catch(() => {});
+  // }, [renderedCode, vercelSandboxId, vercelSandboxReady]);
 
   // ---- Extract code from latest assistant message ----
   useEffect(() => {
@@ -674,15 +676,7 @@ export default function CandidateInterviewPage() {
                     </div>
                     <div className="flex-1 min-h-0 overflow-hidden rounded-b-lg mx-2 mb-2 border border-border bg-code-bg/50">
                       {previewTab === "preview" ? (
-                        vercelPreviewUrl ? (
-                          <iframe
-                            key={iframeKey}
-                            src={vercelPreviewUrl}
-                            className="h-full w-full border-0 bg-white"
-                            title="Preview"
-                            sandbox="allow-scripts allow-same-origin"
-                          />
-                        ) : renderedCode ? (
+                        renderedCode ? (
                           <iframe
                             srcDoc={renderedCode}
                             className="h-full w-full border-0 bg-white"

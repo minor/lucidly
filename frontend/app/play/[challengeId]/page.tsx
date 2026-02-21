@@ -348,37 +348,38 @@ export default function ChallengePage() {
   }, [challenge]);
 
   // Vercel Sandbox lifecycle (for UI challenges — live preview)
-  useEffect(() => {
-    if (!challenge || challenge.category !== "ui") return;
-
-    let ignore = false;
-    setVercelSandboxLoading(true);
-
-    async function initVercelSandbox() {
-      try {
-        const { sandboxId: sbId, previewUrl } = await createVercelSandbox();
-        if (ignore) return;
-        setVercelSandboxId(sbId);
-        setVercelPreviewUrl(previewUrl);
-        setVercelSandboxReady(true);
-        vercelSandboxIdRef.current = sbId;
-      } catch (err) {
-        console.error("Failed to create Vercel sandbox:", err);
-        // Fall back to srcDoc rendering — vercelPreviewUrl stays null
-      } finally {
-        if (!ignore) setVercelSandboxLoading(false);
-      }
-    }
-    initVercelSandbox();
-
-    return () => {
-      ignore = true;
-      if (vercelSandboxIdRef.current) {
-        stopVercelSandbox(vercelSandboxIdRef.current).catch(() => {});
-        vercelSandboxIdRef.current = null;
-      }
-    };
-  }, [challenge]);
+  // DISABLED: using plain srcDoc HTML rendering instead. Re-enable this
+  // useEffect (and the code-push effect below) to restore Vercel Sandbox.
+  // useEffect(() => {
+  //   if (!challenge || challenge.category !== "ui") return;
+  //
+  //   let ignore = false;
+  //   setVercelSandboxLoading(true);
+  //
+  //   async function initVercelSandbox() {
+  //     try {
+  //       const { sandboxId: sbId, previewUrl } = await createVercelSandbox();
+  //       if (ignore) return;
+  //       setVercelSandboxId(sbId);
+  //       setVercelPreviewUrl(previewUrl);
+  //       setVercelSandboxReady(true);
+  //       vercelSandboxIdRef.current = sbId;
+  //     } catch (err) {
+  //       console.error("Failed to create Vercel sandbox:", err);
+  //     } finally {
+  //       if (!ignore) setVercelSandboxLoading(false);
+  //     }
+  //   }
+  //   initVercelSandbox();
+  //
+  //   return () => {
+  //     ignore = true;
+  //     if (vercelSandboxIdRef.current) {
+  //       stopVercelSandbox(vercelSandboxIdRef.current).catch(() => {});
+  //       vercelSandboxIdRef.current = null;
+  //     }
+  //   };
+  // }, [challenge]);
 
   useEffect(() => {
     const handleBeforeUnload = () => {
@@ -389,31 +390,31 @@ export default function ChallengePage() {
           ""
         );
       }
-      // Also clean up Vercel sandbox
-      if (vercelSandboxIdRef.current) {
-        navigator.sendBeacon(
-          `/api/sandbox/${vercelSandboxIdRef.current}`,
-          ""
-        );
-      }
+      // Vercel sandbox cleanup (disabled — not in use)
+      // if (vercelSandboxIdRef.current) {
+      //   navigator.sendBeacon(
+      //     `/api/sandbox/${vercelSandboxIdRef.current}`,
+      //     ""
+      //   );
+      // }
     };
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, []);
 
   // Push rendered code to Vercel Sandbox when it changes
-  useEffect(() => {
-    if (!renderedCode || !vercelSandboxId || !vercelSandboxReady) return;
-
-    updateVercelSandboxCode(vercelSandboxId, renderedCode)
-      .then(() => {
-        // Bump key to force iframe to reload with new content
-        setIframeKey((k) => k + 1);
-      })
-      .catch((err) => {
-        console.error("Failed to update sandbox code:", err);
-      });
-  }, [renderedCode, vercelSandboxId, vercelSandboxReady]);
+  // DISABLED: Vercel Sandbox not in use — srcDoc rendering handles updates.
+  // useEffect(() => {
+  //   if (!renderedCode || !vercelSandboxId || !vercelSandboxReady) return;
+  //
+  //   updateVercelSandboxCode(vercelSandboxId, renderedCode)
+  //     .then(() => {
+  //       setIframeKey((k) => k + 1);
+  //     })
+  //     .catch((err) => {
+  //       console.error("Failed to update sandbox code:", err);
+  //     });
+  // }, [renderedCode, vercelSandboxId, vercelSandboxReady]);
 
   // Auto-run tests/code after streaming
   useEffect(() => {
@@ -623,15 +624,15 @@ export default function ChallengePage() {
     setWorkspaceTab("chat");
     if (feedbackAbortRef.current) feedbackAbortRef.current.abort();
 
-    // Reset Vercel sandbox preview (write empty placeholder back)
-    if (vercelSandboxId && vercelSandboxReady) {
-      updateVercelSandboxCode(
-        vercelSandboxId,
-        '<html><body style="display:flex;align-items:center;justify-content:center;height:100vh;margin:0;font-family:system-ui;color:#94a3b8;"><p>Waiting for code...</p></body></html>'
-      ).then(() => {
-        setIframeKey((k) => k + 1);
-      }).catch(() => {});
-    }
+    // Vercel sandbox reset (disabled — not in use)
+    // if (vercelSandboxId && vercelSandboxReady) {
+    //   updateVercelSandboxCode(
+    //     vercelSandboxId,
+    //     '<html><body style="display:flex;align-items:center;justify-content:center;height:100vh;margin:0;font-family:system-ui;color:#94a3b8;"><p>Waiting for code...</p></body></html>'
+    //   ).then(() => {
+    //     setIframeKey((k) => k + 1);
+    //   }).catch(() => {});
+    // }
   };
 
   const triggerPromptFeedback = async () => {
@@ -1258,20 +1259,7 @@ export default function ChallengePage() {
                   </div>
                   <div className="flex-1 min-h-0 overflow-hidden rounded-b-lg mx-2 mb-2 border border-border bg-code-bg/50">
                     {previewTab === "preview" ? (
-                      vercelSandboxLoading ? (
-                        <div className="h-full flex flex-col items-center justify-center bg-muted/20 gap-2">
-                          <Loader2 className="h-5 w-5 animate-spin text-muted" />
-                          <span className="text-xs text-muted">Spinning up sandbox…</span>
-                        </div>
-                      ) : vercelPreviewUrl ? (
-                        <iframe
-                          key={iframeKey}
-                          src={vercelPreviewUrl}
-                          className="h-full w-full border-0 bg-white"
-                          title="Rendered output (Vercel Sandbox)"
-                          sandbox="allow-scripts allow-same-origin"
-                        />
-                      ) : renderedCode ? (
+                      renderedCode ? (
                         <iframe
                           srcDoc={renderedCode}
                           className="h-full w-full border-0 bg-white"
