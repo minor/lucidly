@@ -15,25 +15,23 @@ export default function Home() {
   const router = useRouter();
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center px-4 sm:px-6 relative">
-      {/* Header */}
-      <header className="absolute top-0 left-0 right-0 flex items-center justify-center px-4 py-4 sm:px-6 sm:py-5">
-        <div className="flex items-center gap-1.5">
-          <Image
-            src="/logo.svg"
-            alt="No Shot"
-            width={120}
-            height={120}
-            className="h-16 w-16 sm:h-24 sm:w-24 md:h-32 md:w-32"
-          />
-          <span className="font-heading text-4xl font-semibold tracking-tight sm:text-6xl md:text-7xl">
-            No Shot
-          </span>
-        </div>
-      </header>
+    <div className="flex min-h-screen flex-col items-center justify-center px-4 sm:px-6 pt-16 pb-8">
+      {/* Logo + title */}
+      <div className="flex items-center gap-1.5 mb-4 sm:mb-6 fade-in-up">
+        <Image
+          src="/logo.svg"
+          alt="No Shot"
+          width={80}
+          height={80}
+          className="h-8 w-8 sm:h-12 sm:w-12"
+        />
+        <span className="font-heading text-2xl font-semibold tracking-tight sm:text-4xl">
+          No Shot
+        </span>
+      </div>
 
       {/* Hero — centered, understated */}
-      <div className="mb-8 sm:mb-10 text-center fade-in-up px-2">
+      <div className="mb-8 sm:mb-10 text-center fade-in-up px-2" style={{ animationDelay: "0.05s" }}>
         <h1 className="font-heading text-3xl font-semibold leading-tight tracking-tight sm:text-5xl md:text-6xl">
           Master the art of{" "}
           <span className="highlight-underline italic">prompting</span>
