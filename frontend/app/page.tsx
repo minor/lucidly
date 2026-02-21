@@ -2,7 +2,14 @@
 
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { ArrowRight, Code, Layout, Bug, FileText, ClipboardList } from "lucide-react";
+import {
+  ArrowRight,
+  Code,
+  Layout,
+  Bug,
+  FileText,
+  ClipboardList,
+} from "lucide-react";
 
 const CATEGORIES = [
   { label: "Function", icon: Code, count: 1 },
@@ -44,7 +51,10 @@ export default function Home() {
       </div>
 
       {/* Start button + Interview mode link */}
-      <div className="mb-10 sm:mb-14 flex flex-col items-center gap-3 fade-in-up" style={{ animationDelay: "0.1s" }}>
+      <div
+        className="mb-10 sm:mb-14 flex flex-col items-center gap-3 fade-in-up"
+        style={{ animationDelay: "0.1s" }}
+      >
         <button
           onClick={() => router.push("/play")}
           className="inline-flex items-center gap-2 rounded-lg bg-foreground px-5 py-2.5 sm:px-6 sm:py-3 text-sm font-medium text-background hover:opacity-90 transition-opacity cursor-pointer"
@@ -77,7 +87,9 @@ export default function Home() {
             >
               <Icon className="h-3.5 w-3.5" />
               <span className="font-medium">{cat.label}</span>
-              <span className="text-xs text-muted/60 font-mono">{cat.count}</span>
+              <span className="text-xs text-muted/60 font-mono">
+                {cat.count}
+              </span>
             </button>
           );
         })}
@@ -89,21 +101,32 @@ export default function Home() {
         style={{ animationDelay: "0.3s" }}
       >
         <div className="text-center">
-          <p className="text-xl sm:text-2xl font-bold font-mono text-foreground">5</p>
-          <p className="text-[10px] sm:text-xs uppercase tracking-wider">Challenges</p>
+          <p className="text-xl sm:text-2xl font-bold font-mono text-foreground">
+            5
+          </p>
+          <p className="text-[10px] sm:text-xs uppercase tracking-wider">
+            Challenges
+          </p>
         </div>
         <div className="h-8 w-px bg-border" />
         <div className="text-center">
-          <p className="text-xl sm:text-2xl font-bold font-mono text-foreground">1000</p>
-          <p className="text-[10px] sm:text-xs uppercase tracking-wider">Max ELO</p>
+          <p className="text-xl sm:text-2xl font-bold font-mono text-foreground">
+            1000
+          </p>
+          <p className="text-[10px] sm:text-xs uppercase tracking-wider">
+            Max ELO
+          </p>
         </div>
         <div className="h-8 w-px bg-border" />
         <div className="text-center">
-          <p className="text-xl sm:text-2xl font-bold font-mono text-foreground">Free</p>
-          <p className="text-[10px] sm:text-xs uppercase tracking-wider">To play</p>
+          <p className="text-xl sm:text-2xl font-bold font-mono text-foreground">
+            Free
+          </p>
+          <p className="text-[10px] sm:text-xs uppercase tracking-wider">
+            To play
+          </p>
         </div>
       </div>
-
     </div>
   );
 }

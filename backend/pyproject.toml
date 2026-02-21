@@ -16,6 +16,7 @@ dependencies = [
     "stagehand-py>=0.3.10",
     "browserbase>=0.1.0",
     "supabase",
+    "sentry-sdk[fastapi]>=2.52.0",
 ]
 
 [build-system]

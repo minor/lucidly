@@ -49,6 +49,10 @@ class Settings(BaseSettings):
         "hard": {"time": 300.0, "tokens": 1000, "turns": 8},
     }
 
+    # Sentry
+    sentry_dsn: str = ""
+    environment: str = "development"
+
     # Supabase (database)
     supabase_url: str = ""
     supabase_service_key: str = ""
