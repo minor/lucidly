@@ -81,16 +81,16 @@ export function UsernameModal({
   return (
     <div className="fixed inset-0 z-[60] flex flex-col items-center justify-center bg-background/95 backdrop-blur-sm animate-in fade-in duration-200">
       {/* Logo + brand */}
-      <div className="flex items-center gap-1.5 mb-4">
+      <div className="flex items-center gap-1.5 mb-4 -ml-6 sm:-ml-8">
         <Image
           src="/logo.svg"
-          alt="NoShot"
-          width={64}
-          height={64}
-          className="h-16 w-16"
+          alt="No Shot"
+          width={48}
+          height={48}
+          className="h-8 w-8 sm:h-12 sm:w-12"
         />
-        <span className="font-serif text-5xl font-semibold tracking-tight">
-          NoShot
+        <span className="font-heading text-2xl font-semibold tracking-tight sm:text-4xl">
+          No Shot
         </span>
       </div>
 
