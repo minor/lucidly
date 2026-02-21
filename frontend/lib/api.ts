@@ -4,6 +4,8 @@ import type {
   PromptResponse,
   Scores,
   LeaderboardEntry,
+  OverallLeaderboardEntry,
+  LeaderboardResponse,
   Agent,
   InterviewRoom,
   InterviewChallenge,
@@ -166,16 +168,35 @@ export async function startAgentRun(agentId: string, challengeId: string): Promi
 
 export async function getLeaderboard(params?: {
   limit?: number;
-  category?: string;
+  offset?: number;
   challenge_id?: string;
-}): Promise<LeaderboardEntry[]> {
+  username?: string;
+  sort_by?: string;
+}): Promise<LeaderboardResponse<LeaderboardEntry>> {
   const searchParams = new URLSearchParams();
-  if (params?.limit) searchParams.set("limit", String(params.limit));
-  if (params?.category) searchParams.set("category", params.category);
+  if (params?.limit != null) searchParams.set("limit", String(params.limit));
+  if (params?.offset != null) searchParams.set("offset", String(params.offset));
   if (params?.challenge_id) searchParams.set("challenge_id", params.challenge_id);
+  if (params?.username) searchParams.set("username", params.username);
+  if (params?.sort_by) searchParams.set("sort_by", params.sort_by);
   const query = searchParams.toString();
-  return fetchJSON<LeaderboardEntry[]>(
+  return fetchJSON<LeaderboardResponse<LeaderboardEntry>>(
     `/api/leaderboard${query ? `?${query}` : ""}`
+  );
+}
+
+export async function getOverallLeaderboard(params?: {
+  limit?: number;
+  offset?: number;
+  username?: string;
+}): Promise<LeaderboardResponse<OverallLeaderboardEntry>> {
+  const searchParams = new URLSearchParams();
+  if (params?.limit != null) searchParams.set("limit", String(params.limit));
+  if (params?.offset != null) searchParams.set("offset", String(params.offset));
+  if (params?.username) searchParams.set("username", params.username);
+  const query = searchParams.toString();
+  return fetchJSON<LeaderboardResponse<OverallLeaderboardEntry>>(
+    `/api/leaderboard/overall${query ? `?${query}` : ""}`
   );
 }
 

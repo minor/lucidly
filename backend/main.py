@@ -395,19 +395,43 @@ async def finish_session(session_id: str, request: Request):
 # ---------------------------------------------------------------------------
 
 
+VALID_SORT_KEYS = {"composite_score", "accuracy", "time_seconds", "total_turns", "total_tokens", "total_cost"}
+
+
 @app.get("/api/leaderboard")
-async def leaderboard(limit: int = 50, category: str | None = None, challenge_id: str | None = None):
-    """Fetch leaderboard entries from Supabase."""
+async def leaderboard(
+    challenge_id: str | None = None,
+    limit: int = 10,
+    offset: int = 0,
+    username: str | None = None,
+    sort_by: str = "composite_score",
+):
+    """Per-question leaderboard: best attempt per user, paginated."""
     from database import get_leaderboard as get_db_leaderboard
-    
-    # Fetch from Supabase
-    entries = await get_db_leaderboard(challenge_id=challenge_id, limit=limit)
-    
-    # Filter by category if provided (since DB currently filters by challenge_id only)
-    if category and category != "all":
-        entries = [e for e in entries if e.get("category") == category]
-        
-    return entries
+
+    return await get_db_leaderboard(
+        challenge_id=challenge_id,
+        limit=max(1, min(limit, 100)),
+        offset=max(0, offset),
+        username=username,
+        sort_by=sort_by if sort_by in VALID_SORT_KEYS else "composite_score",
+    )
+
+
+@app.get("/api/leaderboard/overall")
+async def leaderboard_overall(
+    limit: int = 10,
+    offset: int = 0,
+    username: str | None = None,
+):
+    """Overall leaderboard: sum of top scores across challenges, paginated."""
+    from database import get_overall_leaderboard
+
+    return await get_overall_leaderboard(
+        limit=max(1, min(limit, 100)),
+        offset=max(0, offset),
+        username=username,
+    )
 
 
 # ---------------------------------------------------------------------------
