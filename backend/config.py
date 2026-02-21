@@ -1,5 +1,7 @@
 from pydantic import field_validator
 from pydantic_settings import BaseSettings
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 
 class Settings(BaseSettings):
@@ -49,6 +51,10 @@ class Settings(BaseSettings):
         "hard": {"time": 300.0, "tokens": 1000, "turns": 8},
     }
 
+    # Auth0
+    auth0_domain: str = ""
+    auth0_audience: str = ""
+
     # Sentry
     sentry_dsn: str = ""
     environment: str = "development"
@@ -81,6 +87,7 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
+limiter = Limiter(key_func=get_remote_address)
 
 # Pricing (per 1M tokens)
 MODEL_PRICING = {

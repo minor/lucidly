@@ -119,6 +119,28 @@ async def save_prompt_feedback(session_id: str, feedback: str) -> bool:
         return False
 
 
+async def count_user_challenge_sessions_today(username: str, challenge_id: str) -> int:
+    """Count how many times a user has played a specific challenge today."""
+    supabase = get_supabase_client()
+    if not supabase:
+        return 0
+    try:
+        from datetime import date, timezone
+        today = date.today().isoformat()
+        response = (
+            supabase.table("challenge_sessions")
+            .select("id", count="exact")
+            .eq("username", username)
+            .eq("challenge_id", challenge_id)
+            .gte("created_at", today)
+            .execute()
+        )
+        return response.count or 0
+    except Exception as e:
+        logger.error(f"Error counting daily sessions: {e}")
+        return 0
+
+
 async def get_username_by_auth0_id(auth0_id: str) -> str | None:
     """Fetch the chosen username for an Auth0 user. Returns None if not set."""
     supabase = get_supabase_client()
