@@ -17,6 +17,8 @@ interface PromptInputProps {
   onModelChange?: (model: string) => void; // Controlled mode
   /** When set, hide the model dropdown and always use this model (e.g. "Chat with the CRO" uses GPT only) */
   fixedModel?: string;
+  /** Extra button(s) rendered next to the send button (e.g. mobile submit) */
+  extraButton?: React.ReactNode;
 }
 
 export function PromptInput({
@@ -30,6 +32,7 @@ export function PromptInput({
   selectedModel,
   onModelChange,
   fixedModel,
+  extraButton,
 }: PromptInputProps) {
   const [value, setValue] = useState("");
   // Use controlled model if provided, otherwise local state
@@ -143,6 +146,7 @@ export function PromptInput({
             )}
           </button>
         )}
+        {extraButton}
         </div>
       </div>
     </div>

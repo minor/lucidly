@@ -149,3 +149,12 @@ code {
   from { transform: translateX(-100%); }
   to { transform: translateX(0); }
 }
+
+@media (max-width: 639px) {
+  .mobile-auto-height {
+    height: auto !important;
+  }
+  .mobile-full-width {
+    width: 100% !important;
+  }
+}

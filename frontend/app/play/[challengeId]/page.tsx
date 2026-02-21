@@ -19,6 +19,7 @@ import {
   XCircle,
   FlaskConical,
   GripHorizontal,
+  GripVertical,
   Trophy,
   X,
   MessageCircle,
@@ -70,6 +71,14 @@ export default function ChallengePage() {
   const [productPanelHeight, setProductPanelHeight] = useState(PRODUCT_PANEL_INITIAL);
   const productResizeStartYRef = useRef<number>(0);
   const productResizeStartHeightRef = useRef<number>(PRODUCT_PANEL_INITIAL);
+
+  // Workspace horizontal resize state (default 50%, range 30%–70%)
+  const WORKSPACE_WIDTH_DEFAULT = 50;
+  const WORKSPACE_WIDTH_MIN = 30;
+  const WORKSPACE_WIDTH_MAX = 70;
+  const [workspaceWidth, setWorkspaceWidth] = useState(WORKSPACE_WIDTH_DEFAULT);
+  const workspaceResizeStartXRef = useRef<number>(0);
+  const workspaceResizeStartWidthRef = useRef<number>(WORKSPACE_WIDTH_DEFAULT);
 
   // Chat state
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -269,8 +278,33 @@ export default function ChallengePage() {
     window.addEventListener("mouseup", onUp);
   }, [productPanelHeight]);
 
+  // Workspace horizontal resize
+  const handleWorkspaceResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    workspaceResizeStartXRef.current = e.clientX;
+    workspaceResizeStartWidthRef.current = workspaceWidth;
+    const onMove = (moveEvent: MouseEvent) => {
+      const vw = window.innerWidth;
+      const deltaPx = workspaceResizeStartXRef.current - moveEvent.clientX;
+      const deltaPct = (deltaPx / vw) * 100;
+      const next = workspaceResizeStartWidthRef.current + deltaPct;
+      setWorkspaceWidth(Math.min(WORKSPACE_WIDTH_MAX, Math.max(WORKSPACE_WIDTH_MIN, next)));
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }, [workspaceWidth]);
+
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const container = chatContainerRef.current;
+    if (!container) return;
+    const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
+    if (isNearBottom) {
+      container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
+    }
   };
   useEffect(() => {
     scrollToBottom();
@@ -754,7 +788,7 @@ export default function ChallengePage() {
   }
 
   return (
-    <div className="flex h-screen flex-col relative">
+    <div className="flex min-h-screen sm:h-screen flex-col relative">
       {/* Auth overlay — shown when unauthenticated user tries to prompt */}
       {showAuthOverlay && (
         <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-background/80 backdrop-blur-md animate-in fade-in duration-200">
@@ -953,7 +987,7 @@ export default function ChallengePage() {
                   ? productPart !== 2 || !prdContent.trim()
                   : !testResults && !codeResult && !renderedCode)
             }
-            className={`shrink-0 rounded-lg bg-foreground text-background px-4 py-2 text-xs font-medium transition-opacity ${
+            className={`hidden sm:inline-flex shrink-0 rounded-lg bg-foreground text-background px-4 py-2 text-xs font-medium transition-opacity ${
                 submitState === "pending" ||
                 (submitState === "idle" &&
                   (isExecuting ||
@@ -963,18 +997,18 @@ export default function ChallengePage() {
                 : "hover:opacity-90 cursor-pointer"
             }`}
         >
-            {submitState === "pending" ? "Pending" : submitState === "completed" ? "Retry" : isProductChallenge && productPart === 2 ? "Submit PRD" : "Submit solution"}
+            {submitState === "pending" ? "Pending" : submitState === "completed" ? "Retry" : isProductChallenge && productPart === 2 ? "Submit PRD" : "Submit"}
         </button>
       </div>
 
       {/* Main content */}
-      <div className="flex flex-1 min-h-0">
-        <div className="flex-1 flex flex-col min-w-0 border-r border-border">
+      <div className="flex flex-col sm:flex-row sm:overflow-hidden sm:flex-1 sm:min-h-0">
+        <div className="contents sm:flex sm:flex-1 sm:flex-col sm:min-w-0 sm:border-r sm:border-border">
           {/* Top: Challenge description (or product Part 1/2 + notepad) */}
           <div
             className={`${
-              hasBottomPanel ? "min-h-0 flex-1" : "flex-1"
-            } overflow-y-auto border-b border-border flex flex-col min-h-0`}
+              hasBottomPanel ? "sm:min-h-0 sm:flex-1" : "sm:flex-1"
+            } sm:overflow-y-auto border-b border-border flex flex-col sm:min-h-0 order-1 sm:order-none`}
           >
             <div className="p-6 flex-1 min-h-0">
               <h2 className="text-sm font-semibold mb-3">Challenge</h2>
@@ -1072,13 +1106,13 @@ export default function ChallengePage() {
               <button
                 type="button"
                 onMouseDown={handleProductPanelResizeStart}
-                className="flex w-full cursor-n-resize items-center justify-center border-t border-border bg-muted/10 py-1.5 text-muted hover:bg-muted/20 hover:text-foreground focus:outline-none shrink-0"
+                className="hidden sm:flex order-1 sm:order-none w-full cursor-n-resize items-center justify-center border-t border-border bg-muted/10 py-1.5 text-muted hover:bg-muted/20 hover:text-foreground focus:outline-none shrink-0"
                 aria-label="Resize notepad panel"
               >
                 <GripHorizontal className="h-4 w-4" />
               </button>
               <div
-                className="flex shrink-0 flex-col border-t border-border overflow-hidden"
+                className="flex shrink-0 flex-col border-t border-border overflow-hidden order-1 sm:order-none mobile-auto-height"
                 style={{ height: productPanelHeight }}
               >
                 <div className="flex items-center justify-between border-b border-border px-4 py-2.5 shrink-0 bg-background/80">
@@ -1137,7 +1171,7 @@ export default function ChallengePage() {
             <button
               type="button"
               onMouseDown={handleResizeStart}
-              className="flex w-full cursor-n-resize items-center justify-center border-t border-border bg-muted/10 py-1.5 text-muted hover:bg-muted/20 hover:text-foreground focus:outline-none"
+              className="hidden sm:flex order-3 sm:order-none w-full cursor-n-resize items-center justify-center border-t border-border bg-muted/10 py-1.5 text-muted hover:bg-muted/20 hover:text-foreground focus:outline-none"
               aria-label="Resize output panel"
             >
               <GripHorizontal className="h-4 w-4" />
@@ -1147,7 +1181,7 @@ export default function ChallengePage() {
           {/* Bottom: Output panel */}
           {hasBottomPanel && (
             <div
-              className="flex shrink-0 flex-col border-t border-border bg-muted/5 overflow-hidden"
+              className="flex shrink-0 flex-col border-t border-border bg-muted/5 overflow-hidden order-3 sm:order-none mobile-auto-height"
               style={{ height: outputPanelHeight }}
             >
               {isDataChallenge && (
@@ -1392,8 +1426,21 @@ export default function ChallengePage() {
           )}
         </div>
 
+        {/* Vertical resize handle between left panel and workspace */}
+        <button
+          type="button"
+          onMouseDown={handleWorkspaceResizeStart}
+          className="hidden sm:flex items-center justify-center cursor-col-resize w-1.5 shrink-0 bg-muted/10 hover:bg-muted/20 text-muted hover:text-foreground transition-colors focus:outline-none"
+          aria-label="Resize workspace width"
+        >
+          <GripVertical className="h-4 w-4" />
+        </button>
+
         {/* Right: Chat panel (CRO in Part 1, general assistant in Part 2 for PRD help) */}
-        <div className="flex flex-col w-1/2 shrink-0 border-l border-border">
+        <div
+          className="flex flex-col order-2 sm:order-none h-[80vh] sm:h-auto mobile-full-width sm:shrink-0 border-t sm:border-t-0 border-border"
+          style={{ width: `${workspaceWidth}%` }}
+        >
           <div className="border-b border-border px-6 py-3 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Sparkles className="h-4 w-4 text-muted" />
@@ -1439,7 +1486,7 @@ export default function ChallengePage() {
           >
             <div className="px-6 py-8">
               {messages.length === 0 && !isStreaming && (
-                <div className="flex flex-col items-center justify-center h-full min-h-[400px]">
+                <div className="flex flex-col items-center justify-center h-full min-h-[200px] sm:min-h-[400px]">
                   <div className="text-center max-w-md">
                     <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-accent/10 mb-4">
                       <Sparkles className="h-6 w-6 text-accent" />
@@ -1555,6 +1602,31 @@ export default function ChallengePage() {
                 fixedModel={isProductChallenge && productPart === 1 ? "gpt-5.2" : undefined}
                 placeholder={isProductChallenge && productPart === 1 ? "Ask the CRO..." : "Ask anything..."}
                 disabled={isStreaming || isExecuting || submitState === "pending" || submitState === "completed"}
+                extraButton={
+                  <button
+                    type="button"
+                    onClick={submitState === "completed" ? handleRetry : handleSubmitSolution}
+                    disabled={
+                      submitState === "pending" ||
+                      isExecuting ||
+                      isStreaming ||
+                      (isProductChallenge
+                        ? productPart !== 2 || !prdContent.trim()
+                        : !testResults && !codeResult && !renderedCode)
+                    }
+                    className={`sm:hidden shrink-0 rounded-lg bg-foreground text-background px-3 h-7 text-xs font-medium transition-opacity ${
+                      submitState === "pending" ||
+                      (submitState === "idle" &&
+                        (isExecuting ||
+                          isStreaming ||
+                          (isProductChallenge ? productPart !== 2 || !prdContent.trim() : !testResults && !codeResult && !renderedCode)))
+                        ? "opacity-50 cursor-not-allowed"
+                        : "hover:opacity-90 cursor-pointer"
+                    }`}
+                  >
+                    {submitState === "pending" ? "Pending" : submitState === "completed" ? "Retry" : isProductChallenge && productPart === 2 ? "Submit PRD" : "Submit"}
+                  </button>
+                }
               />
             </div>
           </div>
