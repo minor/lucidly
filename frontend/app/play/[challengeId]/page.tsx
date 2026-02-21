@@ -767,7 +767,7 @@ export default function ChallengePage() {
       (isDataChallenge && (codeResult || runningCode)));
 
   const OUTPUT_PLACEHOLDER_IMAGE =
-    "https://placehold.co/800x400/f8fafc/94a3b8?text=Your+rendered+page";
+    "https://placehold.co/800x400/f8fafc/94a3b8?text=Waiting+for+code...";
   const OUTPUT_PLACEHOLDER_CODE = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1271,7 +1271,7 @@ export default function ChallengePage() {
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img
                             src={OUTPUT_PLACEHOLDER_IMAGE}
-                            alt="Your rendered output"
+                            alt="Waiting for code..."
                             className="max-h-full w-full object-contain object-top"
                           />
                         </div>
