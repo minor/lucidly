@@ -13,7 +13,7 @@ import sentry_sdk
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 from sentry_sdk.integrations.starlette import StarletteIntegration
 
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
@@ -33,6 +33,7 @@ from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel
 
 from config import settings, limiter
+from auth import get_current_user
 
 if settings.sentry_dsn:
     sentry_sdk.init(
@@ -233,7 +234,7 @@ async def get_challenge_html(challenge_id: str):
 
 @app.post("/api/challenges/{challenge_id}/generate-tests")
 @limiter.limit("5/minute")
-async def generate_tests_for_challenge(challenge_id: str, request: Request):
+async def generate_tests_for_challenge(challenge_id: str, request: Request, user_id: str = Depends(get_current_user)):
     """
     Automatically generate test suite for a challenge.
     Returns the generated test suite with test cases tailored to the challenge type.
@@ -437,8 +438,11 @@ class SetUsernameRequest(BaseModel):
 
 
 @app.post("/api/username")
-async def create_username(req: SetUsernameRequest):
+async def create_username(req: SetUsernameRequest, user_id: str = Depends(get_current_user)):
     """Claim a display name. Fails if the name is already taken."""
+    if req.auth0_id != user_id:
+        raise HTTPException(status_code=403, detail="Cannot set username for another user.")
+
     from database import is_username_taken, set_username, get_username_by_auth0_id
 
     name = req.username.strip()
@@ -474,7 +478,7 @@ async def check_username_available(username: str):
 
 @app.post("/api/calculate-score")
 @limiter.limit("10/minute")
-async def calculate_score(req: CalculateScoreRequest, request: Request):
+async def calculate_score(req: CalculateScoreRequest, request: Request, user_id: str = Depends(get_current_user)):
     """Calculate composite score from challenge stats and persist to DB."""
     challenge = get_challenge_by_id(req.challenge_id)
     is_product = req.category == "product" or (challenge and getattr(challenge, "category", None) == "product")
@@ -568,7 +572,7 @@ async def list_agents():
 
 
 @app.post("/api/agent-runs")
-async def start_agent_run(req: AgentRunRequest):
+async def start_agent_run(req: AgentRunRequest, user_id: str = Depends(get_current_user)):
     agent = get_agent_by_id(req.agent_id)
     if agent is None:
         raise HTTPException(status_code=404, detail="Agent not found")
@@ -810,12 +814,29 @@ async def session_ws(ws: WebSocket, session_id: str):
 
 @app.post("/api/chat/stream")
 @limiter.limit("30/minute")
-async def chat_stream(req: ChatRequest, request: Request):
+async def chat_stream(req: ChatRequest, request: Request, user_id: str = Depends(get_current_user)):
     """
     Stream chat responses from Claude Code API.
     Uses Server-Sent Events (SSE) for real-time streaming.
     Supports both Anthropic API directly and OpenAI-compatible APIs (like OpenRouter).
     """
+    user_turns = sum(1 for m in req.messages if m.role == "user")
+    is_product = False
+    if req.challenge_id:
+        _ch = get_challenge_by_id(req.challenge_id)
+        is_product = _ch is not None and getattr(_ch, "category", None) == "product"
+    max_turns = 10 if is_product else 4
+    if user_turns > max_turns:
+        raise HTTPException(status_code=429, detail=f"Turn limit reached (max {max_turns} per conversation).")
+
+    if req.challenge_id and user_turns == 1:
+        from database import get_username_by_auth0_id, count_user_challenge_sessions_today
+        username = await get_username_by_auth0_id(user_id)
+        if username:
+            count = await count_user_challenge_sessions_today(username, req.challenge_id)
+            if count >= 5:
+                raise HTTPException(status_code=429, detail="Daily limit reached (max 5 attempts per challenge).")
+
     # Convert messages to Anthropic format (or OpenAI format if using OpenRouter)
     anthropic_messages = []
     for msg in req.messages:
@@ -1144,7 +1165,7 @@ async def chat_stream(req: ChatRequest, request: Request):
 
 
 @app.post("/api/sandbox/create")
-async def create_sandbox_endpoint():
+async def create_sandbox_endpoint(user_id: str = Depends(get_current_user)):
     """Create a persistent Modal sandbox. Returns sandbox_id."""
     try:
         sandbox_id = await create_sandbox()
@@ -1159,7 +1180,7 @@ async def create_sandbox_endpoint():
 
 
 @app.post("/api/sandbox/{sandbox_id}/terminate")
-async def terminate_sandbox_endpoint(sandbox_id: str):
+async def terminate_sandbox_endpoint(sandbox_id: str, user_id: str = Depends(get_current_user)):
     """Terminate a persistent Modal sandbox."""
     found = await terminate_sandbox(sandbox_id)
     if not found:
@@ -1199,7 +1220,7 @@ class RunTestsResponse(BaseModel):
 
 
 @app.post("/api/run-tests")
-async def run_tests(req: RunTestsRequest) -> RunTestsResponse:
+async def run_tests(req: RunTestsRequest, user_id: str = Depends(get_current_user)) -> RunTestsResponse:
     """Run code against a challenge's test suite in a persistent Modal sandbox."""
     challenge = get_challenge_by_id(req.challenge_id)
     if challenge is None:
@@ -1245,7 +1266,7 @@ class EvaluateUIResponse(BaseModel):
 
 @app.post("/api/evaluate-ui")
 @limiter.limit("3/minute")
-async def evaluate_ui(req: EvaluateUIRequest, request: Request) -> EvaluateUIResponse:
+async def evaluate_ui(req: EvaluateUIRequest, request: Request, user_id: str = Depends(get_current_user)) -> EvaluateUIResponse:
     """Evaluate UI challenge by comparing generated HTML with challenge reference HTML code."""
     print(f"\n{'='*60}")
     print(f"[UI Evaluation] ===== EVALUATION REQUEST RECEIVED =====")
@@ -1431,7 +1452,7 @@ Be thorough in your evaluation. A score of 100 means the codes are essentially i
 
 
 @app.post("/api/run-code")
-async def run_code(req: RunCodeRequest):
+async def run_code(req: RunCodeRequest, user_id: str = Depends(get_current_user)):
     """Run arbitrary code in a sandbox (for data challenges)."""
     try:
         from sandbox import run_code_in_sandbox
@@ -1682,7 +1703,7 @@ Reply in **markdown**. Exactly one sentence per section. No letter grades. Use O
 
 @app.post("/api/prompt-feedback")
 @limiter.limit("2/minute")
-async def prompt_feedback(req: PromptFeedbackRequest, request: Request):
+async def prompt_feedback(req: PromptFeedbackRequest, request: Request, user_id: str = Depends(get_current_user)):
     """
     Stream AI-powered feedback on the user's prompt engineering (coding) or PRD (product).
     Uses SSE to stream the analysis as it's generated.

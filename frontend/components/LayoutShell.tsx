@@ -6,6 +6,7 @@ import { Menu } from "lucide-react";
 import { Sidebar } from "@/components/Sidebar";
 import { TopAuthBar } from "@/components/TopAuthBar";
 import { UsernameGate } from "@/components/UsernameGate";
+import { AuthTokenSync } from "@/components/AuthTokenSync";
 
 export function LayoutShell({ children }: { children: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -56,6 +57,7 @@ export function LayoutShell({ children }: { children: ReactNode }) {
 
       {/* Main content — pt-14 on mobile to clear the fixed top bar */}
       <main className="flex-1 overflow-y-auto relative pt-14 sm:pt-0">
+        <AuthTokenSync />
         <TopAuthBar />
         <UsernameGate />
         {children}
