@@ -40,7 +40,6 @@ if settings.sentry_dsn:
         ],
         traces_sample_rate=0.1,
         environment=settings.environment,
-        debug=True,
     )
 
 from llm import LLM
