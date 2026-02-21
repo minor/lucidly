@@ -5,10 +5,10 @@ import json
 import logging
 import time
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
-from config import settings, MODEL_PRICING, limiter
+from config import settings, MODEL_PRICING
 from evaluation import compute_composite_score
 
 from .models import (
@@ -192,8 +192,7 @@ async def get_session(room_id: str, session_id: str):
 
 
 @router.post("/{room_id}/sessions/{session_id}/prompt")
-@limiter.limit("20/minute")
-async def submit_prompt(room_id: str, session_id: str, req: SubmitPromptRequest, request: Request):
+async def submit_prompt(room_id: str, session_id: str, req: SubmitPromptRequest):
     """Candidate submits a prompt. Streams LLM response via SSE."""
     session = store.get_session(session_id)
     if session is None or session.room_id != room_id:
