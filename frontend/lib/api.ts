@@ -417,9 +417,10 @@ export const MODELS = [
   { id: "gpt-5.2", name: "GPT-5.2" },
   { id: "gpt-5-mini", name: "GPT-5 Mini" },
   { id: "gpt-5-nano", name: "GPT-5 Nano" },
-  { id: "claude-opus-4-6", name: "Claude Opus 4.6" },
-  { id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5" },
-  { id: "claude-haiku-4-5", name: "Claude Haiku 4.5" },
+  // DISABLED: Claude models hidden until re-enabled
+  // { id: "claude-opus-4-6", name: "Claude Opus 4.6" },
+  // { id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5" },
+  // { id: "claude-haiku-4-5", name: "Claude Haiku 4.5" },
   { id: "grok-4-1-fast-reasoning", name: "Grok 4.1 Fast Reasoning" },
   { id: "grok-code-fast-1", name: "Grok Code Fast" },
   { id: "sonar-pro", name: "Perplexity Sonar Pro" },

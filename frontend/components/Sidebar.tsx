@@ -7,7 +7,8 @@ import {
   Zap,
   PlusCircle,
   Trophy,
-  Bot,
+  // DISABLED: Bot icon unused while Agents tab is hidden
+  // Bot,
   ChevronDown,
   ClipboardList,
   LogOut,
@@ -25,7 +26,8 @@ const MODES = [
 
 const ARENA_NAV = [
   { href: "/play", label: "New Challenge", icon: PlusCircle },
-  { href: "/agents", label: "Agents", icon: Bot },
+  // DISABLED: Agents tab hidden until re-enabled
+  // { href: "/agents", label: "Agents", icon: Bot },
   { href: "/leaderboard", label: "Leaderboard", icon: Trophy },
 ];
 
