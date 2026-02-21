@@ -12,7 +12,7 @@ _sandboxes: dict[str, modal.Sandbox] = {}
 
 # Define the image with necessary dependencies for data challenges
 _sandbox_image = (
-    modal.Image.debian_slim()
+    modal.Image.debian_slim(python_version="3.11")
     # Install Python dependencies
     .pip_install("pandas", "requests", "beautifulsoup4", "numpy", "lxml")
     # Install System dependencies (g++ for C++; sanitizer libs come bundled with g++)
