@@ -6,6 +6,7 @@ import logging
 import re
 import time
 import httpx
+import traceback
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 
@@ -1122,9 +1123,11 @@ async def create_sandbox_endpoint():
         sandbox_id = await create_sandbox()
         return {"sandbox_id": sandbox_id}
     except Exception as e:
+        logging.error(f"Sandbox creation failed: {type(e).__name__}: {e}")
+        logging.error(traceback.format_exc())
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to create Modal sandbox: {e}",
+            detail=f"Failed to create Modal sandbox: {type(e).__name__}: {e}",
         )
 
 
