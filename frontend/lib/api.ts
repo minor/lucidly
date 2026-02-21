@@ -23,6 +23,9 @@ async function fetchJSON<T>(
     ...options,
   });
   if (!res.ok) {
+    if (res.status === 429) {
+      throw new Error("Rate limit exceeded. Please wait a moment and try again.");
+    }
     const error = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(error.detail || "API request failed");
   }
@@ -228,6 +231,10 @@ export async function streamChat(
   }
 
   if (!response.ok) {
+    if (response.status === 429) {
+      onError?.("Rate limit exceeded. Please wait a moment and try again.");
+      return;
+    }
     const error = await response.json().catch(() => ({ detail: response.statusText }));
     onError?.(error.detail || "Failed to stream chat");
     return;
@@ -470,6 +477,10 @@ export async function streamPromptFeedback(
   }
 
   if (!response.ok) {
+    if (response.status === 429) {
+      onError?.("Rate limit exceeded. Please wait a moment and try again.");
+      return;
+    }
     const error = await response
       .json()
       .catch(() => ({ detail: response.statusText }));
@@ -684,6 +695,10 @@ export async function streamInterviewPrompt(
   }
 
   if (!response.ok) {
+    if (response.status === 429) {
+      onError?.("Rate limit exceeded. Please wait a moment and try again.");
+      return;
+    }
     const error = await response
       .json()
       .catch(() => ({ detail: response.statusText }));

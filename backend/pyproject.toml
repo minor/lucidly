@@ -17,6 +17,7 @@ dependencies = [
     "browserbase>=0.1.0",
     "supabase",
     "sentry-sdk[fastapi]>=2.52.0",
+    "slowapi",
 ]
 
 [build-system]

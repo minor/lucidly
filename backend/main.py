@@ -14,6 +14,9 @@ from sentry_sdk.integrations.fastapi import FastApiIntegration
 from sentry_sdk.integrations.starlette import StarletteIntegration
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +32,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel
 
-from config import settings
+from config import settings, limiter
 
 if settings.sentry_dsn:
     sentry_sdk.init(
@@ -79,6 +82,8 @@ from interviews import interview_router
 # ---------------------------------------------------------------------------
 
 app = FastAPI(title="No Shot", version="0.1.0")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 @app.on_event("startup")
@@ -96,6 +101,7 @@ def _configure_agent_trace_logging():
         _agent_log.propagate = False
 
 
+app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -226,7 +232,8 @@ async def get_challenge_html(challenge_id: str):
 
 
 @app.post("/api/challenges/{challenge_id}/generate-tests")
-async def generate_tests_for_challenge(challenge_id: str):
+@limiter.limit("5/minute")
+async def generate_tests_for_challenge(challenge_id: str, request: Request):
     """
     Automatically generate test suite for a challenge.
     Returns the generated test suite with test cases tailored to the challenge type.
@@ -314,6 +321,7 @@ def _require_agent_token_if_agent(session, request: Request) -> None:
 
 
 @app.post("/api/sessions/{session_id}/prompt")
+@limiter.limit("20/minute")
 async def submit_prompt(session_id: str, request: Request, req: PromptRequest):
     session = get_session(session_id)
     if session is None:
@@ -465,7 +473,8 @@ async def check_username_available(username: str):
 
 
 @app.post("/api/calculate-score")
-async def calculate_score(req: CalculateScoreRequest):
+@limiter.limit("10/minute")
+async def calculate_score(req: CalculateScoreRequest, request: Request):
     """Calculate composite score from challenge stats and persist to DB."""
     challenge = get_challenge_by_id(req.challenge_id)
     is_product = req.category == "product" or (challenge and getattr(challenge, "category", None) == "product")
@@ -800,7 +809,8 @@ async def session_ws(ws: WebSocket, session_id: str):
 
 
 @app.post("/api/chat/stream")
-async def chat_stream(req: ChatRequest):
+@limiter.limit("30/minute")
+async def chat_stream(req: ChatRequest, request: Request):
     """
     Stream chat responses from Claude Code API.
     Uses Server-Sent Events (SSE) for real-time streaming.
@@ -1234,6 +1244,7 @@ class EvaluateUIResponse(BaseModel):
     detailed_feedback: str | None = None
 
 @app.post("/api/evaluate-ui")
+@limiter.limit("3/minute")
 async def evaluate_ui(req: EvaluateUIRequest, request: Request) -> EvaluateUIResponse:
     """Evaluate UI challenge by comparing generated HTML with challenge reference HTML code."""
     print(f"\n{'='*60}")
@@ -1670,7 +1681,8 @@ Reply in **markdown**. Exactly one sentence per section. No letter grades. Use O
 
 
 @app.post("/api/prompt-feedback")
-async def prompt_feedback(req: PromptFeedbackRequest):
+@limiter.limit("2/minute")
+async def prompt_feedback(req: PromptFeedbackRequest, request: Request):
     """
     Stream AI-powered feedback on the user's prompt engineering (coding) or PRD (product).
     Uses SSE to stream the analysis as it's generated.
