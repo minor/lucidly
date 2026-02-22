@@ -127,16 +127,14 @@ export default function ChallengePage() {
 
   // Scoring session (server-side tamper-proof stat tracking)
   const scoringSessionIdRef = useRef<string | null>(null);
-  const sessionExpiredRef = useRef(false);
+  const [sessionExpired, setSessionExpired] = useState(false);
 
   const handleSessionExpired = useCallback((errMsg?: string) => {
     const isExpired = errMsg && /expired|not found/i.test(errMsg);
     if (!isExpired) return false;
-    if (!sessionExpiredRef.current) {
-      sessionExpiredRef.current = true;
-      scoringSessionIdRef.current = null;
-      toast.error("Your session has expired. Please start a new challenge attempt.");
-    }
+    scoringSessionIdRef.current = null;
+    setSessionExpired(true);
+    toast.error("Your session has expired. Please start a new challenge attempt.");
     return true;
   }, []);
 
@@ -564,7 +562,7 @@ export default function ChallengePage() {
   const productParts = challenge?.product_parts ?? [];
 
   const handleSubmitSolution = async () => {
-    if (submitState !== "idle") return;
+    if (sessionExpired || submitState !== "idle") return;
 
     // Freeze the score bar stats for display (informational only)
     const currentElapsed = elapsed;
@@ -721,6 +719,7 @@ export default function ChallengePage() {
   };
 
   const handleSubmit = async (prompt: string, model: string) => {
+    if (sessionExpired) return;
     if (!prompt.trim() || isStreaming || isExecuting || submitState !== "idle") return;
 
     // Require auth before prompting
@@ -1032,6 +1031,7 @@ export default function ChallengePage() {
             type="button"
             onClick={submitState === 'completed' ? handleRetry : handleSubmitSolution}
             disabled={
+                sessionExpired ||
                 submitState === "pending" ||
                 isExecuting ||
                 isStreaming ||
@@ -1652,12 +1652,13 @@ export default function ChallengePage() {
                 onModelChange={setSelectedModel}
                 fixedModel={isProductChallenge && productPart === 1 ? "gpt-5.2" : undefined}
                 placeholder={isProductChallenge && productPart === 1 ? "Ask the CRO..." : "Ask anything..."}
-                disabled={isStreaming || isExecuting || submitState === "pending" || submitState === "completed"}
+                disabled={sessionExpired || isStreaming || isExecuting || submitState === "pending" || submitState === "completed"}
                 extraButton={
                   <button
                     type="button"
                     onClick={submitState === "completed" ? handleRetry : handleSubmitSolution}
                     disabled={
+                      sessionExpired ||
                       submitState === "pending" ||
                       isExecuting ||
                       isStreaming ||

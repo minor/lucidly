@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-SESSION_TTL_SECONDS = 3600  # 1 hour
+SESSION_TTL_SECONDS = 10  # 1 hour
 
 
 class ScoringSession(BaseModel):
@@ -45,7 +45,13 @@ def create_scoring_session(
 
 
 def get_scoring_session(session_id: str) -> ScoringSession | None:
-    return _scoring_sessions.get(session_id)
+    session = _scoring_sessions.get(session_id)
+    if session is None:
+        return None
+    if time.time() - session.started_at > SESSION_TTL_SECONDS:
+        del _scoring_sessions[session_id]
+        return None
+    return session
 
 
 def record_turn(
