@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { getChallenge, runTests, runCode, createSandbox, terminateSandbox, MODEL_PRICING, MODELS, createVercelSandbox, updateVercelSandboxCode, stopVercelSandbox, streamPromptFeedback, createScoringSession, submitScore, freezeScoringTimer, unfreezeScoringTimer } from "@/lib/api";
+import { getChallenge, runTests, runCode, createSandbox, terminateSandbox, MODEL_PRICING, MODELS, createVercelSandbox, updateVercelSandboxCode, stopVercelSandbox, streamPromptFeedback, createScoringSession, submitScore } from "@/lib/api";
 import { PromptInput } from "@/components/PromptInput";
 import { ScoreBar } from "@/components/ScoreBar";
 import { SimpleMarkdown } from "@/components/SimpleMarkdown";
@@ -273,20 +273,6 @@ export default function ChallengePage() {
     }, 1000);
     return () => clearInterval(interval);
   }, [isWaitingForFirstToken, isExecuting, isStreaming, submitState, testResults]);
-
-  // Freeze/unfreeze server-side timer when 100% accuracy is achieved or lost
-  const wasPerfectRef = useRef(false);
-  useEffect(() => {
-    const sessionId = scoringSessionIdRef.current;
-    if (!sessionId) return;
-    const isPerfect = !!(testResults && testResults.total_count > 0 && testResults.passed_count === testResults.total_count);
-    if (isPerfect && !wasPerfectRef.current) {
-      freezeScoringTimer(sessionId).catch((err: Error) => handleSessionExpired(err.message));
-    } else if (!isPerfect && wasPerfectRef.current) {
-      unfreezeScoringTimer(sessionId).catch((err: Error) => handleSessionExpired(err.message));
-    }
-    wasPerfectRef.current = isPerfect;
-  }, [testResults]);
 
   // Resize handler
   const handleResizeStart = useCallback((e: React.MouseEvent) => {

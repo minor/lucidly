@@ -459,18 +459,6 @@ export async function submitScore(
   });
 }
 
-export async function freezeScoringTimer(sessionId: string): Promise<void> {
-  await fetchJSON(`/api/scoring-sessions/${sessionId}/freeze-timer`, {
-    method: "POST",
-  });
-}
-
-export async function unfreezeScoringTimer(sessionId: string): Promise<void> {
-  await fetchJSON(`/api/scoring-sessions/${sessionId}/unfreeze-timer`, {
-    method: "POST",
-  });
-}
-
 export const MODEL_PRICING: Record<string, { input: number; output: number }> = {
   "claude-opus-4-6": { input: 5.0, output: 25.0 },
   "claude-sonnet-4-5": { input: 3.0, output: 15.0 },

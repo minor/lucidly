@@ -548,25 +548,6 @@ async def create_scoring_session_endpoint(req: CreateScoringSessionRequest):
     return {"session_id": session.id, "started_at": session.started_at}
 
 
-@app.post("/api/scoring-sessions/{session_id}/freeze-timer")
-async def freeze_scoring_timer(session_id: str):
-    """Freeze the scoring session timer (e.g. when 100% accuracy is achieved)."""
-    session = get_scoring_session(session_id)
-    if session is None:
-        raise HTTPException(status_code=410, detail="Scoring session expired or not found")
-    ss_freeze_timer(session_id)
-    return {"ok": True}
-
-
-@app.post("/api/scoring-sessions/{session_id}/unfreeze-timer")
-async def unfreeze_scoring_timer(session_id: str):
-    """Unfreeze the scoring session timer (e.g. if accuracy drops below 100%)."""
-    session = get_scoring_session(session_id)
-    if session is None:
-        raise HTTPException(status_code=410, detail="Scoring session expired or not found")
-    ss_unfreeze_timer(session_id)
-    return {"ok": True}
-
 
 @app.post("/api/scoring-sessions/{session_id}/submit")
 async def submit_scoring_session(session_id: str, req: SubmitScoreRequest):
@@ -1525,7 +1506,12 @@ async def run_tests(req: RunTestsRequest) -> RunTestsResponse:
     if req.scoring_session_id:
         session = get_scoring_session(req.scoring_session_id)
         if session and session.status == "active":
-            session.last_test_accuracy = passed_count / len(results) if results else 0.0
+            accuracy = passed_count / len(results) if results else 0.0
+            session.last_test_accuracy = accuracy
+            if accuracy >= 1.0:
+                ss_freeze_timer(req.scoring_session_id)
+            else:
+                ss_unfreeze_timer(req.scoring_session_id)
 
     return RunTestsResponse(
         results=results,
