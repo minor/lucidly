@@ -615,7 +615,9 @@ Please evaluate the similarity and provide your response in the following JSON f
             except Exception as e:
                 logger.error(f"UI evaluation failed during submit: {e}")
     elif has_tests:
-        if req.code and req.sandbox_id:
+        if session.last_test_accuracy is not None:
+            accuracy = session.last_test_accuracy
+        elif req.code and req.sandbox_id:
             try:
                 test_dicts = [t.model_dump() for t in challenge.test_suite]
                 raw_results = await run_function_tests_detailed(req.sandbox_id, req.code, test_dicts)
@@ -1494,6 +1496,12 @@ async def run_tests(req: RunTestsRequest) -> RunTestsResponse:
 
     results = [TestCaseResult(**r) for r in raw_results]
     passed_count = sum(1 for r in results if r.passed)
+
+    if req.scoring_session_id:
+        session = get_scoring_session(req.scoring_session_id)
+        if session and session.status == "active":
+            session.last_test_accuracy = passed_count / len(results) if results else 0.0
+
     return RunTestsResponse(
         results=results,
         all_passed=passed_count == len(results),

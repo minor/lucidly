@@ -847,48 +847,45 @@ export default function ChallengePage() {
       {/* Score Overlay */}
       {submitState === "completed" && finalScores && showCompletionModal && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/95 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="w-full max-w-2xl rounded-2xl border border-border bg-card p-12 shadow-2xl text-center relative">
-            {/* Close button */}
+          <div className="w-full max-w-2xl rounded-xl border border-border bg-card p-6 shadow-2xl text-center relative">
             <button
               onClick={() => {
                 setShowCompletionModal(false);
-                // Keep submitState as "completed" to maintain frozen state
-                // Timer will stay frozen, chat disabled, button shows "Retry"
               }}
-              className="absolute top-4 right-4 text-muted hover:text-foreground transition-colors cursor-pointer p-1 rounded-md hover:bg-muted/10"
+              className="absolute top-3 right-3 text-muted hover:text-foreground transition-colors cursor-pointer p-1.5 rounded-lg hover:bg-muted/10"
               aria-label="Close modal"
             >
               <X className="h-5 w-5" />
             </button>
             
-            <div className="mb-8 flex justify-center">
-              <div className="rounded-full bg-accent/10 p-4">
-                <Trophy className="h-12 w-12 text-accent" />
+            <div className="mb-4 flex justify-center">
+              <div className="rounded-full bg-accent/10 p-3">
+                <Trophy className="h-8 w-8 text-accent" />
               </div>
             </div>
             
-            <h2 className="mb-2 text-3xl font-bold tracking-tight">Challenge Complete!</h2>
-            <p className="mb-8 text-muted">Great job! Here&apos;s how you performed.</p>
+            <h2 className="mb-1 text-2xl font-bold tracking-tight">Challenge Complete!</h2>
+            <p className="mb-5 text-sm text-muted">Great job! Here&apos;s how you performed.</p>
 
-            <div className="mb-10 flex justify-center">
+            <div className="mb-6 flex justify-center">
               <div className="relative">
                 <div className="text-center">
-                  <div className="text-6xl font-black text-foreground font-mono tracking-tighter">
+                  <div className="text-5xl font-black text-foreground font-mono tracking-tighter">
                     {finalScores.composite_score}
                   </div>
-                  <div className="mt-2 text-sm font-medium text-muted uppercase tracking-widest flex items-center justify-center gap-1">
+                  <div className="mt-1 text-xs font-medium text-muted uppercase tracking-widest flex items-center justify-center gap-1">
                     Final Score
                     <button
                       onClick={() => setShowScoreExplainer((v) => !v)}
                       className="inline-flex items-center justify-center rounded-full text-muted hover:text-foreground transition-colors cursor-pointer"
                       aria-label="How is the score calculated?"
                     >
-                      <HelpCircle className="h-3.5 w-3.5" />
+                      <HelpCircle className="h-3 w-3" />
                     </button>
                   </div>
                 </div>
                 {showScoreExplainer && (
-                  <div className="absolute left-full top-0 ml-4 w-52 rounded-lg border border-border bg-background p-3 text-left text-xs text-muted leading-relaxed shadow-lg animate-in fade-in slide-in-from-left-1 duration-150">
+                  <div className="absolute left-full top-0 ml-3 w-48 rounded-lg border border-border bg-background p-2.5 text-left text-xs text-muted leading-relaxed shadow-lg animate-in fade-in slide-in-from-left-1 duration-150">
                     <p className="mb-1 font-semibold text-foreground text-[11px] uppercase tracking-wider">Scoring</p>
                     <p>
                       ELO-style rating (0–1000) weighted by{" "}
@@ -901,7 +898,7 @@ export default function ChallengePage() {
               </div>
             </div>
 
-            <div className="mb-10 flex justify-center">
+            <div className="mb-6 flex justify-center">
               <ScoreBar 
                 accuracy={isProductChallenge ? undefined : finalScores.accuracy_score / 1000}
                 score={isProductChallenge ? undefined : (frozenStatsRef.current?.score)}
@@ -913,44 +910,44 @@ export default function ChallengePage() {
               />
             </div>
 
-            <div className="mx-auto max-w-sm space-y-4">
-              <div className="rounded-lg bg-green-500/10 border border-green-500/20 p-3 text-green-500 flex items-center justify-center gap-2 animate-in fade-in duration-300">
-                <CheckCircle2 className="h-4 w-4" />
-                <span className="text-sm font-medium">Score submitted as {username || user?.nickname || user?.name || "anonymous"}</span>
+            <div className="mx-auto max-w-xs space-y-3">
+              <div className="rounded-lg bg-green-500/10 border border-green-500/20 p-2.5 text-green-500 flex items-center justify-center gap-2 animate-in fade-in duration-300">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                <span className="text-xs font-medium">Score submitted as {username || user?.nickname || user?.name || "anonymous"}</span>
               </div>
               
-              <div className="flex gap-2 mt-2">
+              <div className="flex gap-2">
                 <button 
                   onClick={() => {
                     setShowCompletionModal(false);
                     setWorkspaceTab("feedback");
                   }}
-                  className="flex-1 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground hover:bg-accent/90 transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                  className="flex-1 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-accent-foreground hover:bg-accent/90 transition-colors cursor-pointer flex items-center justify-center gap-1.5"
                 >
                   <Lightbulb className="h-3.5 w-3.5" />
                   {isProductChallenge ? "View PRD Feedback" : "View Prompt Feedback"}
                 </button>
               </div>
-              <div className="flex gap-2 mt-2">
+              <div className="flex gap-2">
                 <button 
                   onClick={() => {
                     setShowCompletionModal(false);
                     setWorkspaceTab("chat");
                   }}
-                  className="flex-1 rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium text-foreground hover:bg-accent/10 hover:border-accent/40 transition-colors cursor-pointer"
+                  className="flex-1 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium text-foreground hover:bg-accent/10 hover:border-accent/40 transition-colors cursor-pointer"
                 >
                   View My Response
                 </button>
                 <button 
                   onClick={handleRetry}
-                  className="flex-1 rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium text-foreground hover:bg-accent/10 hover:border-accent/40 transition-colors cursor-pointer"
+                  className="flex-1 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium text-foreground hover:bg-accent/10 hover:border-accent/40 transition-colors cursor-pointer"
                 >
                   Retry Challenge
                 </button>
               </div>
               <button 
                 onClick={() => router.push("/play")}
-                className="text-sm text-muted hover:text-foreground underline underline-offset-4 cursor-pointer"
+                className="text-xs text-muted hover:text-foreground underline underline-offset-4 cursor-pointer"
               >
                 Return to All Challenges
               </button>

@@ -19,6 +19,7 @@ class ScoringSession(BaseModel):
     messages: list[dict] = []
     status: str = "active"  # active | completed
     frozen_at: float | None = None  # when set, submission uses this instead of time.time()
+    last_test_accuracy: float | None = None  # cached from the most recent run-tests call
 
 
 _scoring_sessions: dict[str, ScoringSession] = {}
