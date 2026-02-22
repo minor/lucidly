@@ -1,8 +1,13 @@
 """Lightweight server-side scoring sessions for tamper-proof leaderboard submissions."""
 
+import logging
 import time
 import uuid
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
+
+SESSION_TTL_SECONDS = 3600  # 1 hour
 
 
 class ScoringSession(BaseModel):
@@ -121,3 +126,18 @@ def complete_scoring_session(session_id: str) -> ScoringSession | None:
 
 def delete_scoring_session(session_id: str) -> None:
     _scoring_sessions.pop(session_id, None)
+
+
+def cleanup_expired_sessions() -> int:
+    """Remove sessions older than SESSION_TTL_SECONDS. Returns count of removed sessions."""
+    now = time.time()
+    expired_ids = [
+        sid
+        for sid, session in _scoring_sessions.items()
+        if now - session.started_at > SESSION_TTL_SECONDS
+    ]
+    for sid in expired_ids:
+        del _scoring_sessions[sid]
+    if expired_ids:
+        logger.info("Cleaned up %d expired scoring session(s)", len(expired_ids))
+    return len(expired_ids)

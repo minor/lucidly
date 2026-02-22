@@ -96,6 +96,24 @@ def _configure_agent_trace_logging():
         _agent_log.propagate = False
 
 
+_CLEANUP_INTERVAL_SECONDS = 300  # run every 5 minutes
+
+
+async def _session_cleanup_loop() -> None:
+    """Periodically purge scoring sessions older than the TTL."""
+    while True:
+        await asyncio.sleep(_CLEANUP_INTERVAL_SECONDS)
+        try:
+            cleanup_expired_sessions()
+        except Exception:
+            logging.getLogger(__name__).exception("Error during session cleanup")
+
+
+@app.on_event("startup")
+def _start_session_cleanup() -> None:
+    asyncio.get_event_loop().create_task(_session_cleanup_loop())
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -498,6 +516,7 @@ from scoring_sessions import (
     unfreeze_timer as ss_unfreeze_timer,
     complete_scoring_session,
     delete_scoring_session,
+    cleanup_expired_sessions,
 )
 
 
@@ -534,7 +553,7 @@ async def freeze_scoring_timer(session_id: str):
     """Freeze the scoring session timer (e.g. when 100% accuracy is achieved)."""
     session = get_scoring_session(session_id)
     if session is None:
-        raise HTTPException(status_code=404, detail="Scoring session not found")
+        raise HTTPException(status_code=410, detail="Scoring session expired or not found")
     ss_freeze_timer(session_id)
     return {"ok": True}
 
@@ -544,7 +563,7 @@ async def unfreeze_scoring_timer(session_id: str):
     """Unfreeze the scoring session timer (e.g. if accuracy drops below 100%)."""
     session = get_scoring_session(session_id)
     if session is None:
-        raise HTTPException(status_code=404, detail="Scoring session not found")
+        raise HTTPException(status_code=410, detail="Scoring session expired or not found")
     ss_unfreeze_timer(session_id)
     return {"ok": True}
 
@@ -554,7 +573,7 @@ async def submit_scoring_session(session_id: str, req: SubmitScoreRequest):
     """Verify accuracy server-side, compute all metrics from the scoring session, and persist to Supabase."""
     session = get_scoring_session(session_id)
     if session is None:
-        raise HTTPException(status_code=404, detail="Scoring session not found")
+        raise HTTPException(status_code=410, detail="Scoring session expired or not found")
     if session.status != "active":
         raise HTTPException(status_code=400, detail="Scoring session already completed")
 
@@ -1048,6 +1067,9 @@ async def chat_stream(req: ChatRequest):
     if not anthropic_messages or anthropic_messages[-1]["role"] != "user":
         raise HTTPException(status_code=400, detail="Last message must be from user")
 
+    if req.scoring_session_id and get_scoring_session(req.scoring_session_id) is None:
+        raise HTTPException(status_code=410, detail="Scoring session expired or not found")
+
     # Resolve system prompt: use product challenge agent context when applicable
     system_message = "You are a helpful AI assistant. Provide clear, concise, and helpful responses."
     if req.challenge_id:
@@ -1478,6 +1500,9 @@ class RunTestsResponse(BaseModel):
 @app.post("/api/run-tests")
 async def run_tests(req: RunTestsRequest) -> RunTestsResponse:
     """Run code against a challenge's test suite in a persistent Modal sandbox."""
+    if req.scoring_session_id and get_scoring_session(req.scoring_session_id) is None:
+        raise HTTPException(status_code=410, detail="Scoring session expired or not found")
+
     challenge = get_challenge_by_id(req.challenge_id)
     if challenge is None:
         raise HTTPException(status_code=404, detail="Challenge not found")

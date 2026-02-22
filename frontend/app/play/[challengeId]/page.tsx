@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { getChallenge, runTests, runCode, createSandbox, terminateSandbox, MODEL_PRICING, MODELS, createVercelSandbox, updateVercelSandboxCode, stopVercelSandbox, streamPromptFeedback, createScoringSession, submitScore, freezeScoringTimer, unfreezeScoringTimer } from "@/lib/api";
 import { PromptInput } from "@/components/PromptInput";
 import { ScoreBar } from "@/components/ScoreBar";
@@ -126,6 +127,18 @@ export default function ChallengePage() {
 
   // Scoring session (server-side tamper-proof stat tracking)
   const scoringSessionIdRef = useRef<string | null>(null);
+  const sessionExpiredRef = useRef(false);
+
+  const handleSessionExpired = useCallback((errMsg?: string) => {
+    const isExpired = errMsg && /expired|not found/i.test(errMsg);
+    if (!isExpired) return false;
+    if (!sessionExpiredRef.current) {
+      sessionExpiredRef.current = true;
+      scoringSessionIdRef.current = null;
+      toast.error("Your session has expired. Please start a new challenge attempt.");
+    }
+    return true;
+  }, []);
 
   // Abort controller
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -270,9 +283,9 @@ export default function ChallengePage() {
     if (!sessionId) return;
     const isPerfect = !!(testResults && testResults.total_count > 0 && testResults.passed_count === testResults.total_count);
     if (isPerfect && !wasPerfectRef.current) {
-      freezeScoringTimer(sessionId).catch(() => {});
+      freezeScoringTimer(sessionId).catch((err: Error) => handleSessionExpired(err.message));
     } else if (!isPerfect && wasPerfectRef.current) {
-      unfreezeScoringTimer(sessionId).catch(() => {});
+      unfreezeScoringTimer(sessionId).catch((err: Error) => handleSessionExpired(err.message));
     }
     wasPerfectRef.current = isPerfect;
   }, [testResults]);
@@ -485,6 +498,7 @@ export default function ChallengePage() {
           })
           .catch((err) => {
             console.error("Test run failed:", err);
+            handleSessionExpired(err.message);
             setRunningTests(false);
             setIsExecuting(false);
           });
@@ -607,8 +621,12 @@ export default function ChallengePage() {
       setShowCompletionModal(true);
 
       triggerPromptFeedback();
-    } catch (err) {
+    } catch (err: unknown) {
       console.error("Failed to submit score:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!handleSessionExpired(msg)) {
+        toast.error("Failed to submit score. Please try again.");
+      }
       setScoreBarFrozen(false);
       setScoreLoading(false);
       frozenStatsRef.current = null;
@@ -754,6 +772,14 @@ export default function ChallengePage() {
       (error) => {
         if (error === "AbortError") return;
         console.error("Chat error:", error);
+        if (handleSessionExpired(error)) {
+          setCurrentStreamingMessage("");
+          setIsStreaming(false);
+          setIsWaitingForFirstToken(false);
+          setEstimatedTokens(0);
+          abortControllerRef.current = null;
+          return;
+        }
         const errorMessage: ChatMessage = {
           role: "assistant",
           content: `Error: ${error}`,
@@ -761,7 +787,7 @@ export default function ChallengePage() {
         setMessages([...updatedMessages, errorMessage]);
         setCurrentStreamingMessage("");
         setIsStreaming(false);
-        setIsWaitingForFirstToken(false); // Ensure cleared
+        setIsWaitingForFirstToken(false);
         setEstimatedTokens(0);
         abortControllerRef.current = null;
       },
