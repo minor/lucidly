@@ -19,6 +19,9 @@ dependencies = [
     "sentry-sdk[fastapi]>=2.52.0",
 ]
 
+[dependency-groups]
+dev = ["pytest>=7.0"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

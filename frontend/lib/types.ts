@@ -92,7 +92,8 @@ export interface Scores {
 }
 
 export interface LeaderboardEntry {
-  id?: string; // Optional if not always returned by all endpoints, but db has it
+  id?: string;
+  rank: number;
   username: string;
   composite_score: number;
   accuracy_score: number;
@@ -101,10 +102,36 @@ export interface LeaderboardEntry {
   challenge_title?: string;
   total_turns: number;
   total_tokens: number;
-  completed_at: number | string; // Supabase returns string
-  accuracy?: number; // Raw accuracy
+  completed_at: number | string;
+  accuracy?: number;
   time_seconds?: number;
   total_cost?: number;
+}
+
+export interface OverallLeaderboardEntry {
+  rank: number;
+  username: string;
+  total_score: number;
+  challenges_completed: number;
+}
+
+export interface LeaderboardUserEntry {
+  rank: number;
+  username: string;
+  composite_score?: number;
+  total_score?: number;
+  challenges_completed?: number;
+  accuracy?: number;
+  time_seconds?: number;
+  total_turns?: number;
+  total_tokens?: number;
+  total_cost?: number;
+}
+
+export interface LeaderboardResponse<T> {
+  entries: T[];
+  total_count: number;
+  user_entry?: LeaderboardUserEntry;
 }
 
 export interface Agent {

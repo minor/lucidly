@@ -179,32 +179,66 @@ async def set_username(auth0_id: str, username: str) -> bool:
         return False
 
 
+_EMPTY_LEADERBOARD: dict = {"entries": [], "total_count": 0}
+
+
 async def get_leaderboard(
-    challenge_id: str = None, 
-    limit: int = 50,
-    sort_by: str = "composite_score", 
-    ascending: bool = False
-) -> list[dict]:
-    """
-    Fetch leaderboard entries.
-    """
+    challenge_id: str | None = None,
+    limit: int = 10,
+    offset: int = 0,
+    username: str | None = None,
+    sort_by: str = "composite_score",
+) -> dict:
+    """Per-question leaderboard via Postgres RPC (all aggregation in DB)."""
     supabase = get_supabase_client()
-    if not supabase:
-        return []
+    if not supabase or not challenge_id:
+        return _EMPTY_LEADERBOARD
 
     try:
-        query = supabase.table("challenge_sessions").select("*")
-        
-        if challenge_id:
-            query = query.eq("challenge_id", challenge_id)
-            
-        # Mapping sort keys to DB columns if needed (currently they match)
-        order_col = sort_by
-        
-        query = query.order(order_col, desc=not ascending).limit(limit)
-        
-        response = query.execute()
-        return response.data
+        response = supabase.rpc(
+            "get_challenge_leaderboard",
+            {
+                "p_challenge_id": challenge_id,
+                "p_limit": limit,
+                "p_offset": offset,
+                "p_sort_by": sort_by,
+                "p_username": username,
+            },
+        ).execute()
+
+        data = response.data
+        if isinstance(data, dict):
+            return data
+        return _EMPTY_LEADERBOARD
     except Exception as e:
         logger.error(f"Error fetching leaderboard: {e}")
-        return []
+        return _EMPTY_LEADERBOARD
+
+
+async def get_overall_leaderboard(
+    limit: int = 10,
+    offset: int = 0,
+    username: str | None = None,
+) -> dict:
+    """Overall leaderboard via Postgres RPC (all aggregation in DB)."""
+    supabase = get_supabase_client()
+    if not supabase:
+        return _EMPTY_LEADERBOARD
+
+    try:
+        response = supabase.rpc(
+            "get_overall_leaderboard",
+            {
+                "p_limit": limit,
+                "p_offset": offset,
+                "p_username": username,
+            },
+        ).execute()
+
+        data = response.data
+        if isinstance(data, dict):
+            return data
+        return _EMPTY_LEADERBOARD
+    except Exception as e:
+        logger.error(f"Error fetching overall leaderboard: {e}")
+        return _EMPTY_LEADERBOARD

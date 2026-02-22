@@ -2,7 +2,8 @@
 
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { getChallenge, runTests, runCode, createSandbox, terminateSandbox, MODEL_PRICING, MODELS, calculateScore, evaluateUI, createVercelSandbox, updateVercelSandboxCode, stopVercelSandbox, streamPromptFeedback } from "@/lib/api";
+import { toast } from "sonner";
+import { getChallenge, runTests, runCode, createSandbox, terminateSandbox, MODEL_PRICING, MODELS, createVercelSandbox, updateVercelSandboxCode, stopVercelSandbox, streamPromptFeedback, createScoringSession, submitScore } from "@/lib/api";
 import { PromptInput } from "@/components/PromptInput";
 import { ScoreBar } from "@/components/ScoreBar";
 import { SimpleMarkdown } from "@/components/SimpleMarkdown";
@@ -84,6 +85,7 @@ export default function ChallengePage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [currentStreamingMessage, setCurrentStreamingMessage] = useState("");
+  const [lastTurnAborted, setLastTurnAborted] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
@@ -122,6 +124,19 @@ export default function ChallengePage() {
   const [vercelSandboxLoading, setVercelSandboxLoading] = useState(false);
   const vercelSandboxIdRef = useRef<string | null>(null);
   const [iframeKey, setIframeKey] = useState(0); // bump to force iframe reload
+
+  // Scoring session (server-side tamper-proof stat tracking)
+  const scoringSessionIdRef = useRef<string | null>(null);
+  const [sessionExpired, setSessionExpired] = useState(false);
+
+  const handleSessionExpired = useCallback((errMsg?: string) => {
+    const isExpired = errMsg && /expired|not found/i.test(errMsg);
+    if (!isExpired) return false;
+    scoringSessionIdRef.current = null;
+    setSessionExpired(true);
+    toast.error("Your session has expired. Please start a new challenge attempt.");
+    return true;
+  }, []);
 
   // Abort controller
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -200,6 +215,25 @@ export default function ChallengePage() {
       ignore = true;
     };
   }, [challengeId]);
+
+  // Create scoring session once when challenge + username are ready
+  useEffect(() => {
+    if (!challenge || !isAuthenticated || usernameLoading) return;
+    if (scoringSessionIdRef.current) return;
+    const authUsername = username || user?.nickname || user?.name || "anonymous";
+    let ignore = false;
+    createScoringSession({
+      challenge_id: challengeId,
+      username: authUsername,
+    })
+      .then((res) => {
+        if (!ignore) scoringSessionIdRef.current = res.session_id;
+      })
+      .catch((err) => console.error("Failed to create scoring session:", err));
+    return () => {
+      ignore = true;
+    };
+  }, [challenge, challengeId, isAuthenticated, usernameLoading, username, user]);
 
   // Timer Logic (Merged)
   useEffect(() => {
@@ -440,7 +474,7 @@ export default function ChallengePage() {
         setLatestCode(code);
         setRunningTests(true);
         setIsExecuting(true);
-        runTests(code, challengeId, sandboxId)
+        runTests(code, challengeId, sandboxId, scoringSessionIdRef.current ?? undefined)
           .then((results) => {
             setTestResults(results);
             setRunningTests(false);
@@ -448,6 +482,7 @@ export default function ChallengePage() {
           })
           .catch((err) => {
             console.error("Test run failed:", err);
+            handleSessionExpired(err.message);
             setRunningTests(false);
             setIsExecuting(false);
           });
@@ -488,9 +523,9 @@ export default function ChallengePage() {
       abortControllerRef.current = null;
       setIsStreaming(false);
       setIsWaitingForFirstToken(false);
+      setLastTurnAborted(true);
       if (estimatedTokens > 0 || inputCost > 0) {
         setTotalTokens((t) => t + Math.round(estimatedTokens));
-        // Calculate estimated output cost dynamically
         const pricing = MODEL_PRICING[selectedModel] || MODEL_PRICING["gpt-5.2"];
         const outputCost = (estimatedTokens * pricing.output) / 1_000_000;
         setTotalCost((c) => c + inputCost + outputCost);
@@ -500,6 +535,12 @@ export default function ChallengePage() {
     }
   };
 
+  const handleUndoAbortedTurn = () => {
+    if (!lastTurnAborted || messages.length < 2) return;
+    setMessages((prev) => prev.slice(0, -2));
+    setLastTurnAborted(false);
+  };
+
   const isUiChallenge = challenge?.category === "ui";
   const hasFunctionTests = challenge?.test_suite && challenge.test_suite.length > 0;
   const isDataChallenge = challenge?.category === "data";
@@ -507,81 +548,69 @@ export default function ChallengePage() {
   const productParts = challenge?.product_parts ?? [];
 
   const handleSubmitSolution = async () => {
-    if (submitState !== "idle") return;
+    if (sessionExpired || submitState !== "idle") return;
 
-    // Calculate accuracy based on challenge type
-    let accuracy = 0.0;
-    let evaluatedUiScore: number | undefined = undefined;
-    let messagesForScore = messages;
-
-    // Freeze the score bar stats first
+    // Freeze the score bar stats for display (informational only)
     const currentElapsed = elapsed;
     const currentTurns = totalTurns;
     const currentTokens = Math.round(totalTokens + totalInputTokens + estimatedTokens);
     const currentCost = totalCost + inputCost + ((estimatedTokens * (MODEL_PRICING[selectedModel]?.output || MODEL_PRICING["gpt-5.2"].output)) / 1_000_000);
-    
+
     setScoreBarFrozen(true);
     setSubmitState("pending");
     setScoreLoading(true);
-    
+
+    // Client-side accuracy preview for the frozen stats display
+    let previewAccuracy: number | undefined;
+    let previewScore: number | undefined;
+    if (isProductChallenge) {
+      previewAccuracy = undefined;
+      previewScore = undefined;
+    } else if (isUiChallenge) {
+      previewAccuracy = uiScore != null ? uiScore / 100 : undefined;
+      previewScore = uiScore;
+    } else if (hasFunctionTests && testResults) {
+      previewAccuracy = testResults.passed_count / testResults.total_count;
+      previewScore = previewAccuracy * 100;
+    } else if (isDataChallenge && codeResult) {
+      previewAccuracy = codeResult.returncode === 0 ? 1.0 : 0.0;
+      previewScore = previewAccuracy * 100;
+    }
+
+    frozenStatsRef.current = {
+      elapsed: currentElapsed,
+      turns: currentTurns,
+      tokens: currentTokens,
+      accuracy: previewAccuracy,
+      score: previewScore,
+      cost: currentCost,
+    };
+
     try {
-      if (isProductChallenge) {
-        accuracy = 1.0; // No automated grading for PRD; completion counts
-        messagesForScore = [
-          ...messages,
-          { role: "assistant" as const, content: `## PRD\n\n${prdContent}` },
-        ];
-      } else if (isUiChallenge) {
-        if (renderedCode) {
-          const result = await evaluateUI(challengeId, renderedCode);
-          accuracy = result.score / 100;
-          evaluatedUiScore = result.score;
-          setUiScore(result.score);
-        }
-      } else if (hasFunctionTests && testResults) {
-        accuracy = testResults.passed_count / testResults.total_count;
-      } else if (isDataChallenge && codeResult) {
-        accuracy = codeResult.returncode === 0 ? 1.0 : 0.0;
+      const sessionId = scoringSessionIdRef.current;
+      if (!sessionId) {
+        throw new Error("No scoring session — please refresh the page");
       }
-      
-      // Update frozen stats (product has no accuracy/score — composite = efficiency only)
-      frozenStatsRef.current = {
-        elapsed: currentElapsed,
-        turns: currentTurns,
-        tokens: currentTokens,
-        accuracy: isProductChallenge ? undefined : (isUiChallenge ? accuracy : (testResults ? testResults.passed_count / testResults.total_count : undefined)),
-        score: isProductChallenge ? undefined : (isUiChallenge ? evaluatedUiScore : (testResults ? (testResults.passed_count / testResults.total_count) * 100 : undefined)),
-        cost: currentCost,
-      };
-      
-      // Calculate composite score AND auto-submit to leaderboard with chosen username
-      const authUsername = username || user?.nickname || user?.name || "anonymous";
-      const scores = await calculateScore({
-        challenge_id: challengeId,
-        accuracy: isProductChallenge ? 0 : accuracy,
-        elapsed_sec: currentElapsed,
-        total_tokens: currentTokens,
-        total_turns: currentTurns,
-        difficulty: challenge?.difficulty || "medium",
-        model: selectedModel,
-        ...(challenge?.category ? { category: challenge.category } : {}),
-        ...(isProductChallenge && prdContent.trim() ? { prd_content: prdContent } : {}),
-        username: authUsername,
-        messages: isProductChallenge
-          ? [...messages, { role: "assistant" as const, content: `## PRD\n\n${prdContent}` }]
-          : messages,
-        total_cost: currentCost,
+
+      const scores = await submitScore(sessionId, {
+        code: latestCode || undefined,
+        sandbox_id: sandboxId ?? undefined,
+        generated_html: isUiChallenge ? renderedCode || undefined : undefined,
+        prd_content: isProductChallenge && prdContent.trim() ? prdContent : undefined,
       });
-      
+
       setFinalScores(scores);
       setScoreLoading(false);
       setSubmitState("completed");
       setShowCompletionModal(true);
 
-      // Auto-trigger prompt feedback analysis
       triggerPromptFeedback();
-    } catch (err) {
-      console.error("Failed to calculate score:", err);
+    } catch (err: unknown) {
+      console.error("Failed to submit score:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!handleSessionExpired(msg)) {
+        toast.error("Failed to submit score. Please try again.");
+      }
       setScoreBarFrozen(false);
       setScoreLoading(false);
       frozenStatsRef.current = null;
@@ -590,8 +619,8 @@ export default function ChallengePage() {
   };
 
   const handleRetry = () => {
-    // Reset all state to restart
     setMessages([]);
+    setLastTurnAborted(false);
     setRenderedCode("");
     setTestResults(null);
     setLatestCode("");
@@ -624,15 +653,14 @@ export default function ChallengePage() {
     setWorkspaceTab("chat");
     if (feedbackAbortRef.current) feedbackAbortRef.current.abort();
 
-    // Vercel sandbox reset (disabled — not in use)
-    // if (vercelSandboxId && vercelSandboxReady) {
-    //   updateVercelSandboxCode(
-    //     vercelSandboxId,
-    //     '<html><body style="display:flex;align-items:center;justify-content:center;height:100vh;margin:0;font-family:system-ui;color:#94a3b8;"><p>Waiting for code...</p></body></html>'
-    //   ).then(() => {
-    //     setIframeKey((k) => k + 1);
-    //   }).catch(() => {});
-    // }
+    // Create a fresh scoring session for the new attempt
+    const authUsername = username || user?.nickname || user?.name || "anonymous";
+    scoringSessionIdRef.current = null;
+    createScoringSession({ challenge_id: challengeId, username: authUsername })
+      .then((res) => {
+        scoringSessionIdRef.current = res.session_id;
+      })
+      .catch((err) => console.error("Failed to create scoring session:", err));
   };
 
   const triggerPromptFeedback = async () => {
@@ -677,6 +705,7 @@ export default function ChallengePage() {
   };
 
   const handleSubmit = async (prompt: string, model: string) => {
+    if (sessionExpired) return;
     if (!prompt.trim() || isStreaming || isExecuting || submitState !== "idle") return;
 
     // Require auth before prompting
@@ -686,6 +715,7 @@ export default function ChallengePage() {
     }
 
     setSelectedModel(model);
+    setLastTurnAborted(false);
 
     const userMessage: ChatMessage = { role: "user", content: prompt };
     const updatedMessages = [...messages, userMessage];
@@ -727,6 +757,14 @@ export default function ChallengePage() {
       (error) => {
         if (error === "AbortError") return;
         console.error("Chat error:", error);
+        if (handleSessionExpired(error)) {
+          setCurrentStreamingMessage("");
+          setIsStreaming(false);
+          setIsWaitingForFirstToken(false);
+          setEstimatedTokens(0);
+          abortControllerRef.current = null;
+          return;
+        }
         const errorMessage: ChatMessage = {
           role: "assistant",
           content: `Error: ${error}`,
@@ -734,7 +772,7 @@ export default function ChallengePage() {
         setMessages([...updatedMessages, errorMessage]);
         setCurrentStreamingMessage("");
         setIsStreaming(false);
-        setIsWaitingForFirstToken(false); // Ensure cleared
+        setIsWaitingForFirstToken(false);
         setEstimatedTokens(0);
         abortControllerRef.current = null;
       },
@@ -756,7 +794,8 @@ export default function ChallengePage() {
         }
       },
       abortControllerRef.current?.signal,
-      isProductChallenge && productPart === 1 ? challengeId : undefined
+      isProductChallenge && productPart === 1 ? challengeId : undefined,
+      scoringSessionIdRef.current ?? undefined
     );
   };
 
@@ -819,48 +858,45 @@ export default function ChallengePage() {
       {/* Score Overlay */}
       {submitState === "completed" && finalScores && showCompletionModal && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/95 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="w-full max-w-2xl rounded-2xl border border-border bg-card p-12 shadow-2xl text-center relative">
-            {/* Close button */}
+          <div className="w-full max-w-2xl rounded-xl border border-border bg-card p-6 shadow-2xl text-center relative">
             <button
               onClick={() => {
                 setShowCompletionModal(false);
-                // Keep submitState as "completed" to maintain frozen state
-                // Timer will stay frozen, chat disabled, button shows "Retry"
               }}
-              className="absolute top-4 right-4 text-muted hover:text-foreground transition-colors cursor-pointer p-1 rounded-md hover:bg-muted/10"
+              className="absolute top-3 right-3 text-muted hover:text-foreground transition-colors cursor-pointer p-1.5 rounded-lg hover:bg-muted/10"
               aria-label="Close modal"
             >
               <X className="h-5 w-5" />
             </button>
             
-            <div className="mb-8 flex justify-center">
-              <div className="rounded-full bg-accent/10 p-4">
-                <Trophy className="h-12 w-12 text-accent" />
+            <div className="mb-4 flex justify-center">
+              <div className="rounded-full bg-accent/10 p-3">
+                <Trophy className="h-8 w-8 text-accent" />
               </div>
             </div>
             
-            <h2 className="mb-2 text-3xl font-bold tracking-tight">Challenge Complete!</h2>
-            <p className="mb-8 text-muted">Great job! Here&apos;s how you performed.</p>
+            <h2 className="mb-1 text-2xl font-bold tracking-tight">Challenge Complete!</h2>
+            <p className="mb-5 text-sm text-muted">Great job! Here&apos;s how you performed.</p>
 
-            <div className="mb-10 flex justify-center">
+            <div className="mb-6 flex justify-center">
               <div className="relative">
                 <div className="text-center">
-                  <div className="text-6xl font-black text-foreground font-mono tracking-tighter">
+                  <div className="text-5xl font-black text-foreground font-mono tracking-tighter">
                     {finalScores.composite_score}
                   </div>
-                  <div className="mt-2 text-sm font-medium text-muted uppercase tracking-widest flex items-center justify-center gap-1">
+                  <div className="mt-1 text-xs font-medium text-muted uppercase tracking-widest flex items-center justify-center gap-1">
                     Final Score
                     <button
                       onClick={() => setShowScoreExplainer((v) => !v)}
                       className="inline-flex items-center justify-center rounded-full text-muted hover:text-foreground transition-colors cursor-pointer"
                       aria-label="How is the score calculated?"
                     >
-                      <HelpCircle className="h-3.5 w-3.5" />
+                      <HelpCircle className="h-3 w-3" />
                     </button>
                   </div>
                 </div>
                 {showScoreExplainer && (
-                  <div className="absolute left-full top-0 ml-4 w-52 rounded-lg border border-border bg-background p-3 text-left text-xs text-muted leading-relaxed shadow-lg animate-in fade-in slide-in-from-left-1 duration-150">
+                  <div className="absolute left-full top-0 ml-3 w-48 rounded-lg border border-border bg-background p-2.5 text-left text-xs text-muted leading-relaxed shadow-lg animate-in fade-in slide-in-from-left-1 duration-150">
                     <p className="mb-1 font-semibold text-foreground text-[11px] uppercase tracking-wider">Scoring</p>
                     <p>
                       ELO-style rating (0–1000) weighted by{" "}
@@ -873,7 +909,7 @@ export default function ChallengePage() {
               </div>
             </div>
 
-            <div className="mb-10 flex justify-center">
+            <div className="mb-6 flex justify-center">
               <ScoreBar 
                 accuracy={isProductChallenge ? undefined : finalScores.accuracy_score / 1000}
                 score={isProductChallenge ? undefined : (frozenStatsRef.current?.score)}
@@ -885,44 +921,44 @@ export default function ChallengePage() {
               />
             </div>
 
-            <div className="mx-auto max-w-sm space-y-4">
-              <div className="rounded-lg bg-green-500/10 border border-green-500/20 p-3 text-green-500 flex items-center justify-center gap-2 animate-in fade-in duration-300">
-                <CheckCircle2 className="h-4 w-4" />
-                <span className="text-sm font-medium">Score submitted as {username || user?.nickname || user?.name || "anonymous"}</span>
+            <div className="mx-auto max-w-xs space-y-3">
+              <div className="rounded-lg bg-green-500/10 border border-green-500/20 p-2.5 text-green-500 flex items-center justify-center gap-2 animate-in fade-in duration-300">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                <span className="text-xs font-medium">Score submitted as {username || user?.nickname || user?.name || "anonymous"}</span>
               </div>
               
-              <div className="flex gap-2 mt-2">
+              <div className="flex gap-2">
                 <button 
                   onClick={() => {
                     setShowCompletionModal(false);
                     setWorkspaceTab("feedback");
                   }}
-                  className="flex-1 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground hover:bg-accent/90 transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                  className="flex-1 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-accent-foreground hover:bg-accent/90 transition-colors cursor-pointer flex items-center justify-center gap-1.5"
                 >
                   <Lightbulb className="h-3.5 w-3.5" />
                   {isProductChallenge ? "View PRD Feedback" : "View Prompt Feedback"}
                 </button>
               </div>
-              <div className="flex gap-2 mt-2">
+              <div className="flex gap-2">
                 <button 
                   onClick={() => {
                     setShowCompletionModal(false);
                     setWorkspaceTab("chat");
                   }}
-                  className="flex-1 rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium text-foreground hover:bg-accent/10 hover:border-accent/40 transition-colors cursor-pointer"
+                  className="flex-1 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium text-foreground hover:bg-accent/10 hover:border-accent/40 transition-colors cursor-pointer"
                 >
                   View My Response
                 </button>
                 <button 
                   onClick={handleRetry}
-                  className="flex-1 rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium text-foreground hover:bg-accent/10 hover:border-accent/40 transition-colors cursor-pointer"
+                  className="flex-1 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium text-foreground hover:bg-accent/10 hover:border-accent/40 transition-colors cursor-pointer"
                 >
                   Retry Challenge
                 </button>
               </div>
               <button 
                 onClick={() => router.push("/play")}
-                className="text-sm text-muted hover:text-foreground underline underline-offset-4 cursor-pointer"
+                className="text-xs text-muted hover:text-foreground underline underline-offset-4 cursor-pointer"
               >
                 Return to All Challenges
               </button>
@@ -981,6 +1017,7 @@ export default function ChallengePage() {
             type="button"
             onClick={submitState === 'completed' ? handleRetry : handleSubmitSolution}
             disabled={
+                sessionExpired ||
                 submitState === "pending" ||
                 isExecuting ||
                 isStreaming ||
@@ -1577,6 +1614,18 @@ export default function ChallengePage() {
           )}
 
           <div className="border-t border-border bg-background">
+            {lastTurnAborted && messages.length >= 2 && (
+              <div className="px-6 pt-3 pb-0">
+                <button
+                  type="button"
+                  onClick={handleUndoAbortedTurn}
+                  className="flex items-center gap-1.5 text-xs text-muted hover:text-foreground transition-colors"
+                >
+                  <ArrowLeft className="h-3 w-3" />
+                  Undo aborted turn
+                </button>
+              </div>
+            )}
             <div className="px-6 py-4">
               <div className="flex justify-between items-center mb-2">
                 <div></div>
@@ -1589,12 +1638,13 @@ export default function ChallengePage() {
                 onModelChange={setSelectedModel}
                 fixedModel={isProductChallenge && productPart === 1 ? "gpt-5.2" : undefined}
                 placeholder={isProductChallenge && productPart === 1 ? "Ask the CRO..." : "Ask anything..."}
-                disabled={isStreaming || isExecuting || submitState === "pending" || submitState === "completed"}
+                disabled={sessionExpired || isStreaming || isExecuting || submitState === "pending" || submitState === "completed"}
                 extraButton={
                   <button
                     type="button"
                     onClick={submitState === "completed" ? handleRetry : handleSubmitSolution}
                     disabled={
+                      sessionExpired ||
                       submitState === "pending" ||
                       isExecuting ||
                       isStreaming ||

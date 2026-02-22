@@ -4,6 +4,7 @@ import { Lora, DM_Sans } from "next/font/google";
 import "./globals.css";
 import { Auth0Provider } from "@/components/Auth0Provider";
 import { LayoutShell } from "@/components/LayoutShell";
+import { Toaster } from "sonner";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -50,6 +51,7 @@ export default function RootLayout({
         <Auth0Provider>
           <LayoutShell>{children}</LayoutShell>
         </Auth0Provider>
+        <Toaster position="top-center" richColors />
       </body>
     </html>
   );

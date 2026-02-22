@@ -96,6 +96,24 @@ def _configure_agent_trace_logging():
         _agent_log.propagate = False
 
 
+_CLEANUP_INTERVAL_SECONDS = 300  # run every 5 minutes
+
+
+async def _session_cleanup_loop() -> None:
+    """Periodically purge scoring sessions older than the TTL."""
+    while True:
+        await asyncio.sleep(_CLEANUP_INTERVAL_SECONDS)
+        try:
+            cleanup_expired_sessions()
+        except Exception:
+            logging.getLogger(__name__).exception("Error during session cleanup")
+
+
+@app.on_event("startup")
+def _start_session_cleanup() -> None:
+    asyncio.get_event_loop().create_task(_session_cleanup_loop())
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -142,6 +160,7 @@ class ChatRequest(BaseModel):
     messages: list[ChatMessage]
     model: str | None = None
     challenge_id: str | None = None  # When set, backend may inject challenge-specific system prompt (e.g. product CRO agent)
+    scoring_session_id: str | None = None
 
 
 class PromptResponse(BaseModel):
@@ -395,19 +414,43 @@ async def finish_session(session_id: str, request: Request):
 # ---------------------------------------------------------------------------
 
 
+VALID_SORT_KEYS = {"composite_score", "accuracy", "time_seconds", "total_turns", "total_tokens", "total_cost"}
+
+
 @app.get("/api/leaderboard")
-async def leaderboard(limit: int = 50, category: str | None = None, challenge_id: str | None = None):
-    """Fetch leaderboard entries from Supabase."""
+async def leaderboard(
+    challenge_id: str | None = None,
+    limit: int = 10,
+    offset: int = 0,
+    username: str | None = None,
+    sort_by: str = "composite_score",
+):
+    """Per-question leaderboard: best attempt per user, paginated."""
     from database import get_leaderboard as get_db_leaderboard
-    
-    # Fetch from Supabase
-    entries = await get_db_leaderboard(challenge_id=challenge_id, limit=limit)
-    
-    # Filter by category if provided (since DB currently filters by challenge_id only)
-    if category and category != "all":
-        entries = [e for e in entries if e.get("category") == category]
-        
-    return entries
+
+    return await get_db_leaderboard(
+        challenge_id=challenge_id,
+        limit=max(1, min(limit, 100)),
+        offset=max(0, offset),
+        username=username,
+        sort_by=sort_by if sort_by in VALID_SORT_KEYS else "composite_score",
+    )
+
+
+@app.get("/api/leaderboard/overall")
+async def leaderboard_overall(
+    limit: int = 10,
+    offset: int = 0,
+    username: str | None = None,
+):
+    """Overall leaderboard: sum of top scores across challenges, paginated."""
+    from database import get_overall_leaderboard
+
+    return await get_overall_leaderboard(
+        limit=max(1, min(limit, 100)),
+        offset=max(0, offset),
+        username=username,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -460,17 +503,236 @@ async def check_username_available(username: str):
 
 
 # ---------------------------------------------------------------------------
-# Score calculation endpoint (for direct score calculation without session)
+# Scoring Sessions (tamper-proof server-side scoring)
+# ---------------------------------------------------------------------------
+
+from scoring_sessions import (
+    create_scoring_session,
+    get_scoring_session,
+    record_turn as ss_record_turn,
+    record_partial_turn as ss_record_partial_turn,
+    record_processing_time as ss_record_processing_time,
+    freeze_timer as ss_freeze_timer,
+    unfreeze_timer as ss_unfreeze_timer,
+    complete_scoring_session,
+    delete_scoring_session,
+    cleanup_expired_sessions,
+)
+
+
+class CreateScoringSessionRequest(BaseModel):
+    challenge_id: str
+    username: str
+    model: str = "unknown"
+
+
+class SubmitScoreRequest(BaseModel):
+    code: str | None = None
+    sandbox_id: str | None = None
+    generated_html: str | None = None
+    prd_content: str | None = None
+
+
+@app.post("/api/scoring-sessions")
+async def create_scoring_session_endpoint(req: CreateScoringSessionRequest):
+    """Create a server-side scoring session for tamper-proof stat tracking."""
+    challenge = get_challenge_by_id(req.challenge_id)
+    if challenge is None:
+        raise HTTPException(status_code=404, detail="Challenge not found")
+
+    session = create_scoring_session(
+        challenge_id=req.challenge_id,
+        username=req.username,
+        model=req.model,
+    )
+    return {"session_id": session.id, "started_at": session.started_at}
+
+
+
+@app.post("/api/scoring-sessions/{session_id}/submit")
+async def submit_scoring_session(session_id: str, req: SubmitScoreRequest):
+    """Verify accuracy server-side, compute all metrics from the scoring session, and persist to Supabase."""
+    session = get_scoring_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=410, detail="Scoring session expired or not found")
+    if session.status != "active":
+        raise HTTPException(status_code=400, detail="Scoring session already completed")
+
+    challenge = get_challenge_by_id(session.challenge_id)
+    if challenge is None:
+        raise HTTPException(status_code=404, detail="Challenge not found")
+
+    # --- 1. Verify accuracy server-side ---
+    accuracy = 0.0
+    category = getattr(challenge, "category", "") or ""
+    is_product = category == "product"
+    is_ui = category == "ui"
+    has_tests = bool(challenge.test_suite)
+
+    if is_product:
+        accuracy = 0.0
+    elif is_ui:
+        if req.generated_html:
+            try:
+                from pathlib import Path
+                project_root = Path(__file__).parent.parent
+                html_path = project_root / challenge.html_url
+                with open(html_path, "r", encoding="utf-8") as f:
+                    reference_html = f.read()
+                evaluation_prompt = f"""You are a kind and generous scoring expert when it comes to evaluating HTML code similarity. Compare the reference HTML code with the generated HTML code and provide a similarity score between 0-100.
+
+Consider the following aspects when evaluating:
+1. **Structure and Layout**: HTML structure, element hierarchy, semantic elements
+2. **Styling**: CSS styles, colors, fonts, spacing, layout properties
+3. **Content**: Text content, images, links, and other media
+4. **Overall Visual Match**: How closely the generated code would render compared to the reference
+
+**Reference HTML Code:**
+```html
+{reference_html}
+```
+
+**Generated HTML Code:**
+```html
+{req.generated_html}
+```
+
+**Challenge Description:**
+{challenge.description}
+
+Please evaluate the similarity and provide your response in the following JSON format:
+{{"score": <number between 0-100>, "reasoning": "<detailed explanation>"}}"""
+                llm = LLM(
+                    model=settings.default_model,
+                    system_prompt="You are an expert HTML/CSS/JavaScript evaluator. Provide accurate and detailed similarity assessments.",
+                    temperature=0.3,
+                )
+                response = await llm.generate(evaluation_prompt)
+                json_match = re.search(r'\{.*?\}', response.response_text, re.DOTALL)
+                if json_match:
+                    result = json.loads(json_match.group(0))
+                    accuracy = max(0.0, min(1.0, result.get("score", 0) / 100))
+            except Exception as e:
+                logger.error(f"UI evaluation failed during submit: {e}")
+    elif has_tests:
+        if session.last_test_accuracy is not None:
+            accuracy = session.last_test_accuracy
+        elif req.code and req.sandbox_id:
+            try:
+                test_dicts = [t.model_dump() for t in challenge.test_suite]
+                raw_results = await run_function_tests_detailed(req.sandbox_id, req.code, test_dicts)
+                passed = sum(1 for r in raw_results if r.get("passed"))
+                accuracy = passed / len(raw_results) if raw_results else 0.0
+            except Exception as e:
+                logger.error(f"Test execution failed during submit: {e}")
+    else:
+        if req.code and req.sandbox_id:
+            try:
+                from sandbox import run_code_in_sandbox
+                result = await run_code_in_sandbox(req.sandbox_id, req.code)
+                accuracy = 1.0 if result.get("returncode") == 0 else 0.0
+            except Exception as e:
+                logger.error(f"Code execution failed during submit: {e}")
+
+    # --- 2. Compute elapsed time (server-controlled) ---
+    end_time = session.frozen_at or time.time()
+    elapsed_sec = end_time - session.started_at - session.server_processing_seconds
+    elapsed_sec = max(0.0, elapsed_sec)
+
+    # --- 3. Read server-tracked stats ---
+    total_tokens = session.total_input_tokens + session.total_output_tokens
+    total_turns = session.total_turns
+    total_cost = session.total_cost
+
+    # --- 4. Compute composite score ---
+    difficulty = getattr(challenge, "difficulty", "medium") or "medium"
+    scores = compute_composite_score(
+        accuracy=accuracy,
+        elapsed_sec=elapsed_sec,
+        total_tokens=total_tokens,
+        total_turns=total_turns,
+        difficulty=difficulty,
+        total_cost=total_cost,
+    )
+
+    if is_product and (req.prd_content or "").strip():
+        try:
+            prd_req = PromptFeedbackRequest(
+                messages=[ChatMessage(role=m.get("role", "user"), content=m.get("content", "")) for m in session.messages],
+                challenge_id=session.challenge_id,
+                challenge_description=getattr(challenge, "description", "") or session.challenge_id,
+                challenge_category="product",
+                challenge_difficulty=difficulty,
+                prd_content=req.prd_content or "",
+                total_turns=total_turns,
+                total_tokens=total_tokens,
+                elapsed_sec=elapsed_sec,
+            )
+            prompt = _build_prd_feedback_prompt(prd_req)
+            feedback_llm = LLM(
+                base_url=settings.openai_base_url,
+                api_key=settings.openai_api_key,
+                model=settings.default_model,
+                system_prompt=PROMPT_FEEDBACK_PRD_SYSTEM_PROMPT,
+            )
+            llm_response = await feedback_llm.generate(prompt, temperature=0.4)
+            _, total_100 = _parse_prd_section_scores(llm_response.response_text)
+            scores["composite_score"] = min(100, max(0, total_100))
+        except Exception as e:
+            logger.warning("PRD grading failed during submit: %s", e)
+
+    # --- 5. Write to Supabase ---
+    try:
+        from database import save_challenge_session
+
+        db_session_id = await save_challenge_session(
+            challenge_id=session.challenge_id,
+            title=challenge.title,
+            category=challenge.category,
+            difficulty=difficulty,
+            model=session.model,
+            username=session.username,
+            accuracy=accuracy,
+            time_seconds=elapsed_sec,
+            total_tokens=total_tokens,
+            total_turns=total_turns,
+            total_cost=total_cost,
+            composite_score=scores["composite_score"],
+            accuracy_score=scores["accuracy_score"],
+            speed_score=scores["speed_score"],
+            token_score=scores["token_score"],
+            turn_score=scores["turn_score"],
+            messages=[
+                {"role": m["role"], "content": m["content"]}
+                for m in session.messages
+            ],
+        )
+        if db_session_id:
+            scores["db_session_id"] = db_session_id
+    except Exception as e:
+        logger.error(f"Failed to save score from scoring session: {e}")
+
+    # --- 6. Mark completed ---
+    complete_scoring_session(session_id)
+
+    return scores
+
+
+# ---------------------------------------------------------------------------
+# Score calculation endpoint (preview only — does NOT persist to DB)
 # ---------------------------------------------------------------------------
 
 
 @app.post("/api/calculate-score")
 async def calculate_score(req: CalculateScoreRequest):
-    """Calculate composite score from challenge stats and persist to DB."""
+    """Calculate composite score preview. Does NOT persist to DB.
+
+    DB writes go through POST /api/scoring-sessions/{id}/submit which verifies
+    all metrics server-side.
+    """
     challenge = get_challenge_by_id(req.challenge_id)
     is_product = req.category == "product" or (challenge and getattr(challenge, "category", None) == "product")
     if is_product:
-        # Product/PRD: base ELO scores with accuracy=0; composite overridden by PRD grading if available
         scores = compute_composite_score(
             accuracy=0.0,
             elapsed_sec=req.elapsed_sec,
@@ -480,7 +742,6 @@ async def calculate_score(req: CalculateScoreRequest):
             total_cost=req.total_cost or 0.0,
         )
         if (req.prd_content or "").strip():
-            # Grade PRD with LLM; total = (sum of four dimension scores 0–10 each) * 10 / 4 = sum*2.5 → 0–100
             try:
                 prd_req = PromptFeedbackRequest(
                     messages=[ChatMessage(role=m.get("role", "user"), content=m.get("content", "")) for m in (req.messages or [])],
@@ -515,36 +776,6 @@ async def calculate_score(req: CalculateScoreRequest):
             total_cost=req.total_cost or 0.0,
         )
 
-    # Persist to Supabase if credentials exist and username/messages are provided
-    if req.username and req.messages:
-        try:
-            from database import save_challenge_session
-
-            if challenge:
-                 db_session_id = await save_challenge_session(
-                    challenge_id=req.challenge_id,
-                    title=challenge.title,
-                    category=challenge.category,
-                    difficulty=req.difficulty,
-                    model=req.model, 
-                    username=req.username,
-                    accuracy=req.accuracy,
-                    time_seconds=req.elapsed_sec,
-                    total_tokens=req.total_tokens,
-                    total_turns=req.total_turns,
-                    total_cost=req.total_cost or 0.0,
-                    composite_score=scores["composite_score"],
-                    accuracy_score=scores["accuracy_score"],
-                    speed_score=scores["speed_score"],
-                    token_score=scores["token_score"],
-                    turn_score=scores["turn_score"],
-                    messages=req.messages
-                 )
-                 if db_session_id:
-                     scores["db_session_id"] = db_session_id
-        except Exception as e:
-            logger.error(f"Failed to save score: {e}")
-        
     return scores
 
 
@@ -817,6 +1048,9 @@ async def chat_stream(req: ChatRequest):
     if not anthropic_messages or anthropic_messages[-1]["role"] != "user":
         raise HTTPException(status_code=400, detail="Last message must be from user")
 
+    if req.scoring_session_id and get_scoring_session(req.scoring_session_id) is None:
+        raise HTTPException(status_code=410, detail="Scoring session expired or not found")
+
     # Resolve system prompt: use product challenge agent context when applicable
     system_message = "You are a helpful AI assistant. Provide clear, concise, and helpful responses."
     if req.challenge_id:
@@ -866,8 +1100,13 @@ async def chat_stream(req: ChatRequest):
     raw_model = req.model or settings.default_model
     model = MODEL_MAPPING.get(raw_model, raw_model)
     
+    user_last_msg = anthropic_messages[-1]["content"] if anthropic_messages else ""
+
     async def generate():
         """Generator function for SSE streaming."""
+        _ss_start = time.time()
+        _turn_recorded = False
+        _partial_response = ""
         try:
             if use_anthropic:
                 # Use Anthropic API directly
@@ -909,6 +1148,7 @@ async def chat_stream(req: ChatRequest):
                         full_response = ""
                         input_tokens = 0
                         output_tokens = 0
+                        _first_chunk_at = None
                         async for line in response.aiter_lines():
                             if line.startswith("data: "):
                                 data_str = line[6:]
@@ -920,12 +1160,14 @@ async def chat_stream(req: ChatRequest):
                                     if event_type == "message_start":
                                         usage = data.get("message", {}).get("usage", {})
                                         input_tokens = usage.get("input_tokens", 0)
-                                        # Send input tokens immediately
                                         yield f"data: {json.dumps({'type': 'usage', 'input_tokens': input_tokens})}\n\n"
                                     elif event_type == "content_block_delta":
                                         chunk = data.get("delta", {}).get("text", "")
                                         if chunk:
+                                            if _first_chunk_at is None:
+                                                _first_chunk_at = time.time()
                                             full_response += chunk
+                                            _partial_response = full_response
                                             yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
                                     elif event_type == "message_delta":
                                         usage = data.get("usage", {})
@@ -952,7 +1194,13 @@ async def chat_stream(req: ChatRequest):
                             pricing = {"input": 15.0, "output": 75.0}
 
                         cost = (input_tokens * pricing["input"] + output_tokens * pricing["output"]) / 1_000_000
-                        
+
+                        if req.scoring_session_id:
+                            ss_record_turn(req.scoring_session_id, input_tokens=input_tokens, output_tokens=output_tokens, cost=cost, user_message=user_last_msg, assistant_message=full_response)
+                            _turn_recorded = True
+                            latency = (_first_chunk_at or time.time()) - _ss_start
+                            ss_record_processing_time(req.scoring_session_id, latency)
+
                         yield f"data: {json.dumps({'type': 'done', 'content': full_response, 'input_tokens': input_tokens, 'output_tokens': output_tokens, 'cost': cost})}\n\n"
             elif use_xai:
                 # Use xAI API for Grok models (OpenAI-compatible)
@@ -978,17 +1226,27 @@ async def chat_stream(req: ChatRequest):
                 )
                 
                 full_response = ""
+                _first_chunk_at = None
                 async for chunk in xai_llm.stream(
                     current_prompt,
                     conversation_history=conversation_history if conversation_history else None,
+                    include_usage=True,
                 ):
+                    if _first_chunk_at is None:
+                        _first_chunk_at = time.time()
                     full_response += chunk
+                    _partial_response = full_response
                     yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
                 
-                est_input_tokens = len(current_prompt.split()) * 2
-                est_output_tokens = len(full_response.split()) * 2
-                
-                yield f"data: {json.dumps({'type': 'usage', 'input_tokens': est_input_tokens})}\n\n"
+                usage = xai_llm.last_usage
+                if usage:
+                    input_tokens = usage["prompt_tokens"]
+                    output_tokens = usage["completion_tokens"]
+                else:
+                    input_tokens = len(current_prompt.split()) * 2
+                    output_tokens = len(full_response.split()) * 2
+
+                yield f"data: {json.dumps({'type': 'usage', 'input_tokens': input_tokens})}\n\n"
 
                 from config import MODEL_PRICING
                 pricing = MODEL_PRICING.get(model)
@@ -1000,9 +1258,15 @@ async def chat_stream(req: ChatRequest):
                 if not pricing:
                     pricing = {"input": 0.20, "output": 0.50}
 
-                cost = (est_input_tokens * pricing["input"] + est_output_tokens * pricing["output"]) / 1_000_000
-                
-                yield f"data: {json.dumps({'type': 'done', 'content': full_response, 'input_tokens': est_input_tokens, 'output_tokens': est_output_tokens, 'cost': cost})}\n\n"
+                cost = (input_tokens * pricing["input"] + output_tokens * pricing["output"]) / 1_000_000
+
+                if req.scoring_session_id:
+                    ss_record_turn(req.scoring_session_id, input_tokens=input_tokens, output_tokens=output_tokens, cost=cost, user_message=user_last_msg, assistant_message=full_response)
+                    _turn_recorded = True
+                    latency = (_first_chunk_at or time.time()) - _ss_start
+                    ss_record_processing_time(req.scoring_session_id, latency)
+
+                yield f"data: {json.dumps({'type': 'done', 'content': full_response, 'input_tokens': input_tokens, 'output_tokens': output_tokens, 'cost': cost})}\n\n"
             elif use_perplexity:
                 # Use Perplexity Sonar API (OpenAI-compatible)
                 conversation_history = []
@@ -1024,11 +1288,15 @@ async def chat_stream(req: ChatRequest):
                     system_prompt=system_message,
                 )
                 full_response = ""
+                _first_chunk_at = None
                 async for chunk in perplexity_llm.stream(
                     current_prompt,
                     conversation_history=conversation_history if conversation_history else None,
                 ):
+                    if _first_chunk_at is None:
+                        _first_chunk_at = time.time()
                     full_response += chunk
+                    _partial_response = full_response
                     yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
                 est_input_tokens = len(current_prompt.split()) * 2
                 est_output_tokens = len(full_response.split()) * 2
@@ -1043,6 +1311,13 @@ async def chat_stream(req: ChatRequest):
                 if not pricing:
                     pricing = {"input": 3.0, "output": 15.0}
                 cost = (est_input_tokens * pricing["input"] + est_output_tokens * pricing["output"]) / 1_000_000
+
+                if req.scoring_session_id:
+                    ss_record_turn(req.scoring_session_id, input_tokens=est_input_tokens, output_tokens=est_output_tokens, cost=cost, user_message=user_last_msg, assistant_message=full_response)
+                    _turn_recorded = True
+                    latency = (_first_chunk_at or time.time()) - _ss_start
+                    ss_record_processing_time(req.scoring_session_id, latency)
+
                 yield f"data: {json.dumps({'type': 'done', 'content': full_response, 'input_tokens': est_input_tokens, 'output_tokens': est_output_tokens, 'cost': cost})}\n\n"
             else:
                 # Use OpenAI-compatible API (e.g., OpenRouter)
@@ -1070,30 +1345,32 @@ async def chat_stream(req: ChatRequest):
                     system_prompt=system_message,
                 )
                 
-                
                 full_response = ""
-                # GPT-5 Mini and Nano require temperature=1
+                _first_chunk_at = None
                 temperature = 1.0 if model in ["gpt-5-mini", "gpt-5-nano"] else None
                 
                 async for chunk in claude_llm.stream(
                     current_prompt,
                     conversation_history=conversation_history if conversation_history else None,
                     temperature=temperature,
+                    include_usage=True,
                 ):
+                    if _first_chunk_at is None:
+                        _first_chunk_at = time.time()
                     full_response += chunk
+                    _partial_response = full_response
                     yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
                 
-                # Estimate tokens (approx 1.3 tokens per word is standard, but keeping consistent with session_ws * 2 if preferred, 
-                # though * 1.3 is closer to reality for English. Let's use a simple heuristic.)
-                # session_ws uses * 2. Let's use * 1.5 as a middle ground or stick to simple word count.
-                # Actually, main.py session_ws uses len(split()) * 2.
-                est_input_tokens = len(current_prompt.split()) * 2
-                est_output_tokens = len(full_response.split()) * 2
-                
-                # Emit usage event for input tokens so frontend updates headers
-                yield f"data: {json.dumps({'type': 'usage', 'input_tokens': est_input_tokens})}\n\n"
+                usage = claude_llm.last_usage
+                if usage:
+                    input_tokens = usage["prompt_tokens"]
+                    output_tokens = usage["completion_tokens"]
+                else:
+                    input_tokens = len(current_prompt.split()) * 2
+                    output_tokens = len(full_response.split()) * 2
 
-                # Dynamic cost calculation
+                yield f"data: {json.dumps({'type': 'usage', 'input_tokens': input_tokens})}\n\n"
+
                 from config import MODEL_PRICING
                 pricing = MODEL_PRICING.get(model)
                 if not pricing:
@@ -1104,19 +1381,31 @@ async def chat_stream(req: ChatRequest):
                 if not pricing:
                     pricing = {"input": 0.0, "output": 0.0}
 
-                cost = (est_input_tokens * pricing["input"] + est_output_tokens * pricing["output"]) / 1_000_000
-                
-                yield f"data: {json.dumps({'type': 'done', 'content': full_response, 'input_tokens': est_input_tokens, 'output_tokens': est_output_tokens, 'cost': cost})}\n\n"
+                cost = (input_tokens * pricing["input"] + output_tokens * pricing["output"]) / 1_000_000
+
+                if req.scoring_session_id:
+                    ss_record_turn(req.scoring_session_id, input_tokens=input_tokens, output_tokens=output_tokens, cost=cost, user_message=user_last_msg, assistant_message=full_response)
+                    _turn_recorded = True
+                    latency = (_first_chunk_at or time.time()) - _ss_start
+                    ss_record_processing_time(req.scoring_session_id, latency)
+
+                yield f"data: {json.dumps({'type': 'done', 'content': full_response, 'input_tokens': input_tokens, 'output_tokens': output_tokens, 'cost': cost})}\n\n"
         except Exception as e:
             error_msg = str(e)
-            # Provide more helpful error messages
             if "401" in error_msg or "API key" in error_msg or "authentication" in error_msg.lower():
                 error_msg = f"Authentication failed: {error_msg}. Please check your API key configuration in .env file."
             elif "404" in error_msg or "not found" in error_msg.lower():
                 error_msg = f"Model not found: {error_msg}. Please check the model name."
-            # Yield error as SSE message instead of raising exception
             yield f"data: {json.dumps({'type': 'error', 'message': error_msg})}\n\n"
-    
+        finally:
+            if req.scoring_session_id and not _turn_recorded and _partial_response:
+                ss_record_partial_turn(
+                    req.scoring_session_id,
+                    partial_response=_partial_response,
+                    user_message=user_last_msg,
+                    model=raw_model,
+                )
+
     return StreamingResponse(
         generate(),
         media_type="text/event-stream",
@@ -1171,6 +1460,7 @@ class RunTestsRequest(BaseModel):
     code: str
     challenge_id: str
     sandbox_id: str
+    scoring_session_id: str | None = None
 
 
 class TestCaseResult(BaseModel):
@@ -1191,20 +1481,38 @@ class RunTestsResponse(BaseModel):
 @app.post("/api/run-tests")
 async def run_tests(req: RunTestsRequest) -> RunTestsResponse:
     """Run code against a challenge's test suite in a persistent Modal sandbox."""
+    if req.scoring_session_id and get_scoring_session(req.scoring_session_id) is None:
+        raise HTTPException(status_code=410, detail="Scoring session expired or not found")
+
     challenge = get_challenge_by_id(req.challenge_id)
     if challenge is None:
         raise HTTPException(status_code=404, detail="Challenge not found")
     if not challenge.test_suite:
         raise HTTPException(status_code=400, detail="Challenge has no test suite")
 
+    _test_start = time.time()
     test_dicts = [t.model_dump() for t in challenge.test_suite]
     try:
         raw_results = await run_function_tests_detailed(req.sandbox_id, req.code, test_dicts)
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if req.scoring_session_id:
+            ss_record_processing_time(req.scoring_session_id, time.time() - _test_start)
 
     results = [TestCaseResult(**r) for r in raw_results]
     passed_count = sum(1 for r in results if r.passed)
+
+    if req.scoring_session_id:
+        session = get_scoring_session(req.scoring_session_id)
+        if session and session.status == "active":
+            accuracy = passed_count / len(results) if results else 0.0
+            session.last_test_accuracy = accuracy
+            if accuracy >= 1.0:
+                ss_freeze_timer(req.scoring_session_id)
+            else:
+                ss_unfreeze_timer(req.scoring_session_id)
+
     return RunTestsResponse(
         results=results,
         all_passed=passed_count == len(results),
