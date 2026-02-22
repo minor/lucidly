@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-SESSION_TTL_SECONDS = 10  # 1 hour
+SESSION_TTL_SECONDS = 3600  # 1 hour
 
 
 class ScoringSession(BaseModel):
