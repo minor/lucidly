@@ -84,6 +84,7 @@ export default function ChallengePage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [currentStreamingMessage, setCurrentStreamingMessage] = useState("");
+  const [lastTurnAborted, setLastTurnAborted] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
@@ -524,9 +525,9 @@ export default function ChallengePage() {
       abortControllerRef.current = null;
       setIsStreaming(false);
       setIsWaitingForFirstToken(false);
+      setLastTurnAborted(true);
       if (estimatedTokens > 0 || inputCost > 0) {
         setTotalTokens((t) => t + Math.round(estimatedTokens));
-        // Calculate estimated output cost dynamically
         const pricing = MODEL_PRICING[selectedModel] || MODEL_PRICING["gpt-5.2"];
         const outputCost = (estimatedTokens * pricing.output) / 1_000_000;
         setTotalCost((c) => c + inputCost + outputCost);
@@ -534,6 +535,12 @@ export default function ChallengePage() {
         setInputCost(0);
       }
     }
+  };
+
+  const handleUndoAbortedTurn = () => {
+    if (!lastTurnAborted || messages.length < 2) return;
+    setMessages((prev) => prev.slice(0, -2));
+    setLastTurnAborted(false);
   };
 
   const isUiChallenge = challenge?.category === "ui";
@@ -610,8 +617,8 @@ export default function ChallengePage() {
   };
 
   const handleRetry = () => {
-    // Reset all state to restart
     setMessages([]);
+    setLastTurnAborted(false);
     setRenderedCode("");
     setTestResults(null);
     setLatestCode("");
@@ -705,6 +712,7 @@ export default function ChallengePage() {
     }
 
     setSelectedModel(model);
+    setLastTurnAborted(false);
 
     const userMessage: ChatMessage = { role: "user", content: prompt };
     const updatedMessages = [...messages, userMessage];
@@ -1597,6 +1605,18 @@ export default function ChallengePage() {
           )}
 
           <div className="border-t border-border bg-background">
+            {lastTurnAborted && messages.length >= 2 && (
+              <div className="px-6 pt-3 pb-0">
+                <button
+                  type="button"
+                  onClick={handleUndoAbortedTurn}
+                  className="flex items-center gap-1.5 text-xs text-muted hover:text-foreground transition-colors"
+                >
+                  <ArrowLeft className="h-3 w-3" />
+                  Undo aborted turn
+                </button>
+              </div>
+            )}
             <div className="px-6 py-4">
               <div className="flex justify-between items-center mb-2">
                 <div></div>
