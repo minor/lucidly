@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { getChallenge, runTests, runCode, createSandbox, terminateSandbox, MODEL_PRICING, MODELS, calculateScore, evaluateUI, createVercelSandbox, updateVercelSandboxCode, stopVercelSandbox, streamPromptFeedback } from "@/lib/api";
+import { getChallenge, runTests, runCode, createSandbox, terminateSandbox, MODEL_PRICING, MODELS, createVercelSandbox, updateVercelSandboxCode, stopVercelSandbox, streamPromptFeedback, createScoringSession, submitScore, freezeScoringTimer, unfreezeScoringTimer } from "@/lib/api";
 import { PromptInput } from "@/components/PromptInput";
 import { ScoreBar } from "@/components/ScoreBar";
 import { SimpleMarkdown } from "@/components/SimpleMarkdown";
@@ -123,6 +123,9 @@ export default function ChallengePage() {
   const vercelSandboxIdRef = useRef<string | null>(null);
   const [iframeKey, setIframeKey] = useState(0); // bump to force iframe reload
 
+  // Scoring session (server-side tamper-proof stat tracking)
+  const scoringSessionIdRef = useRef<string | null>(null);
+
   // Abort controller
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -201,6 +204,25 @@ export default function ChallengePage() {
     };
   }, [challengeId]);
 
+  // Create scoring session once when challenge + username are ready
+  useEffect(() => {
+    if (!challenge || !isAuthenticated || usernameLoading) return;
+    if (scoringSessionIdRef.current) return;
+    const authUsername = username || user?.nickname || user?.name || "anonymous";
+    let ignore = false;
+    createScoringSession({
+      challenge_id: challengeId,
+      username: authUsername,
+    })
+      .then((res) => {
+        if (!ignore) scoringSessionIdRef.current = res.session_id;
+      })
+      .catch((err) => console.error("Failed to create scoring session:", err));
+    return () => {
+      ignore = true;
+    };
+  }, [challenge, challengeId, isAuthenticated, usernameLoading, username, user]);
+
   // Timer Logic (Merged)
   useEffect(() => {
     // Check for 100% accuracy to auto-pause timer
@@ -239,6 +261,20 @@ export default function ChallengePage() {
     }, 1000);
     return () => clearInterval(interval);
   }, [isWaitingForFirstToken, isExecuting, isStreaming, submitState, testResults]);
+
+  // Freeze/unfreeze server-side timer when 100% accuracy is achieved or lost
+  const wasPerfectRef = useRef(false);
+  useEffect(() => {
+    const sessionId = scoringSessionIdRef.current;
+    if (!sessionId) return;
+    const isPerfect = !!(testResults && testResults.total_count > 0 && testResults.passed_count === testResults.total_count);
+    if (isPerfect && !wasPerfectRef.current) {
+      freezeScoringTimer(sessionId).catch(() => {});
+    } else if (!isPerfect && wasPerfectRef.current) {
+      unfreezeScoringTimer(sessionId).catch(() => {});
+    }
+    wasPerfectRef.current = isPerfect;
+  }, [testResults]);
 
   // Resize handler
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
@@ -440,7 +476,7 @@ export default function ChallengePage() {
         setLatestCode(code);
         setRunningTests(true);
         setIsExecuting(true);
-        runTests(code, challengeId, sandboxId)
+        runTests(code, challengeId, sandboxId, scoringSessionIdRef.current ?? undefined)
           .then((results) => {
             setTestResults(results);
             setRunningTests(false);
@@ -509,79 +545,63 @@ export default function ChallengePage() {
   const handleSubmitSolution = async () => {
     if (submitState !== "idle") return;
 
-    // Calculate accuracy based on challenge type
-    let accuracy = 0.0;
-    let evaluatedUiScore: number | undefined = undefined;
-    let messagesForScore = messages;
-
-    // Freeze the score bar stats first
+    // Freeze the score bar stats for display (informational only)
     const currentElapsed = elapsed;
     const currentTurns = totalTurns;
     const currentTokens = Math.round(totalTokens + totalInputTokens + estimatedTokens);
     const currentCost = totalCost + inputCost + ((estimatedTokens * (MODEL_PRICING[selectedModel]?.output || MODEL_PRICING["gpt-5.2"].output)) / 1_000_000);
-    
+
     setScoreBarFrozen(true);
     setSubmitState("pending");
     setScoreLoading(true);
-    
+
+    // Client-side accuracy preview for the frozen stats display
+    let previewAccuracy: number | undefined;
+    let previewScore: number | undefined;
+    if (isProductChallenge) {
+      previewAccuracy = undefined;
+      previewScore = undefined;
+    } else if (isUiChallenge) {
+      previewAccuracy = uiScore != null ? uiScore / 100 : undefined;
+      previewScore = uiScore;
+    } else if (hasFunctionTests && testResults) {
+      previewAccuracy = testResults.passed_count / testResults.total_count;
+      previewScore = previewAccuracy * 100;
+    } else if (isDataChallenge && codeResult) {
+      previewAccuracy = codeResult.returncode === 0 ? 1.0 : 0.0;
+      previewScore = previewAccuracy * 100;
+    }
+
+    frozenStatsRef.current = {
+      elapsed: currentElapsed,
+      turns: currentTurns,
+      tokens: currentTokens,
+      accuracy: previewAccuracy,
+      score: previewScore,
+      cost: currentCost,
+    };
+
     try {
-      if (isProductChallenge) {
-        accuracy = 1.0; // No automated grading for PRD; completion counts
-        messagesForScore = [
-          ...messages,
-          { role: "assistant" as const, content: `## PRD\n\n${prdContent}` },
-        ];
-      } else if (isUiChallenge) {
-        if (renderedCode) {
-          const result = await evaluateUI(challengeId, renderedCode);
-          accuracy = result.score / 100;
-          evaluatedUiScore = result.score;
-          setUiScore(result.score);
-        }
-      } else if (hasFunctionTests && testResults) {
-        accuracy = testResults.passed_count / testResults.total_count;
-      } else if (isDataChallenge && codeResult) {
-        accuracy = codeResult.returncode === 0 ? 1.0 : 0.0;
+      const sessionId = scoringSessionIdRef.current;
+      if (!sessionId) {
+        throw new Error("No scoring session — please refresh the page");
       }
-      
-      // Update frozen stats (product has no accuracy/score — composite = efficiency only)
-      frozenStatsRef.current = {
-        elapsed: currentElapsed,
-        turns: currentTurns,
-        tokens: currentTokens,
-        accuracy: isProductChallenge ? undefined : (isUiChallenge ? accuracy : (testResults ? testResults.passed_count / testResults.total_count : undefined)),
-        score: isProductChallenge ? undefined : (isUiChallenge ? evaluatedUiScore : (testResults ? (testResults.passed_count / testResults.total_count) * 100 : undefined)),
-        cost: currentCost,
-      };
-      
-      // Calculate composite score AND auto-submit to leaderboard with chosen username
-      const authUsername = username || user?.nickname || user?.name || "anonymous";
-      const scores = await calculateScore({
-        challenge_id: challengeId,
-        accuracy: isProductChallenge ? 0 : accuracy,
-        elapsed_sec: currentElapsed,
-        total_tokens: currentTokens,
-        total_turns: currentTurns,
-        difficulty: challenge?.difficulty || "medium",
-        model: selectedModel,
-        ...(challenge?.category ? { category: challenge.category } : {}),
-        ...(isProductChallenge && prdContent.trim() ? { prd_content: prdContent } : {}),
-        username: authUsername,
-        messages: isProductChallenge
-          ? [...messages, { role: "assistant" as const, content: `## PRD\n\n${prdContent}` }]
-          : messages,
-        total_cost: currentCost,
+
+      const scores = await submitScore(sessionId, {
+        code: latestCode || undefined,
+        sandbox_id: sandboxId ?? undefined,
+        generated_html: isUiChallenge ? renderedCode || undefined : undefined,
+        prd_content: isProductChallenge && prdContent.trim() ? prdContent : undefined,
       });
-      
+
       setFinalScores(scores);
       setScoreLoading(false);
       setSubmitState("completed");
       setShowCompletionModal(true);
 
-      // Auto-trigger prompt feedback analysis
       triggerPromptFeedback();
     } catch (err) {
-      console.error("Failed to calculate score:", err);
+      console.error("Failed to submit score:", err);
       setScoreBarFrozen(false);
       setScoreLoading(false);
       frozenStatsRef.current = null;
@@ -624,15 +644,14 @@ export default function ChallengePage() {
     setWorkspaceTab("chat");
     if (feedbackAbortRef.current) feedbackAbortRef.current.abort();
 
-    // Vercel sandbox reset (disabled — not in use)
-    // if (vercelSandboxId && vercelSandboxReady) {
-    //   updateVercelSandboxCode(
-    //     vercelSandboxId,
-    //     '<html><body style="display:flex;align-items:center;justify-content:center;height:100vh;margin:0;font-family:system-ui;color:#94a3b8;"><p>Waiting for code...</p></body></html>'
-    //   ).then(() => {
-    //     setIframeKey((k) => k + 1);
-    //   }).catch(() => {});
-    // }
+    // Create a fresh scoring session for the new attempt
+    const authUsername = username || user?.nickname || user?.name || "anonymous";
+    scoringSessionIdRef.current = null;
+    createScoringSession({ challenge_id: challengeId, username: authUsername })
+      .then((res) => {
+        scoringSessionIdRef.current = res.session_id;
+      })
+      .catch((err) => console.error("Failed to create scoring session:", err));
   };
 
   const triggerPromptFeedback = async () => {
@@ -756,7 +775,8 @@ export default function ChallengePage() {
         }
       },
       abortControllerRef.current?.signal,
-      isProductChallenge && productPart === 1 ? challengeId : undefined
+      isProductChallenge && productPart === 1 ? challengeId : undefined,
+      scoringSessionIdRef.current ?? undefined
     );
   };
 

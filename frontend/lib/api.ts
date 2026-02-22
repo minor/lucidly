@@ -230,14 +230,20 @@ export async function streamChat(
   onDone?: (data: StreamDoneData) => void,
   onUsage?: (usage: { input_tokens: number }) => void,
   signal?: AbortSignal,
-  challengeId?: string
+  challengeId?: string,
+  scoringSessionId?: string
 ): Promise<void> {
   let response: Response;
   try {
     response = await fetch(`${API_BASE}/api/chat/stream`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages, model, challenge_id: challengeId ?? undefined }),
+      body: JSON.stringify({
+        messages,
+        model,
+        challenge_id: challengeId ?? undefined,
+        scoring_session_id: scoringSessionId ?? undefined,
+      }),
       signal,
     });
   } catch (err: unknown) {
@@ -354,11 +360,17 @@ export interface RunCodeResponse {
 export async function runTests(
   code: string,
   challengeId: string,
-  sandboxId: string
+  sandboxId: string,
+  scoringSessionId?: string
 ): Promise<RunTestsResponse> {
   return fetchJSON<RunTestsResponse>("/api/run-tests", {
     method: "POST",
-    body: JSON.stringify({ code, challenge_id: challengeId, sandbox_id: sandboxId }),
+    body: JSON.stringify({
+      code,
+      challenge_id: challengeId,
+      sandbox_id: sandboxId,
+      scoring_session_id: scoringSessionId ?? undefined,
+    }),
   });
 }
 
@@ -419,6 +431,45 @@ export async function calculateScore(
   });
 }
 
+// ---- Scoring Sessions (tamper-proof server-side scoring) ----
+
+export async function createScoringSession(params: {
+  challenge_id: string;
+  username: string;
+  model?: string;
+}): Promise<{ session_id: string; started_at: number }> {
+  return fetchJSON("/api/scoring-sessions", {
+    method: "POST",
+    body: JSON.stringify(params),
+  });
+}
+
+export async function submitScore(
+  sessionId: string,
+  params: {
+    code?: string;
+    sandbox_id?: string;
+    generated_html?: string;
+    prd_content?: string;
+  }
+): Promise<Scores> {
+  return fetchJSON<Scores>(`/api/scoring-sessions/${sessionId}/submit`, {
+    method: "POST",
+    body: JSON.stringify(params),
+  });
+}
+
+export async function freezeScoringTimer(sessionId: string): Promise<void> {
+  await fetchJSON(`/api/scoring-sessions/${sessionId}/freeze-timer`, {
+    method: "POST",
+  });
+}
+
+export async function unfreezeScoringTimer(sessionId: string): Promise<void> {
+  await fetchJSON(`/api/scoring-sessions/${sessionId}/unfreeze-timer`, {
+    method: "POST",
+  });
+}
 
 export const MODEL_PRICING: Record<string, { input: number; output: number }> = {
   "claude-opus-4-6": { input: 5.0, output: 25.0 },
