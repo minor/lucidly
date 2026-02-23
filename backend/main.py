@@ -737,7 +737,7 @@ Please evaluate the similarity and provide your response in the following JSON f
 
 @app.post("/api/calculate-score")
 @limiter.limit("10/minute")
-async def calculate_score(req: CalculateScoreRequest, request: Request):
+async def calculate_score(req: CalculateScoreRequest, request: Request, user_id: str = Depends(get_current_user)):
     """Calculate composite score preview. Does NOT persist to DB.
 
     DB writes go through POST /api/scoring-sessions/{id}/submit which verifies
@@ -1043,9 +1043,27 @@ async def session_ws(ws: WebSocket, session_id: str):
 # ---------------------------------------------------------------------------
 
 
+async def _require_auth_after_session_check(request: Request) -> str:
+    """For endpoints that accept scoring_session_id: check expiry before auth.
+
+    This ensures a 410 is returned (session expired) before a 401 (not authenticated),
+    so clients get the most actionable error first.
+    """
+    try:
+        body = await request.json()
+        sid = body.get("scoring_session_id") if isinstance(body, dict) else None
+        if sid is not None and get_scoring_session(sid) is None:
+            raise HTTPException(status_code=410, detail="Scoring session expired or not found")
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+    return await get_current_user(request)
+
+
 @app.post("/api/chat/stream")
 @limiter.limit("30/minute")
-async def chat_stream(req: ChatRequest, request: Request, user_id: str = Depends(get_current_user)):
+async def chat_stream(req: ChatRequest, request: Request, user_id: str = Depends(_require_auth_after_session_check)):
     """
     Stream chat responses from Claude Code API.
     Uses Server-Sent Events (SSE) for real-time streaming.
@@ -1510,7 +1528,7 @@ class RunTestsResponse(BaseModel):
 
 
 @app.post("/api/run-tests")
-async def run_tests(req: RunTestsRequest, user_id: str = Depends(get_current_user)) -> RunTestsResponse:
+async def run_tests(req: RunTestsRequest, request: Request, user_id: str = Depends(_require_auth_after_session_check)) -> RunTestsResponse:
     """Run code against a challenge's test suite in a persistent Modal sandbox."""
     if req.scoring_session_id and get_scoring_session(req.scoring_session_id) is None:
         raise HTTPException(status_code=410, detail="Scoring session expired or not found")
