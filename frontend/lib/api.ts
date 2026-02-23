@@ -14,15 +14,29 @@ import type {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+let _authToken: string | null = null;
+export function setAuthToken(token: string | null) {
+  _authToken = token;
+}
+
+function authHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (_authToken) headers["Authorization"] = `Bearer ${_authToken}`;
+  return headers;
+}
+
 async function fetchJSON<T>(
   path: string,
   options?: RequestInit
 ): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders(),
     ...options,
   });
   if (!res.ok) {
+    if (res.status === 429) {
+      throw new Error("Rate limit exceeded. Please wait a moment and try again.");
+    }
     const error = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(error.detail || "API request failed");
   }
@@ -215,7 +229,7 @@ export async function streamChat(
   try {
     response = await fetch(`${API_BASE}/api/chat/stream`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: authHeaders(),
       body: JSON.stringify({ messages, model, challenge_id: challengeId ?? undefined }),
       signal,
     });
@@ -228,6 +242,10 @@ export async function streamChat(
   }
 
   if (!response.ok) {
+    if (response.status === 429) {
+      onError?.("Rate limit exceeded. Please wait a moment and try again.");
+      return;
+    }
     const error = await response.json().catch(() => ({ detail: response.statusText }));
     onError?.(error.detail || "Failed to stream chat");
     return;
@@ -459,7 +477,7 @@ export async function streamPromptFeedback(
   try {
     response = await fetch(`${API_BASE}/api/prompt-feedback`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: authHeaders(),
       body: JSON.stringify(req),
       signal,
     });
@@ -471,6 +489,10 @@ export async function streamPromptFeedback(
   }
 
   if (!response.ok) {
+    if (response.status === 429) {
+      onError?.("Rate limit exceeded. Please wait a moment and try again.");
+      return;
+    }
     const error = await response
       .json()
       .catch(() => ({ detail: response.statusText }));
@@ -671,7 +693,7 @@ export async function streamInterviewPrompt(
       `${API_BASE}/api/interviews/${roomId}/sessions/${sessionId}/prompt`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders(),
         body: JSON.stringify({ prompt, model }),
         signal,
       }
@@ -685,6 +707,10 @@ export async function streamInterviewPrompt(
   }
 
   if (!response.ok) {
+    if (response.status === 429) {
+      onError?.("Rate limit exceeded. Please wait a moment and try again.");
+      return;
+    }
     const error = await response
       .json()
       .catch(() => ({ detail: response.statusText }));
@@ -891,7 +917,7 @@ export async function checkUsernameAvailable(username: string): Promise<boolean>
 export async function setUsername(auth0Id: string, username: string): Promise<string> {
   const res = await fetch(`${API_BASE}/api/username`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders(),
     body: JSON.stringify({ auth0_id: auth0Id, username }),
   });
   if (!res.ok) {

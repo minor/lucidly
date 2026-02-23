@@ -17,11 +17,19 @@ dependencies = [
     "browserbase>=0.1.0",
     "supabase",
     "sentry-sdk[fastapi]>=2.52.0",
+    "slowapi",
+    "PyJWT[crypto]",
 ]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-asyncio", "httpx"]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
 
 [tool.hatch.build.targets.wheel]
 packages = ["."]

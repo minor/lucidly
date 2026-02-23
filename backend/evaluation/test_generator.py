@@ -140,9 +140,15 @@ class TestGenerator:
     """Generates test suites automatically for challenges."""
 
     def __init__(self, llm: LLM | AnthropicLLM | None = None):
-        # Use Claude by default for test generation
-        # Will use Anthropic API directly if ANTHROPIC_API_KEY is set
-        self.llm = llm or create_claude_llm()
+        self._llm = llm
+        self._llm_initialised = llm is not None
+
+    @property
+    def llm(self) -> LLM | AnthropicLLM:
+        if not self._llm_initialised:
+            self._llm = create_claude_llm()
+            self._llm_initialised = True
+        return self._llm  # type: ignore[return-value]
 
     async def generate_tests(self, challenge: Challenge) -> GeneratedTestSuite:
         """
