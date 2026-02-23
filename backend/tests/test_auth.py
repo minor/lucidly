@@ -151,3 +151,25 @@ async def test_prompt_feedback_requires_auth(client: AsyncClient):
             "challenge_id": "nonexistent",
         },
     )
+
+
+@pytest.mark.anyio
+async def test_create_scoring_session_requires_auth(client: AsyncClient):
+    await _assert_requires_auth(
+        client, "post",
+        "/api/scoring-sessions",
+        json={"challenge_id": "fizzbuzz"},
+    )
+
+
+@pytest.mark.anyio
+async def test_submit_scoring_session_requires_auth(client: AsyncClient):
+    import scoring_sessions as ss
+    from tests.conftest import MOCK_USER_ID
+
+    session = ss.create_scoring_session("fizzbuzz", MOCK_USER_ID)
+    await _assert_requires_auth(
+        client, "post",
+        f"/api/scoring-sessions/{session.id}/submit",
+        json={},
+    )

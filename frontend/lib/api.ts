@@ -453,7 +453,6 @@ export async function calculateScore(
 
 export async function createScoringSession(params: {
   challenge_id: string;
-  username: string;
   model?: string;
 }): Promise<{ session_id: string; started_at: number }> {
   return fetchJSON("/api/scoring-sessions", {

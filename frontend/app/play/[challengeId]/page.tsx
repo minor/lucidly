@@ -220,11 +220,9 @@ export default function ChallengePage() {
   useEffect(() => {
     if (!challenge || !isAuthenticated || usernameLoading) return;
     if (scoringSessionIdRef.current) return;
-    const authUsername = username || user?.nickname || user?.name || "anonymous";
     let ignore = false;
     createScoringSession({
       challenge_id: challengeId,
-      username: authUsername,
     })
       .then((res) => {
         if (!ignore) scoringSessionIdRef.current = res.session_id;
@@ -654,9 +652,8 @@ export default function ChallengePage() {
     if (feedbackAbortRef.current) feedbackAbortRef.current.abort();
 
     // Create a fresh scoring session for the new attempt
-    const authUsername = username || user?.nickname || user?.name || "anonymous";
     scoringSessionIdRef.current = null;
-    createScoringSession({ challenge_id: challengeId, username: authUsername })
+    createScoringSession({ challenge_id: challengeId })
       .then((res) => {
         scoringSessionIdRef.current = res.session_id;
       })

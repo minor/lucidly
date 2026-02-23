@@ -187,19 +187,6 @@ class AgentRunRequest(BaseModel):
     challenge_id: str
 
 
-class CalculateScoreRequest(BaseModel):
-    challenge_id: str
-    accuracy: float
-    elapsed_sec: float
-    total_tokens: int
-    total_turns: int
-    difficulty: str = "medium"
-    model: str = "unknown"
-    category: str | None = None  # e.g. "product" — backend uses this to pick scoring formula
-    prd_content: str | None = None  # for product: PRD text to grade via LLM; score = sum(dimension scores)*10/4
-    messages: list[dict] | None = None
-    username: str | None = None
-    total_cost: float | None = 0.0
 
 # ---------------------------------------------------------------------------
 # Challenge endpoints
@@ -534,7 +521,7 @@ from scoring_sessions import (
 
 class CreateScoringSessionRequest(BaseModel):
     challenge_id: str
-    username: str
+    username: str = ""  # ignored if caller is authenticated; kept for backwards-compat
     model: str = "unknown"
 
 
@@ -546,7 +533,7 @@ class SubmitScoreRequest(BaseModel):
 
 
 @app.post("/api/scoring-sessions")
-async def create_scoring_session_endpoint(req: CreateScoringSessionRequest):
+async def create_scoring_session_endpoint(req: CreateScoringSessionRequest, user_id: str = Depends(get_current_user)):
     """Create a server-side scoring session for tamper-proof stat tracking."""
     challenge = get_challenge_by_id(req.challenge_id)
     if challenge is None:
@@ -554,7 +541,7 @@ async def create_scoring_session_endpoint(req: CreateScoringSessionRequest):
 
     session = create_scoring_session(
         challenge_id=req.challenge_id,
-        username=req.username,
+        username=user_id,
         model=req.model,
     )
     return {"session_id": session.id, "started_at": session.started_at}
@@ -562,11 +549,11 @@ async def create_scoring_session_endpoint(req: CreateScoringSessionRequest):
 
 
 @app.post("/api/scoring-sessions/{session_id}/submit")
-async def submit_scoring_session(session_id: str, req: SubmitScoreRequest):
+async def submit_scoring_session(session_id: str, req: SubmitScoreRequest, user_id: str = Depends(_require_auth_after_session_id_check)):
     """Verify accuracy server-side, compute all metrics from the scoring session, and persist to Supabase."""
-    session = get_scoring_session(session_id)
-    if session is None:
-        raise HTTPException(status_code=410, detail="Scoring session expired or not found")
+    session = get_scoring_session(session_id)  # guaranteed non-None by dependency
+    if session.username != user_id:
+        raise HTTPException(status_code=403, detail="Session does not belong to this user")
     if session.status != "active":
         raise HTTPException(status_code=400, detail="Scoring session already completed")
 
@@ -731,68 +718,6 @@ Please evaluate the similarity and provide your response in the following JSON f
 
 
 # ---------------------------------------------------------------------------
-# Score calculation endpoint (preview only — does NOT persist to DB)
-# ---------------------------------------------------------------------------
-
-
-@app.post("/api/calculate-score")
-@limiter.limit("10/minute")
-async def calculate_score(req: CalculateScoreRequest, request: Request, user_id: str = Depends(get_current_user)):
-    """Calculate composite score preview. Does NOT persist to DB.
-
-    DB writes go through POST /api/scoring-sessions/{id}/submit which verifies
-    all metrics server-side.
-    """
-    challenge = get_challenge_by_id(req.challenge_id)
-    is_product = req.category == "product" or (challenge and getattr(challenge, "category", None) == "product")
-    if is_product:
-        scores = compute_composite_score(
-            accuracy=0.0,
-            elapsed_sec=req.elapsed_sec,
-            total_tokens=req.total_tokens,
-            total_turns=req.total_turns,
-            difficulty=req.difficulty,
-            total_cost=req.total_cost or 0.0,
-        )
-        if (req.prd_content or "").strip():
-            try:
-                prd_req = PromptFeedbackRequest(
-                    messages=[ChatMessage(role=m.get("role", "user"), content=m.get("content", "")) for m in (req.messages or [])],
-                    challenge_id=req.challenge_id,
-                    challenge_description=getattr(challenge, "description", "") or req.challenge_id,
-                    challenge_category="product",
-                    challenge_difficulty=req.difficulty,
-                    prd_content=req.prd_content or "",
-                    total_turns=req.total_turns,
-                    total_tokens=req.total_tokens,
-                    elapsed_sec=req.elapsed_sec,
-                )
-                prompt = _build_prd_feedback_prompt(prd_req)
-                feedback_llm = LLM(
-                    base_url=settings.openai_base_url,
-                    api_key=settings.openai_api_key,
-                    model=settings.default_model,
-                    system_prompt=PROMPT_FEEDBACK_PRD_SYSTEM_PROMPT,
-                )
-                llm_response = await feedback_llm.generate(prompt, temperature=0.4)
-                _, total_100 = _parse_prd_section_scores(llm_response.response_text)
-                scores["composite_score"] = min(100, max(0, total_100))
-            except Exception as e:
-                logger.warning("PRD grading failed, using efficiency score: %s", e)
-    else:
-        scores = compute_composite_score(
-            accuracy=req.accuracy,
-            elapsed_sec=req.elapsed_sec,
-            total_tokens=req.total_tokens,
-            total_turns=req.total_turns,
-            difficulty=req.difficulty,
-            total_cost=req.total_cost or 0.0,
-        )
-
-    return scores
-
-
-# ---------------------------------------------------------------------------
 # Agents (benchmark runs)
 # ---------------------------------------------------------------------------
 
@@ -804,6 +729,8 @@ async def list_agents():
 
 @app.post("/api/agent-runs")
 async def start_agent_run(req: AgentRunRequest, user_id: str = Depends(get_current_user)):
+    raise HTTPException(status_code=410, detail="Agent runs are currently disabled.")
+    # fmt: off
     agent = get_agent_by_id(req.agent_id)
     if agent is None:
         raise HTTPException(status_code=404, detail="Agent not found")
@@ -1043,6 +970,11 @@ async def session_ws(ws: WebSocket, session_id: str):
 # ---------------------------------------------------------------------------
 
 
+def _resolve_auth(request: Request):
+    """Return the effective auth callable, respecting dependency_overrides for testability."""
+    return request.app.dependency_overrides.get(get_current_user)
+
+
 async def _require_auth_after_session_check(request: Request) -> str:
     """For endpoints that accept scoring_session_id: check expiry before auth.
 
@@ -1058,7 +990,19 @@ async def _require_auth_after_session_check(request: Request) -> str:
         raise
     except Exception:
         pass
-    return await get_current_user(request)
+    override = _resolve_auth(request)
+    return await override() if override else await get_current_user(request)
+
+
+async def _require_auth_after_session_id_check(session_id: str, request: Request) -> str:
+    """For the submit endpoint: check session expiry (path param) before auth.
+
+    Returns 410 for expired/missing sessions before 401 for unauthenticated requests.
+    """
+    if get_scoring_session(session_id) is None:
+        raise HTTPException(status_code=410, detail="Scoring session expired or not found")
+    override = _resolve_auth(request)
+    return await override() if override else await get_current_user(request)
 
 
 @app.post("/api/chat/stream")
@@ -1528,6 +1472,7 @@ class RunTestsResponse(BaseModel):
 
 
 @app.post("/api/run-tests")
+@limiter.limit("30/minute")
 async def run_tests(req: RunTestsRequest, request: Request, user_id: str = Depends(_require_auth_after_session_check)) -> RunTestsResponse:
     """Run code against a challenge's test suite in a persistent Modal sandbox."""
     if req.scoring_session_id and get_scoring_session(req.scoring_session_id) is None:

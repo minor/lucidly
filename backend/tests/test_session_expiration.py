@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 import scoring_sessions
 from scoring_sessions import _scoring_sessions
+from tests.conftest import MOCK_USER_ID
 
 
 @pytest.fixture(autouse=True)
@@ -24,13 +25,24 @@ def client():
     return TestClient(app, raise_server_exceptions=False)
 
 
-def _create_session(client: TestClient, challenge_id: str = "fizzbuzz") -> str:
-    resp = client.post(
-        "/api/scoring-sessions",
-        json={"challenge_id": challenge_id, "username": "testuser"},
-    )
-    assert resp.status_code == 200, resp.text
-    return resp.json()["session_id"]
+@pytest.fixture()
+def auth_client():
+    """Sync TestClient with get_current_user mocked to return MOCK_USER_ID."""
+    from auth import get_current_user
+    from main import app
+
+    async def _mock():
+        return MOCK_USER_ID
+
+    app.dependency_overrides[get_current_user] = _mock
+    yield TestClient(app, raise_server_exceptions=False)
+    app.dependency_overrides.pop(get_current_user, None)
+
+
+def _create_session(challenge_id: str = "fizzbuzz") -> str:
+    """Create a scoring session directly via the module (bypasses HTTP auth)."""
+    session = scoring_sessions.create_scoring_session(challenge_id, MOCK_USER_ID)
+    return session.id
 
 
 def _expire_session(session_id: str) -> None:
@@ -148,9 +160,9 @@ class TestStandardUserFlow:
 
         assert second_freeze > first_freeze
 
-    def test_submit_uses_frozen_time(self, client: TestClient):
+    def test_submit_uses_frozen_time(self, auth_client: TestClient):
         """Submit should use frozen_at (not current time) for elapsed calculation."""
-        sid = _create_session(client)
+        sid = _create_session()
         session = _scoring_sessions[sid]
 
         now = time.time()
@@ -159,7 +171,7 @@ class TestStandardUserFlow:
         session.server_processing_seconds = 10.0
         session.last_test_accuracy = 1.0
 
-        resp = client.post(
+        resp = auth_client.post(
             f"/api/scoring-sessions/{sid}/submit",
             json={"code": "def fizzbuzz(n): pass"},
         )
@@ -168,19 +180,19 @@ class TestStandardUserFlow:
         assert "composite_score" in data
         assert "accuracy_score" in data
 
-    def test_double_submit_rejected(self, client: TestClient):
+    def test_double_submit_rejected(self, auth_client: TestClient):
         """Submitting twice should fail — session is already completed."""
-        sid = _create_session(client)
+        sid = _create_session()
         session = _scoring_sessions[sid]
         session.last_test_accuracy = 1.0
 
-        resp1 = client.post(
+        resp1 = auth_client.post(
             f"/api/scoring-sessions/{sid}/submit",
             json={"code": "pass"},
         )
         assert resp1.status_code == 200
 
-        resp2 = client.post(
+        resp2 = auth_client.post(
             f"/api/scoring-sessions/{sid}/submit",
             json={"code": "pass"},
         )
@@ -196,7 +208,7 @@ class TestStandardUserFlow:
 class TestExpiredSession:
 
     def test_submit_expired(self, client: TestClient):
-        sid = _create_session(client)
+        sid = _create_session()
         _expire_session(sid)
         resp = client.post(
             f"/api/scoring-sessions/{sid}/submit",
@@ -206,7 +218,7 @@ class TestExpiredSession:
         assert "expired" in resp.json()["detail"].lower()
 
     def test_chat_stream_expired(self, client: TestClient):
-        sid = _create_session(client)
+        sid = _create_session()
         _expire_session(sid)
         resp = client.post(
             "/api/chat/stream",
@@ -219,7 +231,7 @@ class TestExpiredSession:
         assert "expired" in resp.json()["detail"].lower()
 
     def test_run_tests_expired(self, client: TestClient):
-        sid = _create_session(client)
+        sid = _create_session()
         _expire_session(sid)
         resp = client.post(
             "/api/run-tests",
@@ -241,7 +253,7 @@ class TestExpiredSession:
         assert resp.status_code == 410
 
     def test_repeated_calls_all_410(self, client: TestClient):
-        sid = _create_session(client)
+        sid = _create_session()
         _expire_session(sid)
 
         for _ in range(5):
@@ -292,30 +304,29 @@ class TestExpiredSession:
 
 class TestAdversarial:
 
-    def test_create_session_for_nonexistent_challenge(self, client: TestClient):
+    def test_create_session_for_nonexistent_challenge(self, auth_client: TestClient):
         """Creating a session for a challenge that doesn't exist should fail."""
-        resp = client.post(
+        resp = auth_client.post(
             "/api/scoring-sessions",
-            json={"challenge_id": "does-not-exist-challenge", "username": "hacker"},
+            json={"challenge_id": "does-not-exist-challenge"},
         )
         assert resp.status_code == 404
 
-    def test_submit_someone_elses_session(self, client: TestClient):
-        """A session ID is opaque — but submitting a valid one should still work
-        (no auth on session ownership yet). This test documents current behavior."""
-        sid = _create_session(client)
+    def test_submit_someone_elses_session(self, auth_client: TestClient):
+        """Submitting a session owned by a different user should return 403."""
+        sid = scoring_sessions.create_scoring_session("fizzbuzz", "other-user|456").id
         _scoring_sessions[sid].last_test_accuracy = 1.0
 
-        resp = client.post(
+        resp = auth_client.post(
             f"/api/scoring-sessions/{sid}/submit",
             json={"code": "pass"},
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 403
 
-    def test_submit_with_empty_body(self, client: TestClient):
+    def test_submit_with_empty_body(self, auth_client: TestClient):
         """Submitting with no code/sandbox should still go through (accuracy = 0)."""
-        sid = _create_session(client)
-        resp = client.post(
+        sid = _create_session()
+        resp = auth_client.post(
             f"/api/scoring-sessions/{sid}/submit",
             json={},
         )
@@ -416,9 +427,9 @@ class TestAdversarial:
 
     def test_rapid_session_creation_independent(self, client: TestClient):
         """Multiple sessions should be independent — expiring one shouldn't affect others."""
-        sid1 = _create_session(client)
-        sid2 = _create_session(client)
-        sid3 = _create_session(client)
+        sid1 = _create_session()
+        sid2 = _create_session()
+        sid3 = _create_session()
 
         _expire_session(sid2)
 
@@ -429,7 +440,7 @@ class TestAdversarial:
     def test_chat_stream_with_expired_session_id_blocks_request(self, client: TestClient):
         """Even though chat could work without a session, providing an expired
         session ID should block the request to alert the user."""
-        sid = _create_session(client)
+        sid = _create_session()
         _expire_session(sid)
 
         resp = client.post(
@@ -443,7 +454,7 @@ class TestAdversarial:
 
     def test_run_tests_with_expired_session_id_blocks_request(self, client: TestClient):
         """Same as above but for run-tests."""
-        sid = _create_session(client)
+        sid = _create_session()
         _expire_session(sid)
 
         resp = client.post(
