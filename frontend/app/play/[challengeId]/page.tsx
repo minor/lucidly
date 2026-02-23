@@ -706,7 +706,8 @@ export default function ChallengePage() {
 
   const handleSubmit = async (prompt: string, model: string) => {
     if (sessionExpired) return;
-    if (!prompt.trim() || isStreaming || isExecuting || submitState !== "idle") return;
+    const maxTurns = isProductChallenge ? 10 : 4;
+    if (!prompt.trim() || isStreaming || isExecuting || submitState !== "idle" || totalTurns >= maxTurns) return;
 
     // Require auth before prompting
     if (!isAuthenticated) {
@@ -1637,8 +1638,8 @@ export default function ChallengePage() {
                 selectedModel={selectedModel}
                 onModelChange={setSelectedModel}
                 fixedModel={isProductChallenge && productPart === 1 ? "gpt-5.2" : undefined}
-                placeholder={isProductChallenge && productPart === 1 ? "Ask the CRO..." : "Ask anything..."}
-                disabled={sessionExpired || isStreaming || isExecuting || submitState === "pending" || submitState === "completed"}
+                placeholder={totalTurns >= (isProductChallenge ? 10 : 4) ? `Turn limit reached (${totalTurns}/${isProductChallenge ? 10 : 4})` : isProductChallenge && productPart === 1 ? "Ask the CRO..." : "Ask anything..."}
+                disabled={sessionExpired || isStreaming || isExecuting || submitState === "pending" || submitState === "completed" || totalTurns >= (isProductChallenge ? 10 : 4)}
                 extraButton={
                   <button
                     type="button"

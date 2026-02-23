@@ -34,6 +34,7 @@ export function Auth0Provider({ children }: { children: ReactNode }) {
       clientId={clientId!}
       authorizationParams={{
         redirect_uri: appUrl,
+        audience: process.env.NEXT_PUBLIC_AUTH0_AUDIENCE,
       }}
       onRedirectCallback={onRedirectCallback}
     >
