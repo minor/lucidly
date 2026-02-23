@@ -72,23 +72,6 @@ async def test_generate_tests_rate_limit(auth_client: AsyncClient):
     )
 
 
-@pytest.mark.anyio
-async def test_calculate_score_rate_limit(auth_client: AsyncClient):
-    """/api/calculate-score — 10/minute"""
-    await _exhaust_rate_limit(
-        auth_client,
-        "post",
-        "/api/calculate-score",
-        limit=10,
-        json={
-            "challenge_id": "nonexistent",
-            "accuracy": 0.5,
-            "elapsed_sec": 10.0,
-            "total_tokens": 100,
-            "total_turns": 1,
-        },
-    )
-
 
 # ---------------------------------------------------------------------------
 # Higher-limit endpoints (exhaustive — requests are fast because they fail

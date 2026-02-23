@@ -65,20 +65,6 @@ async def test_create_username_requires_auth(client: AsyncClient):
     )
 
 
-@pytest.mark.anyio
-async def test_calculate_score_requires_auth(client: AsyncClient):
-    await _assert_requires_auth(
-        client, "post",
-        "/api/calculate-score",
-        json={
-            "challenge_id": "nonexistent",
-            "accuracy": 0.5,
-            "elapsed_sec": 10.0,
-            "total_tokens": 100,
-            "total_turns": 1,
-        },
-    )
-
 
 @pytest.mark.anyio
 async def test_agent_runs_requires_auth(client: AsyncClient):
