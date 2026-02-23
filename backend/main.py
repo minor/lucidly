@@ -519,6 +519,41 @@ from scoring_sessions import (
 )
 
 
+def _resolve_auth(request: Request):
+    """Return the effective auth callable, respecting dependency_overrides for testability."""
+    return request.app.dependency_overrides.get(get_current_user)
+
+
+async def _require_auth_after_session_check(request: Request) -> str:
+    """For endpoints that accept scoring_session_id: check expiry before auth.
+
+    This ensures a 410 is returned (session expired) before a 401 (not authenticated),
+    so clients get the most actionable error first.
+    """
+    try:
+        body = await request.json()
+        sid = body.get("scoring_session_id") if isinstance(body, dict) else None
+        if sid is not None and get_scoring_session(sid) is None:
+            raise HTTPException(status_code=410, detail="Scoring session expired or not found")
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+    override = _resolve_auth(request)
+    return await override() if override else await get_current_user(request)
+
+
+async def _require_auth_after_session_id_check(session_id: str, request: Request) -> str:
+    """For the submit endpoint: check session expiry (path param) before auth.
+
+    Returns 410 for expired/missing sessions before 401 for unauthenticated requests.
+    """
+    if get_scoring_session(session_id) is None:
+        raise HTTPException(status_code=410, detail="Scoring session expired or not found")
+    override = _resolve_auth(request)
+    return await override() if override else await get_current_user(request)
+
+
 class CreateScoringSessionRequest(BaseModel):
     challenge_id: str
     username: str = ""  # ignored if caller is authenticated; kept for backwards-compat
@@ -968,41 +1003,6 @@ async def session_ws(ws: WebSocket, session_id: str):
 # ---------------------------------------------------------------------------
 # Chat endpoint — streaming chat with Claude Code API
 # ---------------------------------------------------------------------------
-
-
-def _resolve_auth(request: Request):
-    """Return the effective auth callable, respecting dependency_overrides for testability."""
-    return request.app.dependency_overrides.get(get_current_user)
-
-
-async def _require_auth_after_session_check(request: Request) -> str:
-    """For endpoints that accept scoring_session_id: check expiry before auth.
-
-    This ensures a 410 is returned (session expired) before a 401 (not authenticated),
-    so clients get the most actionable error first.
-    """
-    try:
-        body = await request.json()
-        sid = body.get("scoring_session_id") if isinstance(body, dict) else None
-        if sid is not None and get_scoring_session(sid) is None:
-            raise HTTPException(status_code=410, detail="Scoring session expired or not found")
-    except HTTPException:
-        raise
-    except Exception:
-        pass
-    override = _resolve_auth(request)
-    return await override() if override else await get_current_user(request)
-
-
-async def _require_auth_after_session_id_check(session_id: str, request: Request) -> str:
-    """For the submit endpoint: check session expiry (path param) before auth.
-
-    Returns 410 for expired/missing sessions before 401 for unauthenticated requests.
-    """
-    if get_scoring_session(session_id) is None:
-        raise HTTPException(status_code=410, detail="Scoring session expired or not found")
-    override = _resolve_auth(request)
-    return await override() if override else await get_current_user(request)
 
 
 @app.post("/api/chat/stream")
