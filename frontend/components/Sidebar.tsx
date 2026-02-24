@@ -208,7 +208,7 @@ export function Sidebar({ onNavigate, isMobile }: SidebarProps = {}) {
             {collapsed ? (
               <button
                 onClick={() => setModeOpen(!modeOpen)}
-                className="flex items-center gap-3 rounded-lg px-3 py-2 min-h-[40px] text-muted hover:text-foreground transition-colors cursor-pointer w-full min-w-0"
+                className="flex items-center justify-center rounded-lg py-2 min-h-[40px] w-10 mx-auto text-muted hover:text-foreground transition-colors cursor-pointer"
                 title={currentMode.label}
               >
                 <CurrentIcon className="h-4 w-4 shrink-0" />
@@ -303,11 +303,14 @@ export function Sidebar({ onNavigate, isMobile }: SidebarProps = {}) {
                   key={item.href}
                   href={item.href}
                   onClick={onNavigate}
-                  className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors min-w-0 ${
+                  className={`flex items-center rounded-lg py-2 text-sm transition-colors min-w-0 ${
+                    collapsed ? "justify-center w-10 mx-auto px-0" : "gap-3 px-3"
+                  } ${
                     isActive
                       ? "bg-accent-bg text-foreground font-medium"
                       : "text-muted hover:text-foreground hover:bg-accent-bg/50"
                   }`}
+                  title={collapsed ? item.label : undefined}
                 >
                   <Icon className="h-4 w-4 shrink-0" />
                   {!collapsed && (
@@ -323,9 +326,9 @@ export function Sidebar({ onNavigate, isMobile }: SidebarProps = {}) {
       })()}
 
       {/* User info — bottom-left (click to show Log out) */}
-      {!collapsed && isAuthenticated && user && (
-        <div className="px-3 py-3 shrink-0 min-w-0 relative" ref={userBlockRef}>
-          {logoutOpen && (
+      {isAuthenticated && user && (
+        <div className={`py-3 shrink-0 min-w-0 relative ${collapsed ? "px-0 flex justify-center" : "px-3"}`} ref={userBlockRef}>
+          {logoutOpen && !collapsed && (
             <button
               type="button"
               onClick={() => {
@@ -338,23 +341,49 @@ export function Sidebar({ onNavigate, isMobile }: SidebarProps = {}) {
               Log out
             </button>
           )}
-          <button
-            type="button"
-            onClick={() => setLogoutOpen((o) => !o)}
-            className="flex items-center gap-2.5 rounded-xl bg-background px-3 py-2.5 min-w-0 w-full text-left hover:bg-muted/30 transition-colors cursor-pointer"
-          >
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent/20 text-sm font-semibold text-accent">
+          {collapsed ? (
+            <button
+              type="button"
+              onClick={() => setLogoutOpen((o) => !o)}
+              className="flex h-9 w-9 items-center justify-center rounded-full bg-accent/20 text-sm font-semibold text-accent hover:ring-2 hover:ring-accent/30 transition-all cursor-pointer"
+              title={username || user.nickname || user.name || "User"}
+            >
               {(username || user.nickname || user.name || "U").charAt(0).toUpperCase()}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setLogoutOpen((o) => !o)}
+              className="flex items-center gap-2.5 rounded-xl bg-background px-3 py-2.5 min-w-0 w-full text-left hover:bg-muted/30 transition-colors cursor-pointer"
+            >
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent/20 text-sm font-semibold text-accent">
+                {(username || user.nickname || user.name || "U").charAt(0).toUpperCase()}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-foreground truncate leading-tight" title={username || user.nickname || user.name || undefined}>
+                  {username || user.nickname || user.name || "User"}
+                </p>
+                <p className="text-[11px] text-muted truncate leading-tight mt-0.5" title={user.email ?? undefined}>
+                  {user.email}
+                </p>
+              </div>
+            </button>
+          )}
+          {logoutOpen && collapsed && (
+            <div className="absolute left-full bottom-0 ml-1 rounded-lg border border-border bg-card shadow-lg z-20 overflow-hidden min-w-[120px]">
+              <button
+                type="button"
+                onClick={() => {
+                  logout({ logoutParams: { returnTo: appUrl } });
+                  setLogoutOpen(false);
+                }}
+                className="flex items-center gap-1.5 w-full px-3 py-2.5 text-sm text-muted hover:text-foreground hover:bg-muted/10 transition-colors cursor-pointer"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                Log out
+              </button>
             </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-foreground truncate leading-tight" title={username || user.nickname || user.name || undefined}>
-                {username || user.nickname || user.name || "User"}
-              </p>
-              <p className="text-[11px] text-muted truncate leading-tight mt-0.5" title={user.email ?? undefined}>
-                {user.email}
-              </p>
-            </div>
-          </button>
+          )}
         </div>
       )}
       </aside>

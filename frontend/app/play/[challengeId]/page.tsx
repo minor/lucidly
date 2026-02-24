@@ -973,7 +973,7 @@ export default function ChallengePage() {
                   </div>
                 </div>
                 {showScoreExplainer && (
-                  <div className="absolute left-full top-0 ml-3 w-48 rounded-lg border border-border bg-background p-2.5 text-left text-xs text-muted leading-relaxed shadow-lg animate-in fade-in slide-in-from-left-1 duration-150">
+                  <div className="absolute left-1/2 -translate-x-1/2 top-full mt-3 w-56 rounded-lg border border-border bg-background p-2.5 text-left text-xs text-muted leading-relaxed shadow-lg z-10 animate-in fade-in slide-in-from-top-1 duration-150">
                     <p className="mb-1 font-semibold text-foreground text-[11px] uppercase tracking-wider">Scoring</p>
                     <p>
                       ELO-style rating (0–1000) weighted by{" "}
