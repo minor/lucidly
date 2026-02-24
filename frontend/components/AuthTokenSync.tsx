@@ -9,7 +9,7 @@ import { setAuthToken } from "@/lib/api";
  * Render once near the app root (e.g. in LayoutShell).
  */
 export function AuthTokenSync() {
-  const { isAuthenticated, getAccessTokenSilently } = useAuth0();
+  const { isAuthenticated, getAccessTokenSilently, loginWithRedirect } = useAuth0();
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -24,13 +24,19 @@ export function AuthTokenSync() {
       })
       .catch((err) => {
         console.error("[AuthTokenSync] Failed to get access token:", err);
-        if (!cancelled) setAuthToken(null);
+        if (!cancelled) {
+          setAuthToken(null);
+          // Session expired or refresh token invalidated — redirect to login
+          if (err?.error === "login_required" || err?.error === "missing_refresh_token") {
+            loginWithRedirect({ appState: { returnTo: window.location.pathname } });
+          }
+        }
       });
 
     return () => {
       cancelled = true;
     };
-  }, [isAuthenticated, getAccessTokenSilently]);
+  }, [isAuthenticated, getAccessTokenSilently, loginWithRedirect]);
 
   return null;
 }

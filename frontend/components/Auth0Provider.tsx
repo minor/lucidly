@@ -36,8 +36,9 @@ export function Auth0Provider({ children }: { children: ReactNode }) {
         redirect_uri: appUrl,
         audience: process.env.NEXT_PUBLIC_AUTH0_AUDIENCE,
       }}
-      cacheLocation="localstorage"
+      cacheLocation="memory"
       useRefreshTokens={true}
+      useRefreshTokensFallback={true}
       onRedirectCallback={onRedirectCallback}
     >
       {children}
