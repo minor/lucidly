@@ -7,12 +7,14 @@ import { Sidebar } from "@/components/Sidebar";
 import { TopAuthBar } from "@/components/TopAuthBar";
 import { UsernameGate } from "@/components/UsernameGate";
 import { AuthTokenSync } from "@/components/AuthTokenSync";
+import { UsernameProvider } from "@/hooks/UsernameContext";
 
 export function LayoutShell({ children }: { children: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const closeMobile = useCallback(() => setMobileOpen(false), []);
 
   return (
+    <UsernameProvider>
     <div className="flex h-screen overflow-hidden">
       {/* Desktop sidebar — hidden on mobile */}
       <div className="hidden sm:block">
@@ -63,5 +65,6 @@ export function LayoutShell({ children }: { children: ReactNode }) {
         {children}
       </main>
     </div>
+    </UsernameProvider>
   );
 }

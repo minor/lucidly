@@ -1,7 +1,7 @@
 "use client";
 
 import { useAuth0 } from "@auth0/auth0-react";
-import { useUsername } from "@/hooks/useUsername";
+import { useUsernameContext } from "@/hooks/UsernameContext";
 import { UsernameModal } from "@/components/UsernameModal";
 import { setAuthToken } from "@/lib/api";
 
@@ -11,7 +11,7 @@ import { setAuthToken } from "@/lib/api";
  */
 export function UsernameGate() {
   const { user, isAuthenticated, getAccessTokenSilently } = useAuth0();
-  const { needsUsername, setUsername } = useUsername(user);
+  const { needsUsername, setUsername } = useUsernameContext();
 
   if (!isAuthenticated || !needsUsername) return null;
 
