@@ -204,6 +204,7 @@ class LLM:
         self.system_prompt = system_prompt
         self.max_tokens = max_tokens
         self.temperature = temperature
+        self.last_usage: dict | None = None
 
         self.client = AsyncOpenAI(
             api_key=self.api_key,
@@ -262,11 +263,14 @@ class LLM:
         temperature: float | None = None,
         conversation_history: list[dict] | None = None,
         image_data_url: str | None = None,
+        include_usage: bool = False,
     ) -> AsyncGenerator[str, None]:
         """
         Streaming generation. Yields text chunks as they arrive.
-        If image_data_url is provided, the message includes the image for vision models.
+        If include_usage is True, requests token usage in the final chunk
+        and stores it in self.last_usage after the stream completes.
         """
+        self.last_usage = None
         messages = self._build_messages(
             prompt,
             system_prompt=system_prompt,
@@ -274,17 +278,26 @@ class LLM:
             image_data_url=image_data_url,
         )
 
-        stream = await self.client.chat.completions.create(
-            model=model or self.model,
-            messages=messages,
-            max_completion_tokens=max_tokens or self.max_tokens,
-            temperature=temperature if temperature is not None else self.temperature,
-            stream=True,
-        )
+        create_kwargs: dict = {
+            "model": model or self.model,
+            "messages": messages,
+            "max_completion_tokens": max_tokens or self.max_tokens,
+            "temperature": temperature if temperature is not None else self.temperature,
+            "stream": True,
+        }
+        if include_usage:
+            create_kwargs["stream_options"] = {"include_usage": True}
+
+        stream = await self.client.chat.completions.create(**create_kwargs)
 
         async for chunk in stream:
             if chunk.choices and chunk.choices[0].delta.content:
                 yield chunk.choices[0].delta.content
+            if include_usage and hasattr(chunk, "usage") and chunk.usage:
+                self.last_usage = {
+                    "prompt_tokens": chunk.usage.prompt_tokens or 0,
+                    "completion_tokens": chunk.usage.completion_tokens or 0,
+                }
 
     def _build_messages(
         self,

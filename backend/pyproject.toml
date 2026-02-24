@@ -21,8 +21,8 @@ dependencies = [
     "PyJWT[crypto]",
 ]
 
-[project.optional-dependencies]
-dev = ["pytest", "pytest-asyncio", "httpx"]
+[dependency-groups]
+dev = ["pytest>=7.0", "pytest-asyncio", "httpx"]
 
 [build-system]
 requires = ["hatchling"]

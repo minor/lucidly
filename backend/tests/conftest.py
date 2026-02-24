@@ -1,4 +1,12 @@
-"""Shared fixtures for backend API tests."""
+"""Shared fixtures for backend API tests.
+
+The dummy env var must be set before any application module is imported —
+app initialization requires at least one LLM API key to be present.
+"""
+
+import os
+
+os.environ["OPENAI_API_KEY"] = os.environ.get("OPENAI_API_KEY") or "test-dummy-key"
 
 import pytest
 import pytest_asyncio
