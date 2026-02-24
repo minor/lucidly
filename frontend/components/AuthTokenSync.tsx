@@ -22,7 +22,8 @@ export function AuthTokenSync() {
       .then((token) => {
         if (!cancelled) setAuthToken(token);
       })
-      .catch(() => {
+      .catch((err) => {
+        console.error("[AuthTokenSync] Failed to get access token:", err);
         if (!cancelled) setAuthToken(null);
       });
 
