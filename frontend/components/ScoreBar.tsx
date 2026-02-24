@@ -1,6 +1,6 @@
 "use client";
 
-import { Zap, Clock, Coins, RefreshCw, DollarSign } from "lucide-react";
+import { Zap, Clock, Coins, RefreshCw, DollarSign, Info } from "lucide-react";
 
 interface ScoreBarProps {
   accuracy?: number;
@@ -13,6 +13,8 @@ interface ScoreBarProps {
   scoreLoading?: boolean; // Whether score is currently being evaluated
   /** When true, hide the Turns stat (e.g. for agent benchmark runs where turns aren't an efficiency metric) */
   hideTurns?: boolean;
+  /** When true, show an info tooltip indicating metrics are live estimates */
+  showEstimateInfo?: boolean;
 }
 
 export function ScoreBar({
@@ -25,6 +27,7 @@ export function ScoreBar({
   score,
   scoreLoading = false,
   hideTurns = false,
+  showEstimateInfo = false,
 }: ScoreBarProps) {
   const formatTime = (sec: number) => {
     const m = Math.floor(sec / 60);
@@ -74,7 +77,7 @@ export function ScoreBar({
   };
 
   return (
-    <div className="flex items-center gap-6 rounded-xl border border-border bg-card px-5 py-3">
+    <div className="flex items-center gap-6 rounded-xl border border-border bg-card px-5 py-3 relative">
       {/* Composite score */}
       {compositeScore !== undefined && (
         <div className="flex items-center gap-2">
@@ -159,6 +162,16 @@ export function ScoreBar({
             <p className="text-[10px] text-muted uppercase tracking-wider">
               Cost
             </p>
+          </div>
+        </div>
+      )}
+
+      {/* Estimate info tooltip */}
+      {showEstimateInfo && (
+        <div className="group relative ml-auto flex items-center">
+          <Info className="h-3.5 w-3.5 text-muted cursor-help" />
+          <div className="pointer-events-none absolute bottom-full right-0 mb-2 w-56 rounded-lg border border-border bg-card px-3 py-2 text-[11px] text-muted shadow-md opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-50">
+            Live metrics are estimates. Final values are computed server-side on submission.
           </div>
         </div>
       )}

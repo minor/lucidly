@@ -598,6 +598,18 @@ export default function ChallengePage() {
       });
 
       setFinalScores(scores);
+
+      // Overwrite frozen stats with authoritative server values
+      if (frozenStatsRef.current) {
+        frozenStatsRef.current = {
+          ...frozenStatsRef.current,
+          ...(scores.elapsed_sec !== undefined && { elapsed: scores.elapsed_sec }),
+          ...(scores.total_turns !== undefined && { turns: scores.total_turns }),
+          ...(scores.total_tokens !== undefined && { tokens: scores.total_tokens }),
+          ...(scores.total_cost !== undefined && { cost: scores.total_cost }),
+        };
+      }
+
       setScoreLoading(false);
       setSubmitState("completed");
       setShowCompletionModal(true);
@@ -1003,6 +1015,7 @@ export default function ChallengePage() {
           }
           scoreLoading={scoreLoading && !scoreBarFrozen}
           compositeScore={finalScores ? finalScores.composite_score : undefined}
+          showEstimateInfo={!scoreBarFrozen}
           cost={
             scoreBarFrozen && frozenStatsRef.current
               ? frozenStatsRef.current.cost

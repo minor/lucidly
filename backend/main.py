@@ -749,6 +749,11 @@ Please evaluate the similarity and provide your response in the following JSON f
     # --- 6. Mark completed ---
     complete_scoring_session(session_id)
 
+    scores["elapsed_sec"] = elapsed_sec
+    scores["total_turns"] = total_turns
+    scores["total_tokens"] = total_tokens
+    scores["total_cost"] = total_cost
+
     return scores
 
 

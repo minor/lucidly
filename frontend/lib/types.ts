@@ -89,6 +89,10 @@ export interface Scores {
   turn_score: number;
   composite_score: number;
   db_session_id?: string;
+  elapsed_sec?: number;
+  total_turns?: number;
+  total_tokens?: number;
+  total_cost?: number;
 }
 
 export interface LeaderboardEntry {
