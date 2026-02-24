@@ -62,6 +62,10 @@ export async function getChallenge(id: string): Promise<Challenge> {
   return fetchJSON<Challenge>(`/api/challenges/${id}`);
 }
 
+export async function getDailyAttempts(): Promise<Record<string, number>> {
+  return fetchJSON<Record<string, number>>("/api/challenges/daily-attempts");
+}
+
 // ---- Sessions ----
 
 export async function createSession(

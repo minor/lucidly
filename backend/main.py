@@ -203,6 +203,16 @@ async def list_challenges(category: str | None = None, difficulty: str | None = 
     return challenges
 
 
+@app.get("/api/challenges/daily-attempts")
+async def get_daily_attempts(user_id: str = Depends(get_current_user)):
+    """Return {challenge_id: attempts_used} for the authenticated user today."""
+    from database import get_username_by_auth0_id, count_user_attempts_today_bulk
+    username = await get_username_by_auth0_id(user_id)
+    if not username:
+        return {}
+    return await count_user_attempts_today_bulk(username)
+
+
 @app.get("/api/challenges/{challenge_id}")
 async def get_challenge(challenge_id: str):
     challenge = get_challenge_by_id(challenge_id)
@@ -1028,12 +1038,13 @@ async def chat_stream(req: ChatRequest, request: Request, user_id: str = Depends
         raise HTTPException(status_code=429, detail=f"Turn limit reached (max {max_turns} per conversation).")
 
     if req.challenge_id and user_turns == 1:
-        from database import get_username_by_auth0_id, count_user_challenge_sessions_today
+        from database import get_username_by_auth0_id, count_user_challenge_attempts_today, record_challenge_attempt
         username = await get_username_by_auth0_id(user_id)
         if username:
-            count = await count_user_challenge_sessions_today(username, req.challenge_id)
+            count = await count_user_challenge_attempts_today(username, req.challenge_id)
             if count >= 5:
                 raise HTTPException(status_code=429, detail="Daily limit reached (max 5 attempts per challenge).")
+            await record_challenge_attempt(username, req.challenge_id)
 
     # Convert messages to Anthropic format (or OpenAI format if using OpenRouter)
     anthropic_messages = []

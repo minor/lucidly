@@ -12,6 +12,8 @@ interface PromptInputProps {
   isStreaming?: boolean; // Alias for loading
   placeholder?: string;
   disabled?: boolean;
+  /** Block submission (and model changes) without locking the textarea */
+  submitDisabled?: boolean;
   initialModel?: string;
   selectedModel?: string; // Controlled mode
   onModelChange?: (model: string) => void; // Controlled mode
@@ -28,6 +30,7 @@ export function PromptInput({
   isStreaming,
   placeholder = "Ask anything...",
   disabled = false,
+  submitDisabled = false,
   initialModel = "gpt-5.2",
   selectedModel,
   onModelChange,
@@ -53,7 +56,7 @@ export function PromptInput({
 
   const handleSubmit = () => {
     const trimmed = value.trim();
-    if (!trimmed || isLoading || disabled) return;
+    if (!trimmed || isLoading || disabled || submitDisabled) return;
     onSubmit(trimmed, activeModel);
     setValue("");
     if (textareaRef.current) {
@@ -91,7 +94,7 @@ export function PromptInput({
             <select
               value={activeModel}
               onChange={(e) => handleModelChange(e.target.value)}
-              disabled={isLoading || disabled}
+              disabled={isLoading || disabled || submitDisabled}
               className="bg-transparent text-xs font-medium text-muted hover:text-foreground focus:outline-none cursor-pointer"
             >
               {MODELS.map((m) => (
@@ -135,7 +138,7 @@ export function PromptInput({
         ) : (
           <button
             onClick={handleSubmit}
-            disabled={!value.trim() || isLoading || disabled}
+            disabled={!value.trim() || isLoading || disabled || submitDisabled}
             className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-foreground text-background transition-opacity hover:opacity-90 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
             aria-label="Submit prompt"
           >
