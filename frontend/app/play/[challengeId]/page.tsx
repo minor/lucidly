@@ -53,6 +53,8 @@ export default function ChallengePage() {
   const startTimeRef = useRef<number>(Date.now());
   const [elapsed, setElapsed] = useState(0);
   const [totalTurns, setTotalTurns] = useState(0);
+  // Tracks whether there is unsaved progress for nav-guard purposes
+  const navGuardActiveRef = useRef(false);
   const [totalTokens, setTotalTokens] = useState(0);
   const [totalInputTokens, setTotalInputTokens] = useState(0);
   const [estimatedTokens, setEstimatedTokens] = useState(0);
@@ -171,6 +173,7 @@ export default function ChallengePage() {
   
   // Execution state (from Leaderboard - allows pausing during tests)
   const [isExecuting, setIsExecuting] = useState(false);
+  const testRunInFlightRef = useRef(false);
   
   // True from prompt submission until first LLM token arrives (pause timer during latency)
   const [isWaitingForFirstToken, setIsWaitingForFirstToken] = useState(false);
@@ -413,6 +416,59 @@ export default function ChallengePage() {
   //   };
   // }, [challenge]);
 
+  // Keep navGuardActiveRef in sync: guard is active when user has started but not submitted
+  useEffect(() => {
+    navGuardActiveRef.current = totalTurns > 0 && submitState !== "completed";
+  }, [totalTurns, submitState]);
+
+  // Navigation guard — warn before leaving the page in any way
+  useEffect(() => {
+    // 1. Tab close / browser refresh
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (navGuardActiveRef.current) e.preventDefault();
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+
+    // 2. Client-side navigation via <Link> or router.push (Next.js calls pushState)
+    const nativePushState = window.history.pushState.bind(window.history);
+    window.history.pushState = (...args: Parameters<typeof window.history.pushState>) => {
+      if (navGuardActiveRef.current) {
+        const ok = window.confirm(
+          "You have an unsubmitted session in progress. Leave anyway?"
+        );
+        if (!ok) return;
+      }
+      nativePushState(...args);
+    };
+
+    // 3. Browser back/forward button.
+    // When popstate fires the URL has already changed, so use history.forward()
+    // to undo a back-navigation. Guard the extra popstate it fires with a flag.
+    let ignoreNextPopState = false;
+    const handlePopState = () => {
+      if (ignoreNextPopState) {
+        ignoreNextPopState = false;
+        return;
+      }
+      if (navGuardActiveRef.current) {
+        const ok = window.confirm(
+          "You have an unsubmitted session in progress. Leave anyway?"
+        );
+        if (!ok) {
+          ignoreNextPopState = true;
+          window.history.forward();
+        }
+      }
+    };
+    window.addEventListener("popstate", handlePopState);
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      window.removeEventListener("popstate", handlePopState);
+      window.history.pushState = nativePushState;
+    };
+  }, []);
+
   useEffect(() => {
     const handleBeforeUnload = () => {
       if (sandboxIdRef.current) {
@@ -450,7 +506,7 @@ export default function ChallengePage() {
 
   // Auto-run tests/code after streaming
   useEffect(() => {
-    if (isStreaming) return;
+    if (isStreaming || testRunInFlightRef.current) return;
 
     const assistantMessages = messages.filter((m) => m.role === "assistant");
     if (assistantMessages.length === 0) return;
@@ -472,6 +528,7 @@ export default function ChallengePage() {
         setLatestCode(code);
         setRunningTests(true);
         setIsExecuting(true);
+        testRunInFlightRef.current = true;
         runTests(code, challengeId, sandboxId, scoringSessionIdRef.current ?? undefined)
           .then((results) => {
             setTestResults(results);
@@ -483,6 +540,9 @@ export default function ChallengePage() {
             handleSessionExpired(err.message);
             setRunningTests(false);
             setIsExecuting(false);
+          })
+          .finally(() => {
+            testRunInFlightRef.current = false;
           });
       } else {
         setIsExecuting(false);
@@ -493,7 +553,7 @@ export default function ChallengePage() {
         setRenderedCode(code);
         setRunningCode(true);
         setIsExecuting(true);
-        setCodeResult(null);
+        testRunInFlightRef.current = true;
         
         runCode(sandboxId, code)
           .then((result) => {
@@ -506,6 +566,9 @@ export default function ChallengePage() {
             setCodeResult({ stdout: "", stderr: `Error running code: ${e}`, returncode: 1 });
             setRunningCode(false);
             setIsExecuting(false);
+          })
+          .finally(() => {
+            testRunInFlightRef.current = false;
           });
       } else {
         setIsExecuting(false);
@@ -626,6 +689,10 @@ export default function ChallengePage() {
       frozenStatsRef.current = null;
       setSubmitState("idle");
     }
+  };
+
+  const navigateAway = (path: string) => {
+    router.push(path);
   };
 
   const handleRetry = () => {
@@ -804,7 +871,7 @@ export default function ChallengePage() {
         }
       },
       abortControllerRef.current?.signal,
-      isProductChallenge && productPart === 1 ? challengeId : undefined,
+      challengeId,
       scoringSessionIdRef.current ?? undefined
     );
   };
@@ -981,10 +1048,10 @@ export default function ChallengePage() {
       <header className="flex items-center justify-between border-b border-border px-6 py-3">
         <div className="flex items-center gap-3">
           <button
-            onClick={() => router.push("/play")}
-            className="text-muted hover:text-foreground transition-colors cursor-pointer"
-          >
-            <ArrowLeft className="h-4 w-4" />
+                onClick={() => navigateAway("/play")}
+                className="text-muted hover:text-foreground transition-colors cursor-pointer"
+              >
+                <ArrowLeft className="h-4 w-4" />
           </button>
           <div>
             <h1 className="text-sm font-semibold">{challenge?.title}</h1>
@@ -1001,6 +1068,7 @@ export default function ChallengePage() {
       <div className="flex items-center justify-between gap-4 border-b border-border px-6 py-2">
         <ScoreBar
           turns={scoreBarFrozen && frozenStatsRef.current ? frozenStatsRef.current.turns : totalTurns}
+          maxTurns={isProductChallenge ? 10 : 4}
           tokens={scoreBarFrozen && frozenStatsRef.current ? frozenStatsRef.current.tokens : Math.round(totalTokens + totalInputTokens + estimatedTokens)}
           elapsedSec={scoreBarFrozen && frozenStatsRef.current ? frozenStatsRef.current.elapsed : elapsed}
           accuracy={scoreBarFrozen && frozenStatsRef.current ? frozenStatsRef.current.accuracy : (testResults ? testResults.passed_count / testResults.total_count : undefined)}
@@ -1648,8 +1716,15 @@ export default function ChallengePage() {
                 selectedModel={selectedModel}
                 onModelChange={setSelectedModel}
                 fixedModel={isProductChallenge && productPart === 1 ? "gpt-5.2" : undefined}
-                placeholder={totalTurns >= (isProductChallenge ? 10 : 4) ? `Turn limit reached (${totalTurns}/${isProductChallenge ? 10 : 4})` : isProductChallenge && productPart === 1 ? "Ask the CRO..." : "Ask anything..."}
-                disabled={sessionExpired || isStreaming || isExecuting || submitState === "pending" || submitState === "completed" || totalTurns >= (isProductChallenge ? 10 : 4)}
+                placeholder={(() => {
+                  const maxT = isProductChallenge ? 10 : 4;
+                  const remaining = maxT - totalTurns;
+                  if (remaining <= 0) return `Turn limit reached`;
+                  const base = isProductChallenge && productPart === 1 ? "Ask the CRO..." : "Ask anything...";
+                  return `${base} (${remaining} turn${remaining === 1 ? "" : "s"} left)`;
+                })()}
+                disabled={sessionExpired || submitState === "completed" || totalTurns >= (isProductChallenge ? 10 : 4)}
+                submitDisabled={isStreaming || isExecuting || submitState === "pending"}
                 extraButton={
                   <button
                     type="button"

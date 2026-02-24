@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getChallenges } from "@/lib/api";
+import { useAuth0 } from "@auth0/auth0-react";
+import { getChallenges, getDailyAttempts } from "@/lib/api";
 import { ChallengeCard } from "@/components/ChallengeCard";
 import type { Challenge } from "@/lib/types";
 import { Loader2, Filter } from "lucide-react";
@@ -10,7 +11,9 @@ const CATEGORIES = ["all", "ui", "function", "debug", "data", "system"];
 const DIFFICULTIES = ["all", "easy", "medium", "hard"];
 
 export default function PlayPage() {
+  const { isAuthenticated } = useAuth0();
   const [challenges, setChallenges] = useState<Challenge[]>([]);
+  const [dailyAttempts, setDailyAttempts] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [category, setCategory] = useState("all");
@@ -36,6 +39,17 @@ export default function PlayPage() {
       ignore = true;
     };
   }, [category, difficulty]);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    let ignore = false;
+    getDailyAttempts()
+      .then((data) => {
+        if (!ignore) setDailyAttempts(data);
+      })
+      .catch(() => {});
+    return () => { ignore = true; };
+  }, [isAuthenticated]);
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-10">
@@ -106,7 +120,11 @@ export default function PlayPage() {
       ) : (
         <div className="grid gap-3 sm:gap-4 sm:grid-cols-2">
           {challenges.map((challenge) => (
-            <ChallengeCard key={challenge.id} challenge={challenge} />
+            <ChallengeCard
+              key={challenge.id}
+              challenge={challenge}
+              attemptsUsed={isAuthenticated ? (dailyAttempts[challenge.id] ?? 0) : undefined}
+            />
           ))}
         </div>
       )}

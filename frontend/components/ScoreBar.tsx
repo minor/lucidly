@@ -11,6 +11,8 @@ interface ScoreBarProps {
   compositeScore?: number;
   score?: number; // Score out of 100, undefined means pending (for accuracy display)
   scoreLoading?: boolean; // Whether score is currently being evaluated
+  /** Max turns allowed for this challenge (displayed as turns/maxTurns) */
+  maxTurns?: number;
   /** When true, hide the Turns stat (e.g. for agent benchmark runs where turns aren't an efficiency metric) */
   hideTurns?: boolean;
   /** When true, show an info tooltip indicating metrics are live estimates */
@@ -26,6 +28,7 @@ export function ScoreBar({
   compositeScore,
   score,
   scoreLoading = false,
+  maxTurns,
   hideTurns = false,
   showEstimateInfo = false,
 }: ScoreBarProps) {

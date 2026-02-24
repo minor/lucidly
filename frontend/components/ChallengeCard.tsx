@@ -19,25 +19,43 @@ const DIFFICULTY_COLORS: Record<string, string> = {
   hard: "bg-error/10 text-error",
 };
 
+const MAX_DAILY_ATTEMPTS = 5;
+
 interface ChallengeCardProps {
   challenge: Challenge;
+  attemptsUsed?: number;
 }
 
-export function ChallengeCard({ challenge }: ChallengeCardProps) {
+export function ChallengeCard({ challenge, attemptsUsed }: ChallengeCardProps) {
   const Icon = CATEGORY_ICONS[challenge.category] || Code;
   const difficultyClass =
     DIFFICULTY_COLORS[challenge.difficulty] || "bg-muted/10 text-muted";
+  const remaining = attemptsUsed !== undefined ? MAX_DAILY_ATTEMPTS - attemptsUsed : undefined;
+  const exhausted = remaining !== undefined && remaining <= 0;
 
   return (
     <Link
       href={`/play/${challenge.id}`}
-      className="card-hover group block rounded-2xl border border-border bg-card p-5 transition-all hover:border-accent/40"
+      className={`card-hover group block rounded-2xl border bg-card p-5 transition-all ${exhausted ? "border-error/30 opacity-60" : "border-border hover:border-accent/40"}`}
     >
       <div className="flex items-start justify-between mb-3">
         <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent/10 text-accent">
           <Icon className="h-5 w-5" />
         </div>
         <div className="flex items-center gap-2">
+          {remaining !== undefined && (
+            <span
+              className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                exhausted
+                  ? "bg-error/10 text-error"
+                  : remaining <= 2
+                    ? "bg-orange-500/10 text-orange-500"
+                    : "bg-muted/10 text-muted"
+              }`}
+            >
+              {remaining}/{MAX_DAILY_ATTEMPTS} attempts left today
+            </span>
+          )}
           <span
             className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${difficultyClass}`}
           >

@@ -119,16 +119,30 @@ async def save_prompt_feedback(session_id: str, feedback: str) -> bool:
         return False
 
 
-async def count_user_challenge_sessions_today(username: str, challenge_id: str) -> int:
-    """Count how many times a user has played a specific challenge today."""
+async def record_challenge_attempt(username: str, challenge_id: str) -> None:
+    """Record that a user started an attempt (first turn) for a challenge."""
+    supabase = get_supabase_client()
+    if not supabase:
+        return
+    try:
+        supabase.table("challenge_attempts").insert({
+            "username": username,
+            "challenge_id": challenge_id,
+        }).execute()
+    except Exception as e:
+        logger.error(f"Error recording challenge attempt: {e}")
+
+
+async def count_user_challenge_attempts_today(username: str, challenge_id: str) -> int:
+    """Count how many attempts a user has started for a specific challenge today."""
     supabase = get_supabase_client()
     if not supabase:
         return 0
     try:
-        from datetime import date, timezone
+        from datetime import date
         today = date.today().isoformat()
         response = (
-            supabase.table("challenge_sessions")
+            supabase.table("challenge_attempts")
             .select("id", count="exact")
             .eq("username", username)
             .eq("challenge_id", challenge_id)
@@ -137,8 +151,33 @@ async def count_user_challenge_sessions_today(username: str, challenge_id: str) 
         )
         return response.count or 0
     except Exception as e:
-        logger.error(f"Error counting daily sessions: {e}")
+        logger.error(f"Error counting daily attempts: {e}")
         return 0
+
+
+async def count_user_attempts_today_bulk(username: str) -> dict[str, int]:
+    """Return {challenge_id: count} for all challenge attempts the user started today."""
+    supabase = get_supabase_client()
+    if not supabase:
+        return {}
+    try:
+        from datetime import date
+        today = date.today().isoformat()
+        response = (
+            supabase.table("challenge_attempts")
+            .select("challenge_id")
+            .eq("username", username)
+            .gte("created_at", today)
+            .execute()
+        )
+        counts: dict[str, int] = {}
+        for row in response.data or []:
+            cid = row["challenge_id"]
+            counts[cid] = counts.get(cid, 0) + 1
+        return counts
+    except Exception as e:
+        logger.error(f"Error bulk counting daily attempts: {e}")
+        return {}
 
 
 async def get_username_by_auth0_id(auth0_id: str) -> str | None:
