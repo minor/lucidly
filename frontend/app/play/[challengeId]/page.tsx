@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { getChallenge, runTests, runCode, createSandbox, terminateSandbox, MODEL_PRICING, MODELS, createVercelSandbox, updateVercelSandboxCode, stopVercelSandbox, streamPromptFeedback, createScoringSession, submitScore } from "@/lib/api";
+import { getChallenge, runTests, runCode, createSandbox, terminateSandbox, MODEL_PRICING, MODELS, createVercelSandbox, updateVercelSandboxCode, stopVercelSandbox, streamPromptFeedback, createScoringSession, submitScore, setAuthToken } from "@/lib/api";
 import { PromptInput } from "@/components/PromptInput";
 import { ScoreBar } from "@/components/ScoreBar";
 import { SimpleMarkdown } from "@/components/SimpleMarkdown";
@@ -40,7 +40,7 @@ import { useUsername } from "@/hooks/useUsername";
 export default function ChallengePage() {
   const params = useParams();
   const router = useRouter();
-  const { user, isAuthenticated, loginWithRedirect } = useAuth0();
+  const { user, isAuthenticated, loginWithRedirect, getAccessTokenSilently } = useAuth0();
   const { username, loading: usernameLoading } = useUsername(user);
   const [showAuthOverlay, setShowAuthOverlay] = useState(false);
   const challengeId = params.challengeId as string;
@@ -224,18 +224,17 @@ export default function ChallengePage() {
     if (!challenge || !isAuthenticated || usernameLoading) return;
     if (scoringSessionIdRef.current) return;
     let ignore = false;
-    createScoringSession({
-      challenge_id: challengeId,
-    })
+    getAccessTokenSilently()
+      .then((token) => {
+        setAuthToken(token);
+        return createScoringSession({ challenge_id: challengeId });
+      })
       .then((res) => {
         if (!ignore) scoringSessionIdRef.current = res.session_id;
       })
       .catch((err) => console.error("Failed to create scoring session:", err));
-    return () => {
-      ignore = true;
-    };
-  }, [challenge, challengeId, isAuthenticated, usernameLoading, username, user]);
-
+    return () => { ignore = true; };
+  }, [challenge, challengeId, isAuthenticated, usernameLoading, username, user, getAccessTokenSilently]);
   // Timer Logic (Merged)
   useEffect(() => {
     // Check for 100% accuracy to auto-pause timer

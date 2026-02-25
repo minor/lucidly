@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useAuth0 } from "@auth0/auth0-react";
-import { getChallenges, getDailyAttempts } from "@/lib/api";
+import { getChallenges, getDailyAttempts, setAuthToken } from "@/lib/api";
 import { ChallengeCard } from "@/components/ChallengeCard";
 import type { Challenge } from "@/lib/types";
 import { Loader2, Filter } from "lucide-react";
@@ -11,7 +11,7 @@ const CATEGORIES = ["all", "ui", "function", "debug", "data", "system"];
 const DIFFICULTIES = ["all", "easy", "medium", "hard"];
 
 export default function PlayPage() {
-  const { isAuthenticated } = useAuth0();
+  const { isAuthenticated, getAccessTokenSilently } = useAuth0();
   const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [dailyAttempts, setDailyAttempts] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
@@ -43,13 +43,17 @@ export default function PlayPage() {
   useEffect(() => {
     if (!isAuthenticated) return;
     let ignore = false;
-    getDailyAttempts()
+    getAccessTokenSilently()
+      .then((token) => {
+        setAuthToken(token); // keep it in sync
+        return getDailyAttempts();
+      })
       .then((data) => {
         if (!ignore) setDailyAttempts(data);
       })
       .catch(() => {});
     return () => { ignore = true; };
-  }, [isAuthenticated]);
+  }, [isAuthenticated, getAccessTokenSilently]);
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-10">

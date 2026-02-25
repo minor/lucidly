@@ -480,27 +480,37 @@ class SetUsernameRequest(BaseModel):
 @app.post("/api/username")
 async def create_username(req: SetUsernameRequest, user_id: str = Depends(get_current_user)):
     """Claim a display name. Fails if the name is already taken."""
-    if req.auth0_id != user_id:
-        raise HTTPException(status_code=403, detail="Cannot set username for another user.")
+    try:
+        if req.auth0_id != user_id:
+            raise HTTPException(status_code=403, detail="Cannot set username for another user.")
 
-    from database import is_username_taken, set_username, get_username_by_auth0_id
+        from database import is_username_taken, set_username, get_username_by_auth0_id
 
-    name = req.username.strip()
-    if not name or len(name) < 2 or len(name) > 30:
-        raise HTTPException(status_code=400, detail="Username must be 2-30 characters.")
+        name = req.username.strip()
+        if not name or len(name) < 2 or len(name) > 30:
+            raise HTTPException(status_code=400, detail="Username must be 2-30 characters.")
 
-    # Allow the same user to keep their current name
-    existing = await get_username_by_auth0_id(req.auth0_id)
-    if existing and existing.lower() == name.lower():
-        return {"ok": True, "username": existing}
+        existing = await get_username_by_auth0_id(req.auth0_id)
+        if existing and existing.lower() == name.lower():
+            return {"ok": True, "username": existing}
 
-    if await is_username_taken(name):
-        raise HTTPException(status_code=409, detail="Username is already taken.")
+        if await is_username_taken(name):
+            raise HTTPException(status_code=409, detail="Username is already taken.")
 
-    ok = await set_username(req.auth0_id, name)
-    if not ok:
-        raise HTTPException(status_code=500, detail="Failed to save username.")
-    return {"ok": True, "username": name}
+        ok = await set_username(req.auth0_id, name)
+        if not ok:
+            raise HTTPException(status_code=500, detail="Failed to save username.")
+        return {"ok": True, "username": name}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"create_username failed: {type(e).__name__}: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(
+            status_code=500,
+            detail=f"create_username failed: {type(e).__name__}: {e}",
+        )
 
 
 @app.get("/api/username-available/{username}")
