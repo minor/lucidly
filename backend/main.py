@@ -135,6 +135,40 @@ app.include_router(interview_router)
 # Default LLM instance (can be overridden per-request)
 llm = LLM()
 
+
+def _create_judge_llm(
+    *,
+    system_prompt: str,
+    temperature: float = 0.3,
+    model: str | None = None,
+) -> LLM:
+    """
+    Build the default judge/scoring LLM client.
+    Prefers xAI for Grok judge models and gracefully falls back to OpenAI.
+    """
+    judge_model = model or settings.judge_model
+    is_grok_judge = judge_model.startswith("grok")
+    use_xai = is_grok_judge and bool(settings.xai_api_key)
+
+    if use_xai:
+        return LLM(
+            base_url=settings.xai_base_url,
+            api_key=settings.xai_api_key,
+            model=judge_model,
+            system_prompt=system_prompt,
+            temperature=temperature,
+        )
+
+    fallback_model = settings.default_model if is_grok_judge else judge_model
+    return LLM(
+        base_url=settings.openai_base_url,
+        api_key=settings.openai_api_key,
+        model=fallback_model,
+        system_prompt=system_prompt,
+        temperature=temperature,
+    )
+
+
 # Test generator and evaluator instances
 # TestGenerator uses Claude by default (configured in test_generator.py)
 test_generator = TestGenerator()  # Will use Claude via create_claude_llm()
@@ -656,8 +690,8 @@ Consider the following aspects when evaluating:
 
 Please evaluate the similarity and provide your response in the following JSON format:
 {{"score": <number between 0-100>, "reasoning": "<detailed explanation>"}}"""
-                llm = LLM(
-                    model=settings.default_model,
+                llm = _create_judge_llm(
+                    model=settings.judge_model,
                     system_prompt="You are an expert HTML/CSS/JavaScript evaluator. Provide accurate and detailed similarity assessments.",
                     temperature=0.3,
                 )
@@ -723,11 +757,10 @@ Please evaluate the similarity and provide your response in the following JSON f
                 elapsed_sec=elapsed_sec,
             )
             prompt = _build_prd_feedback_prompt(prd_req)
-            feedback_llm = LLM(
-                base_url=settings.openai_base_url,
-                api_key=settings.openai_api_key,
-                model=settings.default_model,
+            feedback_llm = _create_judge_llm(
+                model=settings.judge_model,
                 system_prompt=PROMPT_FEEDBACK_PRD_SYSTEM_PROMPT,
+                temperature=0.4,
             )
             llm_response = await feedback_llm.generate(prompt, temperature=0.4)
             _, total_100 = _parse_prd_section_scores(llm_response.response_text)
@@ -1643,25 +1676,25 @@ Please evaluate the similarity and provide your response in the following JSON f
 
 Be thorough in your evaluation. A score of 100 means the codes are essentially identical in structure, styling, content, and functionality. Lower scores indicate increasing differences."""
         
-        # Use OpenAI model for evaluation
-        llm = LLM(
-            model=settings.default_model,
+        # Use default judge model for evaluation
+        llm = _create_judge_llm(
+            model=settings.judge_model,
             system_prompt="You are an expert HTML/CSS/JavaScript evaluator. Provide accurate and detailed similarity assessments.",
             temperature=0.3,  # Lower temperature for more consistent evaluation
         )
         
-        logger.info("[UI Evaluation] Calling OpenAI model for HTML comparison...")
-        print(f"[UI Evaluation] Calling OpenAI model: {settings.default_model}")
+        logger.info("[UI Evaluation] Calling judge model for HTML comparison...")
+        print(f"[UI Evaluation] Calling judge model: {settings.judge_model}")
         print(f"[UI Evaluation] Prompt length: {len(evaluation_prompt)} characters")
         
         response = await llm.generate(evaluation_prompt)
         response_text = response.response_text.strip()
         
         # Log the full response for debugging
-        print(f"[UI Evaluation] OpenAI API Response received:")
+        print(f"[UI Evaluation] Judge API response received:")
         print(f"[UI Evaluation] Response length: {len(response_text)} characters")
         print(f"[UI Evaluation] Full response text:\n{response_text}")
-        logger.info(f"[UI Evaluation] OpenAI API Response received ({len(response_text)} chars)")
+        logger.info(f"[UI Evaluation] Judge API response received ({len(response_text)} chars)")
         logger.info(f"[UI Evaluation] Full response: {response_text}")
         
         # Extract JSON from response (might be wrapped in markdown code block)
@@ -2030,11 +2063,10 @@ async def prompt_feedback(req: PromptFeedbackRequest, request: Request, user_id:
             else:
                 analysis_prompt = _build_feedback_analysis_prompt(req)
 
-            feedback_llm = LLM(
-                base_url=settings.openai_base_url,
-                api_key=settings.openai_api_key,
-                model=settings.default_model,
+            feedback_llm = _create_judge_llm(
+                model=settings.judge_model,
                 system_prompt=system_prompt,
+                temperature=0.4,
             )
 
             full_response = ""
