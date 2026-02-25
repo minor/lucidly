@@ -15,17 +15,21 @@ _jwks_cache: dict | None = None
 
 
 async def _get_jwks() -> dict:
-    """Fetch and cache the Auth0 JWKS (JSON Web Key Set)."""
     global _jwks_cache
     if _jwks_cache is not None:
         return _jwks_cache
 
     url = f"https://{settings.auth0_domain}/.well-known/jwks.json"
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(url)
-        resp.raise_for_status()
-        _jwks_cache = resp.json()
-    return _jwks_cache
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            _jwks_cache = resp.json()
+        return _jwks_cache
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=503, detail=f"Auth0 JWKS fetch timed out (url={url})")
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Auth0 JWKS fetch failed: {type(e).__name__}: {e}")
 
 
 def _find_rsa_key(jwks: dict, kid: str) -> dict | None:

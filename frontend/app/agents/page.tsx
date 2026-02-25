@@ -68,6 +68,7 @@ export default function AgentsPage() {
 //     if (!selectedAgentId || !selectedChallengeId || running) return;
 // 
 //     // Require login before starting a run
+//     TODO: if agents are being re-enabled, we need to check if the user token is ready.
 //     if (!isAuthenticated) {
 //       setShowAuthOverlay(true);
 //       return;
