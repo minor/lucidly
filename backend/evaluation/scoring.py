@@ -55,6 +55,20 @@ def calculate_prompt_score(accuracy, time_seconds, cost_dollars, base_rating=500
     - breakdown: dict showing component contributions
     """
 
+    # Hard floor: 0% accuracy always yields a 0 score.
+    if accuracy <= 0:
+        return 0, {
+            "accuracy_contribution": 0.0,
+            "time_contribution": 0.0,
+            "cost_contribution": 0.0,
+            "low_accuracy_penalty_multiplier": 0.0,
+            "raw_components": {
+                "accuracy": -1.0,
+                "time": 0.0,
+                "cost": 0.0,
+            },
+        }
+
     # Normalize accuracy to 0-1 range, then apply power curve to penalize low accuracy
     # Power of 2 means: 100% → 1.0, 50% → 0.25, 25% → 0.0625, 10% → 0.01
     accuracy_normalized = max(0, min(accuracy, 100)) / 100
@@ -91,12 +105,21 @@ def calculate_prompt_score(accuracy, time_seconds, cost_dollars, base_rating=500
 
     # Convert to 0-1000 scale: -1 maps to 0, 0 maps to 500, +1 maps to 1000
     elo_score = base_rating + (combined_score * 500)
+
+    # Extra punishment for very low accuracy: under 20% gets a steep penalty.
+    # 20% -> 1.0x, 10% -> 0.25x, 5% -> 0.0625x.
+    low_accuracy_penalty_multiplier = 1.0
+    if accuracy_normalized < 0.20:
+        low_accuracy_penalty_multiplier = math.pow(accuracy_normalized / 0.20, 2)
+        elo_score *= low_accuracy_penalty_multiplier
+
     elo_score = max(0, min(1000, elo_score))  # clamp to [0, 1000]
 
     breakdown = {
         'accuracy_contribution': weights['accuracy'] * accuracy_component * 500,
         'time_contribution': weights['time'] * time_component * 500,
         'cost_contribution': weights['cost'] * cost_component * 500,
+        'low_accuracy_penalty_multiplier': low_accuracy_penalty_multiplier,
         'raw_components': {
             'accuracy': accuracy_component,
             'time': time_component,
