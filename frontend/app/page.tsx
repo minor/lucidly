@@ -22,7 +22,7 @@ export default function Home() {
   const router = useRouter();
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center px-4 sm:px-6 pt-16 pb-8">
+    <div className="flex min-h-screen flex-col items-center justify-center px-4 sm:px-6 pt-8 pb-8">
       {/* Logo + title */}
       <div className="flex items-center gap-1.5 mb-4 sm:mb-6 fade-in-up">
         <Image
@@ -127,6 +127,17 @@ export default function Home() {
           </p>
         </div>
       </div>
+
+      {/* Footer */}
+      <footer
+        className="absolute bottom-6 left-0 right-0 flex items-center justify-center gap-4 text-xs text-muted fade-in-up"
+        style={{ animationDelay: "0.4s" }}
+      >
+        <span>©️ 2026 No Shot</span>
+        <button className="underline hover:text-foreground transition-colors cursor-pointer">
+          Contact Us
+        </button>
+      </footer>
     </div>
   );
 }

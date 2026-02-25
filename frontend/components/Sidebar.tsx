@@ -12,6 +12,7 @@ import {
   ChevronDown,
   ClipboardList,
   LogOut,
+  LibraryBig,
 } from "lucide-react";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth0 } from "@auth0/auth0-react";
@@ -34,6 +35,7 @@ const ARENA_NAV = [
   // DISABLED: Agents tab hidden until re-enabled
   // { href: "/agents", label: "Agents", icon: Bot },
   { href: "/leaderboard", label: "Leaderboard", icon: Trophy },
+  { href: "/resources", label: "Resources", icon: LibraryBig },
 ];
 
 const INTERVIEW_NAV = [
