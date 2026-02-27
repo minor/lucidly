@@ -63,8 +63,6 @@ from sessions import (
 )
 from evaluation import (
     compute_composite_score,
-    compute_accuracy_function,
-    compute_accuracy_text,
     run_function_tests_detailed,
     TestGenerator,
     GeneratedTestSuite,

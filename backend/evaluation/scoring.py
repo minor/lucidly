@@ -17,7 +17,7 @@ from pathlib import Path
 if str(Path(__file__).parent.parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from config import settings
+# from config import settings
 
 
 def compute_accuracy_function(test_results: list[bool]) -> float:
@@ -40,7 +40,7 @@ def compute_accuracy_text(generated: str, target: str) -> float:
     return common / max(len(tgt_tokens), 1)
 
 
-def calculate_prompt_score(accuracy, time_seconds, cost_dollars, base_rating=500):
+def calculate_prompt_score(accuracy, time_seconds, cost_dollars, num_turns, base_rating=500):
     """
     Calculate an ELO-style score for prompt performance.
 
@@ -48,11 +48,19 @@ def calculate_prompt_score(accuracy, time_seconds, cost_dollars, base_rating=500
     - accuracy: 0-100 (percentage)
     - time_seconds: time taken in seconds
     - cost_dollars: cost in dollars
+    - num_turns: number of conversation turns
     - base_rating: starting ELO (default 500, midpoint of 0-1000)
 
     Returns:
     - score: ELO-style rating (0-1000)
     - breakdown: dict showing component contributions
+
+    Changes from v1:
+    - Accuracy: power 1.5 (was 2) — softer curve, 67% now contributes positively
+    - Time: reference 90s (was 60s), gentler slope via 1.5× divisor
+    - Cost: reference $0.05 (was $0.002) — realistic for modern LLM calls
+    - Turns: NEW metric — 1 turn = +1, 3 turns = neutral, 10+ = near -1
+    - Weights: accuracy 60%, cost 15%, turns 15%, time 10%
     """
 
     # Hard floor: 0% accuracy always yields a 0 score.
@@ -61,53 +69,65 @@ def calculate_prompt_score(accuracy, time_seconds, cost_dollars, base_rating=500
             "accuracy_contribution": 0.0,
             "time_contribution": 0.0,
             "cost_contribution": 0.0,
+            "turns_contribution": 0.0,
             "low_accuracy_penalty_multiplier": 0.0,
             "raw_components": {
                 "accuracy": -1.0,
                 "time": 0.0,
                 "cost": 0.0,
+                "turns": 0.0,
             },
         }
 
-    # Normalize accuracy to 0-1 range, then apply power curve to penalize low accuracy
-    # Power of 2 means: 100% → 1.0, 50% → 0.25, 25% → 0.0625, 10% → 0.01
+    # --- ACCURACY ---
+    # Power of 1.5 instead of 2 for a softer curve.
+    # 100% → 1.0, 67% → 0.548, 50% → 0.354, 25% → 0.125
+    # Break-even (~0 component) is at ~63% accuracy.
     accuracy_normalized = max(0, min(accuracy, 100)) / 100
-    accuracy_component = math.pow(accuracy_normalized, 2)
-    # Map to -1 to +1: 0→-1, 0.5→0 (which is ~71% accuracy), 1→+1
-    accuracy_component = accuracy_component * 2 - 1
+    accuracy_component = math.pow(accuracy_normalized, 1.5)
+    accuracy_component = accuracy_component * 2 - 1  # Map to [-1, +1]
 
-    # Time penalty: exponential decay (24s = 0, 12s = +0.5, 48s = -0.5)
-    # Using 24s as reference point
-    time_reference = 60
-    time_component = -math.tanh((time_seconds - time_reference) / time_reference)
+    # --- TIME ---
+    # Reference: 160 seconds (neutral point). Divisor of 45 for good spread.
+    # 10s → +1.0, 60s → +0.97, 120s → +0.66, 160s → 0, 200s → -0.66, 300s → -0.999
+    time_reference = 160
+    time_component = math.tanh((time_reference - time_seconds) / 45)
 
-    # Cost penalty: logarithmic scale (lower is better)
-    # $0.0020 as reference
-    cost_reference = 0.0020
+    # --- COST ---
+    # Reference: $0.05 (realistic midpoint for LLM API calls).
+    # $0.05 → 0, $0.005 → +1, $0.50 → -1
+    cost_reference = 0.05
     if cost_dollars > 0:
-        cost_component = -math.log10(cost_dollars / cost_reference) 
+        cost_component = -math.log10(cost_dollars / cost_reference)
         cost_component = max(-1, min(1, cost_component))  # clamp to [-1, 1]
     else:
         cost_component = 1  # free is best
 
-    # Weighted combination (turns excluded — directly correlated with time)
+    # --- TURNS ---
+    # Linear mapping across 1-4 turns (max is 4).
+    # 1 turn → +1.0, 2 turns → +0.33, 3 turns → -0.33, 4 turns → -1.0
+    num_turns_clamped = max(1, min(num_turns, 4))
+    turns_component = 1 - 2 * (num_turns_clamped - 1) / 3
+
+    # --- WEIGHTED COMBINATION ---
     weights = {
-        'accuracy': 0.70,   # Most important
-        'time': 0.15,
-        'cost': 0.15
+        "accuracy": 0.60,  # Most important
+        "time": 0.15,      # Reduced from 0.15
+        "cost": 0.15,
+        "turns": 0.10,     # New
     }
 
     combined_score = (
-        weights['accuracy'] * accuracy_component +
-        weights['time'] * time_component +
-        weights['cost'] * cost_component
+        weights["accuracy"] * accuracy_component
+        + weights["time"] * time_component
+        + weights["cost"] * cost_component
+        + weights["turns"] * turns_component
     )
 
-    # Convert to 0-1000 scale: -1 maps to 0, 0 maps to 500, +1 maps to 1000
+    # Convert to 0-1000 scale: -1 → 0, 0 → 500, +1 → 1000
     elo_score = base_rating + (combined_score * 500)
 
     # Extra punishment for very low accuracy: under 20% gets a steep penalty.
-    # 20% -> 1.0x, 10% -> 0.25x, 5% -> 0.0625x.
     low_accuracy_penalty_multiplier = 1.0
     if accuracy_normalized < 0.20:
         low_accuracy_penalty_multiplier = math.pow(accuracy_normalized / 0.20, 2)
@@ -115,16 +135,20 @@ def calculate_prompt_score(accuracy, time_seconds, cost_dollars, base_rating=500
 
     elo_score = max(0, min(1000, elo_score))  # clamp to [0, 1000]
 
+    raw = {
+        "accuracy": accuracy_component,
+        "time": time_component,
+        "cost": cost_component,
+        "turns": turns_component,
+    }
+
     breakdown = {
-        'accuracy_contribution': weights['accuracy'] * accuracy_component * 500,
-        'time_contribution': weights['time'] * time_component * 500,
-        'cost_contribution': weights['cost'] * cost_component * 500,
-        'low_accuracy_penalty_multiplier': low_accuracy_penalty_multiplier,
-        'raw_components': {
-            'accuracy': accuracy_component,
-            'time': time_component,
-            'cost': cost_component
-        }
+        "accuracy_contribution": weights["accuracy"] * accuracy_component * 500,
+        "time_contribution": weights["time"] * time_component * 500,
+        "cost_contribution": weights["cost"] * cost_component * 500,
+        "turns_contribution": weights["turns"] * turns_component * 500,
+        "low_accuracy_penalty_multiplier": low_accuracy_penalty_multiplier,
+        "raw_components": raw,
     }
 
     return round(elo_score), breakdown
@@ -144,33 +168,31 @@ def compute_composite_score(
     Parameters:
     - accuracy: 0-1 (fraction of tests passed / similarity)
     - elapsed_sec: time taken in seconds
-    - total_tokens: total tokens used (unused in ELO model, kept for API compat)
+    - total_tokens: total tokens used (kept for API compat)
     - total_turns: number of conversation turns
-    - difficulty: challenge difficulty (unused in ELO model, kept for API compat)
+    - difficulty: challenge difficulty (kept for API compat)
     - total_cost: cost in dollars
 
     Returns a dict with individual sub-scores and the ELO composite (0-1000).
     """
-    # Convert accuracy from 0-1 fraction to 0-100 percentage for the ELO function
     accuracy_pct = accuracy * 100
 
     elo_score, breakdown = calculate_prompt_score(
         accuracy=accuracy_pct,
         time_seconds=elapsed_sec,
         cost_dollars=total_cost,
+        num_turns=total_turns,
     )
 
-    # Map raw components (-1 to +1) back to 0-1000 scale for sub-score display
     raw = breakdown["raw_components"]
 
     return {
         "accuracy_score": round((raw["accuracy"] + 1) / 2 * 1000),
         "speed_score": round((raw["time"] + 1) / 2 * 1000),
         "token_score": round((raw["cost"] + 1) / 2 * 1000),
-        "turn_score": 0,  # turns no longer factored into ELO
+        "turn_score": round((raw["turns"] + 1) / 2 * 1000),
         "composite_score": elo_score,
     }
-
 
 async def run_function_tests(sandbox_id: str, code: str, test_suite: list[dict]) -> list[bool]:
     """
