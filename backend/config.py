@@ -10,7 +10,8 @@ class Settings(BaseSettings):
     # LLM provider configuration
     openai_api_key: str = ""
     openai_base_url: str = "https://api.openai.com/v1"
-    default_model: str = "gpt-5.2"
+    default_model: str = "grok-4-1-fast-reasoning"
+    judge_model: str = "grok-4-1-fast-reasoning"
     """Model used for vision-based UI replication. Should be vision-capable (e.g. gpt-4o, claude-3-5-sonnet)."""
     vision_model: str = "gpt-4o"
     max_tokens: int = 16384

@@ -69,7 +69,7 @@ export default function CandidateInterviewPage() {
   const [estimatedTokens, setEstimatedTokens] = useState(0);
 
   // Model
-  const [selectedModel, setSelectedModel] = useState("gpt-5.2");
+  const [selectedModel, setSelectedModel] = useState("grok-4-1-fast-reasoning");
 
   // Output panel
   const OUTPUT_PANEL_MIN = 120;

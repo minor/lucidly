@@ -18,7 +18,7 @@ class Challenge(BaseModel):
     id: str
     title: str
     description: str
-    category: str  # ui, function, debug, system, data, product
+    category: str  # UI, function, debug, system, data, product
     difficulty: str  # easy, medium, hard
     target_code: str | None = None
     test_suite: list[TestCase] | None = None

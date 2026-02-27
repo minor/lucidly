@@ -296,7 +296,7 @@ export default function AgentRunWatchPage() {
 //   const isActive = session?.status === "active";
 //   const latestCode = session?.final_code || (session?.turns?.length ? session?.turns[session.turns.length - 1]?.generated_code : "") || "";
 //   const hasFunctionTests = challenge?.test_suite && challenge.test_suite.length > 0;
-//   const isUiChallenge = challenge?.category === "ui";
+//   const isUiChallenge = challenge?.category === "UI";
 // 
 //   // Calculate total cost from turns (use fallback pricing if model not in MODEL_PRICING, e.g. openai-cot uses gpt-4o)
 //   const defaultPricing = { input: 0, output: 0 };

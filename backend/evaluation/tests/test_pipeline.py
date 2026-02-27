@@ -268,7 +268,7 @@ async def main():
     for challenge in challenges:
         # Get appropriate sample code
         sample_code = None
-        if challenge.category == "ui":
+        if challenge.category == "UI":
             sample_code = SAMPLE_CODE.get("ui")
         elif challenge.category == "data" or "scraper" in challenge.description.lower():
             sample_code = SAMPLE_CODE.get("scraping")
@@ -290,7 +290,7 @@ async def main():
     
     for challenge in challenges:
         sample_code = None
-        if challenge.category == "ui":
+        if challenge.category == "UI":
             sample_code = SAMPLE_CODE.get("ui")
         elif challenge.category == "data" or "scraper" in challenge.description.lower():
             sample_code = SAMPLE_CODE.get("scraping")

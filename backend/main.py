@@ -63,8 +63,6 @@ from sessions import (
 )
 from evaluation import (
     compute_composite_score,
-    compute_accuracy_function,
-    compute_accuracy_text,
     run_function_tests_detailed,
     TestGenerator,
     GeneratedTestSuite,
@@ -134,6 +132,40 @@ app.include_router(interview_router)
 
 # Default LLM instance (can be overridden per-request)
 llm = LLM()
+
+
+def _create_judge_llm(
+    *,
+    system_prompt: str,
+    temperature: float = 0.3,
+    model: str | None = None,
+) -> LLM:
+    """
+    Build the default judge/scoring LLM client.
+    Prefers xAI for Grok judge models and gracefully falls back to OpenAI.
+    """
+    judge_model = model or settings.judge_model
+    is_grok_judge = judge_model.startswith("grok")
+    use_xai = is_grok_judge and bool(settings.xai_api_key)
+
+    if use_xai:
+        return LLM(
+            base_url=settings.xai_base_url,
+            api_key=settings.xai_api_key,
+            model=judge_model,
+            system_prompt=system_prompt,
+            temperature=temperature,
+        )
+
+    fallback_model = settings.default_model if is_grok_judge else judge_model
+    return LLM(
+        base_url=settings.openai_base_url,
+        api_key=settings.openai_api_key,
+        model=fallback_model,
+        system_prompt=system_prompt,
+        temperature=temperature,
+    )
+
 
 # Test generator and evaluator instances
 # TestGenerator uses Claude by default (configured in test_generator.py)
@@ -620,7 +652,7 @@ async def submit_scoring_session(session_id: str, req: SubmitScoreRequest, user_
     accuracy = 0.0
     category = getattr(challenge, "category", "") or ""
     is_product = category == "product"
-    is_ui = category == "ui"
+    is_ui = category == "UI"
     has_tests = bool(challenge.test_suite)
 
     if is_product:
@@ -633,31 +665,36 @@ async def submit_scoring_session(session_id: str, req: SubmitScoreRequest, user_
                 html_path = project_root / challenge.html_url
                 with open(html_path, "r", encoding="utf-8") as f:
                     reference_html = f.read()
-                evaluation_prompt = f"""You are a kind and generous scoring expert when it comes to evaluating HTML code similarity. Compare the reference HTML code with the generated HTML code and provide a similarity score between 0-100.
+                evaluation_prompt = f"""You are a generous and encouraging evaluator assessing how well someone recreated a UI challenge. Your goal is to reward effort and high-level accuracy, not penalize for minor differences.
 
-Consider the following aspects when evaluating:
-1. **Structure and Layout**: HTML structure, element hierarchy, semantic elements
-2. **Styling**: CSS styles, colors, fonts, spacing, layout properties
-3. **Content**: Text content, images, links, and other media
-4. **Overall Visual Match**: How closely the generated code would render compared to the reference
+                    Compare the reference HTML with the generated HTML and score from 0-100 based on **visual and functional similarity**, not code exactness.
 
-**Reference HTML Code:**
-```html
-{reference_html}
-```
+                    **Be generous**: if the overall purpose and key elements are present, that deserves a high score (70+). Only give low scores if the output is clearly missing major sections or looks completely different.
 
-**Generated HTML Code:**
-```html
-{req.generated_html}
-```
+                    Scoring guide:
+                    - 90-100: Looks nearly identical, all major elements present
+                    - 70-89: Clearly the same page, minor visual differences
+                    - 50-69: Right idea, missing some elements or styling is off
+                    - 30-49: Partial match, missing significant sections
+                    - 0-29: Major structural differences or wrong content entirely
 
-**Challenge Description:**
-{challenge.description}
+                    **Challenge Description:**
+                    {challenge.description}
 
-Please evaluate the similarity and provide your response in the following JSON format:
-{{"score": <number between 0-100>, "reasoning": "<detailed explanation>"}}"""
-                llm = LLM(
-                    model=settings.default_model,
+                    **Reference HTML:**
+                    ```html
+                    {reference_html}
+                    ```
+
+                    **Generated HTML:**
+                    ```html
+                    {req.generated_html}
+                    ```
+
+                    Respond in JSON only:
+                    {{"score": <0-100>, "reasoning": "<brief explanation focusing on what matched well>"}}"""
+                llm = _create_judge_llm(
+                    model=settings.judge_model,
                     system_prompt="You are an expert HTML/CSS/JavaScript evaluator. Provide accurate and detailed similarity assessments.",
                     temperature=0.3,
                 )
@@ -723,11 +760,10 @@ Please evaluate the similarity and provide your response in the following JSON f
                 elapsed_sec=elapsed_sec,
             )
             prompt = _build_prd_feedback_prompt(prd_req)
-            feedback_llm = LLM(
-                base_url=settings.openai_base_url,
-                api_key=settings.openai_api_key,
-                model=settings.default_model,
+            feedback_llm = _create_judge_llm(
+                model=settings.judge_model,
                 system_prompt=PROMPT_FEEDBACK_PRD_SYSTEM_PROMPT,
+                temperature=0.4,
             )
             llm_response = await feedback_llm.generate(prompt, temperature=0.4)
             _, total_100 = _parse_prd_section_scores(llm_response.response_text)
@@ -1579,7 +1615,7 @@ async def evaluate_ui(req: EvaluateUIRequest, request: Request, user_id: str = D
         logger.error(f"[UI Evaluation] Challenge not found: {req.challenge_id}")
         raise HTTPException(status_code=404, detail="Challenge not found")
     
-    if challenge.category != "ui":
+    if challenge.category != "UI":
         logger.error(f"[UI Evaluation] Challenge is not UI category: {challenge.category}")
         raise HTTPException(status_code=400, detail="Challenge is not a UI challenge")
     
@@ -1643,25 +1679,25 @@ Please evaluate the similarity and provide your response in the following JSON f
 
 Be thorough in your evaluation. A score of 100 means the codes are essentially identical in structure, styling, content, and functionality. Lower scores indicate increasing differences."""
         
-        # Use OpenAI model for evaluation
-        llm = LLM(
-            model=settings.default_model,
+        # Use default judge model for evaluation
+        llm = _create_judge_llm(
+            model=settings.judge_model,
             system_prompt="You are an expert HTML/CSS/JavaScript evaluator. Provide accurate and detailed similarity assessments.",
             temperature=0.3,  # Lower temperature for more consistent evaluation
         )
         
-        logger.info("[UI Evaluation] Calling OpenAI model for HTML comparison...")
-        print(f"[UI Evaluation] Calling OpenAI model: {settings.default_model}")
+        logger.info("[UI Evaluation] Calling judge model for HTML comparison...")
+        print(f"[UI Evaluation] Calling judge model: {settings.judge_model}")
         print(f"[UI Evaluation] Prompt length: {len(evaluation_prompt)} characters")
         
         response = await llm.generate(evaluation_prompt)
         response_text = response.response_text.strip()
         
         # Log the full response for debugging
-        print(f"[UI Evaluation] OpenAI API Response received:")
+        print(f"[UI Evaluation] Judge API response received:")
         print(f"[UI Evaluation] Response length: {len(response_text)} characters")
         print(f"[UI Evaluation] Full response text:\n{response_text}")
-        logger.info(f"[UI Evaluation] OpenAI API Response received ({len(response_text)} chars)")
+        logger.info(f"[UI Evaluation] Judge API response received ({len(response_text)} chars)")
         logger.info(f"[UI Evaluation] Full response: {response_text}")
         
         # Extract JSON from response (might be wrapped in markdown code block)
@@ -1782,7 +1818,13 @@ class PromptFeedbackRequest(BaseModel):
 PROMPT_FEEDBACK_SYSTEM_PROMPT = (
     "You are a concise, supportive prompt engineering coach. You give direct, non-redundant "
     "feedback. Never repeat the same point across sections. Be warm but respect the reader's "
-    "intelligence — don't over-explain obvious things. Quote the user's actual prompts when relevant."
+    "intelligence — don't over-explain obvious things. Quote the user's actual prompts when relevant. "
+    "You may suggest example prompt snippets to illustrate improvements. However, never suggest that "
+    "the user paste in or reference HTML/CSS snippets in their prompt — for UI challenges, the user "
+    "only has a visual screenshot and should be prompted to describe what they see in plain English. "
+    "Only reference code-based prompting strategies when the challenge is clearly code-focused, not visual. "
+    "Do not make any assumptions about what AI product or company is being used. "
+    "Refer to the AI generically as 'the model' — never reference OpenAI, ChatGPT, or any specific product."
 )
 
 PROMPT_FEEDBACK_PRD_SYSTEM_PROMPT = (
@@ -1955,20 +1997,23 @@ def _build_feedback_analysis_prompt(req: PromptFeedbackRequest) -> str:
     reference_section = ""
     convergence_section = ""
     if req.reference_html:
-        truncated_html = req.reference_html[:3000]
-        if len(req.reference_html) > 3000:
+        html_for_feedback = re.sub(r'<style>.*?</style>', '<!-- styles removed -->', req.reference_html, flags=re.DOTALL)
+        truncated_html = html_for_feedback[:6000]
+        if len(req.reference_html) > 6000:
             truncated_html += "\n... (truncated)"
         reference_section = f"""
 ## Reference Target
-The user was shown this HTML and asked to recreate it by prompting an AI:
+The user was shown a screenshot of this HTML and asked to recreate it by prompting an AI in plain English. They never saw this code.
 
 ```html
 {truncated_html}
 ```
+**Important:** When giving feedback, only reference UI elements that are actually present in the HTML above. Do not invent or assume details (e.g. nav link labels, button text, section counts) that aren't explicitly in the code.
+
 """
         convergence_section = """
 ### Convergence
-One sentence: did they get closer to the reference? Name 1–2 things they got right and 1–2 they missed."""
+One sentence explaining if they got closer to the reference. Name 1–2 things they got right and 1–2 they missed."""
 
     return f"""Analyze this prompt engineering session. Be encouraging but concise — say each thing once.
 
@@ -2030,11 +2075,10 @@ async def prompt_feedback(req: PromptFeedbackRequest, request: Request, user_id:
             else:
                 analysis_prompt = _build_feedback_analysis_prompt(req)
 
-            feedback_llm = LLM(
-                base_url=settings.openai_base_url,
-                api_key=settings.openai_api_key,
-                model=settings.default_model,
+            feedback_llm = _create_judge_llm(
+                model=settings.judge_model,
                 system_prompt=system_prompt,
+                temperature=0.4,
             )
 
             full_response = ""

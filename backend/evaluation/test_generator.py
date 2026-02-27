@@ -156,7 +156,7 @@ class TestGenerator:
         
         Returns a GeneratedTestSuite with test cases tailored to the challenge type.
         """
-        if challenge.category == "ui":
+        if challenge.category == "UI":
             return await self._generate_ui_tests(challenge)
         elif challenge.category == "data" or "scraper" in challenge.description.lower() or "scraping" in challenge.description.lower():
             return await self._generate_scraping_tests(challenge)
