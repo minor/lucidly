@@ -73,7 +73,7 @@ async def quick_test(challenge_id: str | None = None):
     
     # Create sample code based on challenge type
     sample_code = ""
-    if challenge.category == "ui":
+    if challenge.category == "UI":
         sample_code = """<!DOCTYPE html>
 <html><head><style>body{background:#1a1a2e;color:#eee}</style></head>
 <body><header class="hero"><h1>Test</h1></header></body></html>"""

@@ -44,7 +44,7 @@ class ChallengeEvaluator:
         
         Uses different evaluation strategies based on challenge category.
         """
-        if challenge.category == "ui":
+        if challenge.category == "UI":
             return await self._evaluate_ui(challenge, generated_code, generated_test_suite)
         elif challenge.category == "data" or "scraper" in challenge.description.lower():
             return await self._evaluate_scraping(challenge, generated_code, generated_test_suite)
