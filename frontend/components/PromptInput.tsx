@@ -31,7 +31,7 @@ export function PromptInput({
   placeholder = "Ask anything...",
   disabled = false,
   submitDisabled = false,
-  initialModel = "gpt-5.2",
+  initialModel = "grok-4-1-fast-reasoning",
   selectedModel,
   onModelChange,
   fixedModel,

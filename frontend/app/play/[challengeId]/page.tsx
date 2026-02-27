@@ -112,7 +112,7 @@ export default function ChallengePage() {
   const [runningCode, setRunningCode] = useState(false);
 
   // Model selection state
-  const [selectedModel, setSelectedModel] = useState("gpt-5.2");
+  const [selectedModel, setSelectedModel] = useState("grok-4-1-fast-reasoning");
 
   // Sandbox state
   const [sandboxId, setSandboxId] = useState<string | null>(null);
@@ -385,7 +385,7 @@ export default function ChallengePage() {
   // DISABLED: using plain srcDoc HTML rendering instead. Re-enable this
   // useEffect (and the code-push effect below) to restore Vercel Sandbox.
   // useEffect(() => {
-  //   if (!challenge || challenge.category !== "ui") return;
+  //   if (!challenge || challenge.category !== "UI") return;
   //
   //   let ignore = false;
   //   setVercelSandboxLoading(true);
@@ -511,7 +511,7 @@ export default function ChallengePage() {
     if (assistantMessages.length === 0) return;
 
     const latest = assistantMessages[assistantMessages.length - 1];
-    const isUi = challenge?.category === "ui";
+    const isUi = challenge?.category === "UI";
     const hasFunctionTests = challenge?.test_suite && challenge.test_suite.length > 0;
 
     if (isUi) {
@@ -601,7 +601,7 @@ export default function ChallengePage() {
     setLastTurnAborted(false);
   };
 
-  const isUiChallenge = challenge?.category === "ui";
+  const isUiChallenge = challenge?.category === "UI";
   const hasFunctionTests = challenge?.test_suite && challenge.test_suite.length > 0;
   const isDataChallenge = challenge?.category === "data";
   const isProductChallenge = challenge?.category === "product";
@@ -832,7 +832,7 @@ export default function ChallengePage() {
       },
       (error) => {
         if (error === "AbortError") return;
-        console.error("Chat error:", error);
+        console.warn("Chat error:", error);
         if (handleSessionExpired(error)) {
           setCurrentStreamingMessage("");
           setIsStreaming(false);
@@ -881,8 +881,6 @@ export default function ChallengePage() {
       (hasFunctionTests && (testResults || runningTests)) ||
       (isDataChallenge && (codeResult || runningCode)));
 
-  const OUTPUT_PLACEHOLDER_IMAGE =
-    "https://placehold.co/800x400/f8fafc/94a3b8?text=Waiting+for+code...";
   const OUTPUT_PLACEHOLDER_CODE = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1382,13 +1380,13 @@ export default function ChallengePage() {
                           title="Rendered output"
                         />
                       ) : (
-                        <div className="h-full flex items-center justify-center bg-muted/20">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={OUTPUT_PLACEHOLDER_IMAGE}
-                            alt="Waiting for code..."
-                            className="max-h-full w-full object-contain object-top"
-                          />
+                        <div className="h-full flex items-center justify-center bg-muted/20 p-2">
+                          <div className="w-full max-w-lg rounded-lg border border-border bg-card/70 px-5 py-8 text-center">
+                            <p className="text-sm font-large font-bold text-foreground">Waiting for code...</p>
+                            <p className="mt-1 text-xs italic text-muted">
+                            Ask the model to write some HTML to see a live preview
+                            </p>
+                          </div>
                         </div>
                       )
                     ) : (
