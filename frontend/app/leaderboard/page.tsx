@@ -216,10 +216,10 @@ export default function LeaderboardPage() {
           )}
 
           {/* Table */}
-          <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
-            <table className="w-full text-left text-sm whitespace-nowrap">
+          <div className="rounded-xl border border-border overflow-hidden shadow-sm">
+            <table className="w-full text-left text-sm whitespace-nowrap bg-card">
               <thead>
-                <tr className="border-b border-border bg-card">
+                <tr className="border-b border-border">
                   <th className="px-3 sm:px-6 py-3 sm:py-4 font-medium text-muted w-10 sm:w-16">
                     <div className="flex items-center gap-1.5">
                       <Hash className="h-3.5 w-3.5" />
@@ -299,7 +299,7 @@ export default function LeaderboardPage() {
                         key={entry.username}
                         className={`border-b border-border last:border-0 transition-colors ${
                           highlighted
-                            ? "bg-[#fff7ed] dark:bg-orange-950/40"
+                            ? "!bg-accent/5 dark:bg-orange-950/40"
                             : "hover:bg-muted/5"
                         }`}
                       >
@@ -331,7 +331,7 @@ export default function LeaderboardPage() {
                         key={entry.id || entry.username}
                         className={`border-b border-border last:border-0 transition-colors ${
                           highlighted
-                            ? "bg-[#fff7ed] dark:bg-orange-950/40"
+                            ? "!bg-accent/5 dark:bg-orange-950/40"
                             : "hover:bg-muted/5"
                         }`}
                       >
