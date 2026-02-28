@@ -19,6 +19,11 @@ const categories = [
         description: "Best practices for GPT models including writing clear instructions, providing reference text, and splitting complex tasks.",
       },
       {
+        name: "Grok - Prompt Engineering Guide",
+        url: "https://docs.x.ai/developers/advanced-api-usage/grok-code-prompt-engineering",
+        description: "Tips for writing effective prompts for Grok models, including code generation and advanced API usage patterns."
+      },
+      {
         name: "Google – Prompting Strategies",
         url: "https://ai.google.dev/gemini-api/docs/prompting-strategies",
         description: "Techniques for prompting Gemini models effectively, including multimodal prompting.",
@@ -40,35 +45,30 @@ const categories = [
         url: "https://learnprompting.org/",
         description: "Open-source curriculum covering beginner to advanced prompt engineering techniques.",
       },
-      {
-        name: "Anthropic – Interactive Tutorial",
-        url: "https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/interactive-tutorial",
-        description: "Hands-on, chapter-by-chapter tutorial walking through prompt engineering fundamentals with Claude.",
-      },
     ],
   },
-  {
-    title: "Tools & Playgrounds",
-    icon: Wrench,
-    description: "Experiment and iterate on prompts",
-    resources: [
-      {
-        name: "Anthropic Console & Workbench",
-        url: "https://console.anthropic.com/",
-        description: "Test prompts against Claude models, compare outputs, and generate production-ready code.",
-      },
-      {
-        name: "OpenAI Playground",
-        url: "https://platform.openai.com/playground",
-        description: "Experiment with GPT models, adjust parameters, and prototype prompts interactively.",
-      },
-      {
-        name: "Google AI Studio",
-        url: "https://aistudio.google.com/",
-        description: "Free tool to prototype with Gemini models, test prompts, and tune model behavior.",
-      },
-    ],
-  },
+  // {
+  //   title: "Tools & Playgrounds",
+  //   icon: Wrench,
+  //   description: "Experiment and iterate on prompts",
+  //   resources: [
+  //     {
+  //       name: "Anthropic Console & Workbench",
+  //       url: "https://console.anthropic.com/",
+  //       description: "Test prompts against Claude models, compare outputs, and generate production-ready code.",
+  //     },
+  //     {
+  //       name: "OpenAI Playground",
+  //       url: "https://platform.openai.com/playground",
+  //       description: "Experiment with GPT models, adjust parameters, and prototype prompts interactively.",
+  //     },
+  //     {
+  //       name: "Google AI Studio",
+  //       url: "https://aistudio.google.com/",
+  //       description: "Free tool to prototype with Gemini models, test prompts, and tune model behavior.",
+  //     },
+  //   ],
+  // },
   {
     title: "Community & Research",
     icon: Users,
@@ -106,7 +106,7 @@ export default function ResourcesPage() {
       <main className="flex-1 overflow-auto p-4 sm:p-8">
         <div className="mx-auto max-w-3xl">
           <p className="mb-8 text-center text-sm text-muted">
-            A curated collection of prompt engineering guides, courses, and tools to help you get the most out of LLMs.
+            A collection of prompt engineering guides, courses, and forums to help you get the most out of LLMs.
           </p>
 
           <div className="space-y-10">
