@@ -197,7 +197,7 @@ class LLM:
         model: str | None = None,
         system_prompt: str = CODING_SYSTEM_PROMPT,
         max_tokens: int = settings.max_tokens,
-        temperature: float = 0.2,
+        temperature: float = 1.0,
     ) -> None:
         self.base_url = base_url or settings.openai_base_url
         self.api_key = api_key or settings.openai_api_key
@@ -235,12 +235,20 @@ class LLM:
             image_data_url=image_data_url,
         )
 
+        model_id = model or self.model
+        reasoning_effort = None
+        if model_id == "gpt-5.2-reasoning":
+            model_id = "gpt-5.2"
+            reasoning_effort = "medium"
+
         create_kwargs = {
-            "model": model or self.model,
+            "model": model_id,
             "messages": messages,
             "max_completion_tokens": max_tokens or self.max_tokens,
             "temperature": temperature if temperature is not None else self.temperature,
         }
+        if reasoning_effort:
+            create_kwargs["reasoning_effort"] = reasoning_effort
 
         response = await self.client.chat.completions.create(**create_kwargs)
 
@@ -281,13 +289,22 @@ class LLM:
             image_data_url=image_data_url,
         )
 
+        model_id = model or self.model
+        reasoning_effort = None
+        if model_id == "gpt-5.2-reasoning":
+            model_id = "gpt-5.2"
+            reasoning_effort = "medium"
+
         create_kwargs: dict = {
-            "model": model or self.model,
+            "model": model_id,
             "messages": messages,
             "max_completion_tokens": max_tokens or self.max_tokens,
             "temperature": temperature if temperature is not None else self.temperature,
             "stream": True,
         }
+        if reasoning_effort:
+            create_kwargs["reasoning_effort"] = reasoning_effort
+
         if include_usage:
             create_kwargs["stream_options"] = {"include_usage": True}
 
@@ -297,10 +314,15 @@ class LLM:
             if chunk.choices and chunk.choices[0].delta.content:
                 yield chunk.choices[0].delta.content
             if include_usage and hasattr(chunk, "usage") and chunk.usage:
-                self.last_usage = {
-                    "prompt_tokens": chunk.usage.prompt_tokens or 0,
-                    "completion_tokens": chunk.usage.completion_tokens or 0,
-                }
+                # Capture all available fields if it's a Pydantic model
+                if hasattr(chunk.usage, "model_dump"):
+                    self.last_usage = chunk.usage.model_dump()
+                else:
+                    self.last_usage = {
+                        "prompt_tokens": getattr(chunk.usage, "prompt_tokens", 0) or 0,
+                        "completion_tokens": getattr(chunk.usage, "completion_tokens", 0) or 0,
+                        "completion_tokens_details": getattr(chunk.usage, "completion_tokens_details", None),
+                    }
 
     def _build_messages(
         self,

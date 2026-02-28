@@ -1288,8 +1288,9 @@ async def chat_stream(req: ChatRequest, request: Request, user_id: str = Depends
                         if req.scoring_session_id:
                             ss_record_turn(req.scoring_session_id, input_tokens=input_tokens, output_tokens=output_tokens, cost=cost, user_message=user_last_msg, assistant_message=full_response)
                             _turn_recorded = True
-                            latency = (_first_chunk_at or time.time()) - _ss_start
-                            ss_record_processing_time(req.scoring_session_id, latency)
+                            if _first_chunk_at is not None and model not in ["gpt-5.2-reasoning", "grok-4-1-fast-reasoning"]:
+                                latency = _first_chunk_at - _ss_start
+                                ss_record_processing_time(req.scoring_session_id, latency)
 
                         yield f"data: {json.dumps({'type': 'done', 'content': full_response, 'input_tokens': input_tokens, 'output_tokens': output_tokens, 'cost': cost})}\n\n"
             elif use_xai:
@@ -1329,9 +1330,10 @@ async def chat_stream(req: ChatRequest, request: Request, user_id: str = Depends
                     yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
                 
                 usage = xai_llm.last_usage
+                print(f"DEBUG [xAI]: usage={usage}")
                 if usage:
                     input_tokens = usage["prompt_tokens"]
-                    output_tokens = usage["completion_tokens"]
+                    output_tokens = usage["completion_tokens"] + usage.get("completion_tokens_details", {}).get("reasoning_tokens", 0)
                 else:
                     input_tokens = len(current_prompt.split()) * 2
                     output_tokens = len(full_response.split()) * 2
@@ -1353,8 +1355,9 @@ async def chat_stream(req: ChatRequest, request: Request, user_id: str = Depends
                 if req.scoring_session_id:
                     ss_record_turn(req.scoring_session_id, input_tokens=input_tokens, output_tokens=output_tokens, cost=cost, user_message=user_last_msg, assistant_message=full_response)
                     _turn_recorded = True
-                    latency = (_first_chunk_at or time.time()) - _ss_start
-                    ss_record_processing_time(req.scoring_session_id, latency)
+                    if _first_chunk_at is not None and model not in ["gpt-5.2-reasoning", "grok-4-1-fast-reasoning"]:
+                        latency = _first_chunk_at - _ss_start
+                        ss_record_processing_time(req.scoring_session_id, latency)
 
                 yield f"data: {json.dumps({'type': 'done', 'content': full_response, 'input_tokens': input_tokens, 'output_tokens': output_tokens, 'cost': cost})}\n\n"
             elif use_perplexity:
@@ -1382,15 +1385,23 @@ async def chat_stream(req: ChatRequest, request: Request, user_id: str = Depends
                 async for chunk in perplexity_llm.stream(
                     current_prompt,
                     conversation_history=conversation_history if conversation_history else None,
+                    include_usage=True,
                 ):
                     if _first_chunk_at is None:
                         _first_chunk_at = time.time()
                     full_response += chunk
                     _partial_response = full_response
                     yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
-                est_input_tokens = len(current_prompt.split()) * 2
-                est_output_tokens = len(full_response.split()) * 2
-                yield f"data: {json.dumps({'type': 'usage', 'input_tokens': est_input_tokens})}\n\n"
+                
+                usage = perplexity_llm.last_usage
+                print(f"DEBUG [Perplexity]: usage={usage}")
+                if usage:
+                    input_tokens = usage["prompt_tokens"]
+                    output_tokens = usage["completion_tokens"]
+                else:
+                    input_tokens = len(current_prompt.split()) * 2
+                    output_tokens = len(full_response.split()) * 2
+                yield f"data: {json.dumps({'type': 'usage', 'input_tokens': input_tokens})}\n\n"
                 from config import MODEL_PRICING
                 pricing = MODEL_PRICING.get(model)
                 if not pricing:
@@ -1400,15 +1411,16 @@ async def chat_stream(req: ChatRequest, request: Request, user_id: str = Depends
                             break
                 if not pricing:
                     pricing = {"input": 3.0, "output": 15.0}
-                cost = (est_input_tokens * pricing["input"] + est_output_tokens * pricing["output"]) / 1_000_000
+                cost = (input_tokens * pricing["input"] + output_tokens * pricing["output"]) / 1_000_000
 
                 if req.scoring_session_id:
-                    ss_record_turn(req.scoring_session_id, input_tokens=est_input_tokens, output_tokens=est_output_tokens, cost=cost, user_message=user_last_msg, assistant_message=full_response)
+                    ss_record_turn(req.scoring_session_id, input_tokens=input_tokens, output_tokens=output_tokens, cost=cost, user_message=user_last_msg, assistant_message=full_response)
                     _turn_recorded = True
-                    latency = (_first_chunk_at or time.time()) - _ss_start
-                    ss_record_processing_time(req.scoring_session_id, latency)
+                    if _first_chunk_at is not None and model not in ["gpt-5.2-reasoning", "grok-4-1-fast-reasoning"]:
+                        latency = _first_chunk_at - _ss_start
+                        ss_record_processing_time(req.scoring_session_id, latency)
 
-                yield f"data: {json.dumps({'type': 'done', 'content': full_response, 'input_tokens': est_input_tokens, 'output_tokens': est_output_tokens, 'cost': cost})}\n\n"
+                yield f"data: {json.dumps({'type': 'done', 'content': full_response, 'input_tokens': input_tokens, 'output_tokens': output_tokens, 'cost': cost})}\n\n"
             else:
                 # Use OpenAI-compatible API (e.g., OpenRouter)
                 conversation_history = []
@@ -1452,6 +1464,7 @@ async def chat_stream(req: ChatRequest, request: Request, user_id: str = Depends
                     yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
                 
                 usage = claude_llm.last_usage
+                print(f"DEBUG [OpenAI]: usage={usage}")
                 if usage:
                     input_tokens = usage["prompt_tokens"]
                     output_tokens = usage["completion_tokens"]
@@ -1476,8 +1489,9 @@ async def chat_stream(req: ChatRequest, request: Request, user_id: str = Depends
                 if req.scoring_session_id:
                     ss_record_turn(req.scoring_session_id, input_tokens=input_tokens, output_tokens=output_tokens, cost=cost, user_message=user_last_msg, assistant_message=full_response)
                     _turn_recorded = True
-                    latency = (_first_chunk_at or time.time()) - _ss_start
-                    ss_record_processing_time(req.scoring_session_id, latency)
+                    if _first_chunk_at is not None and model not in ["gpt-5.2-reasoning", "grok-4-1-fast-reasoning"]:
+                        latency = _first_chunk_at - _ss_start
+                        ss_record_processing_time(req.scoring_session_id, latency)
 
                 yield f"data: {json.dumps({'type': 'done', 'content': full_response, 'input_tokens': input_tokens, 'output_tokens': output_tokens, 'cost': cost})}\n\n"
         except Exception as e:

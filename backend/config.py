@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     judge_model: str = "grok-4-1-fast-reasoning"
     """Model used for vision-based UI replication. Should be vision-capable (e.g. gpt-4o, claude-3-5-sonnet)."""
     vision_model: str = "gpt-4o"
-    max_tokens: int = 16384
+    max_tokens: int = 32768
     
     # Anthropic/Claude configuration
     anthropic_api_key: str = ""
@@ -101,6 +101,7 @@ MODEL_PRICING = {
     "claude-haiku-4-5": {"input": 1.0, "output": 5.0},
     # OpenAI
     "gpt-5.2": {"input": 1.75, "output": 14.0},
+    "gpt-5.2-reasoning": {"input": 1.75, "output": 14.0},
     # xAI/Grok
     "grok-4-1-fast-reasoning": {"input": 0.20, "output": 0.50},
     "grok-code-fast-1": {"input": 0.20, "output": 1.50},
