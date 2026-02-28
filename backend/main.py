@@ -13,6 +13,8 @@ import sentry_sdk
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 from sentry_sdk.integrations.starlette import StarletteIntegration
 
+from contextlib import asynccontextmanager
+
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -78,29 +80,10 @@ from session_events import (
 )
 from interviews import interview_router
 
+
 # ---------------------------------------------------------------------------
 # App setup
 # ---------------------------------------------------------------------------
-
-app = FastAPI(title="No Shot", version="0.1.0")
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-
-
-@app.on_event("startup")
-def _configure_agent_trace_logging():
-    """Run in the worker process so [agent_trace] appears in the console and in the debug log."""
-    import sys
-    _agent_log = logging.getLogger("agent_runner")
-    _agent_log.setLevel(logging.INFO)
-    if not _agent_log.handlers:
-        _h = logging.StreamHandler(sys.stderr)
-        _h.setLevel(logging.INFO)
-        _h.setFormatter(logging.Formatter("%(message)s"))
-        _h.terminator = "\n"
-        _agent_log.addHandler(_h)
-        _agent_log.propagate = False
-
 
 _CLEANUP_INTERVAL_SECONDS = 300  # run every 5 minutes
 
@@ -115,9 +98,32 @@ async def _session_cleanup_loop() -> None:
             logging.getLogger(__name__).exception("Error during session cleanup")
 
 
-@app.on_event("startup")
-def _start_session_cleanup() -> None:
-    asyncio.get_event_loop().create_task(_session_cleanup_loop())
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """Application lifespan: configure logging and start background tasks on startup."""
+    import sys
+    # Configure agent trace logger so [agent_trace] lines appear in the console.
+    _agent_log = logging.getLogger("agent_runner")
+    _agent_log.setLevel(logging.INFO)
+    if not _agent_log.handlers:
+        _h = logging.StreamHandler(sys.stderr)
+        _h.setLevel(logging.INFO)
+        _h.setFormatter(logging.Formatter("%(message)s"))
+        _h.terminator = "\n"
+        _agent_log.addHandler(_h)
+        _agent_log.propagate = False
+
+    # Start background session-cleanup loop.
+    cleanup_task = asyncio.get_event_loop().create_task(_session_cleanup_loop())
+
+    yield  # application runs
+
+    cleanup_task.cancel()
+
+
+app = FastAPI(title="No Shot", version="0.1.0", lifespan=_lifespan)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 app.add_middleware(SlowAPIMiddleware)
