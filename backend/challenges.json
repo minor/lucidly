@@ -50,7 +50,7 @@
     {
         "id": "build-snake-game",
         "title": "Build this UI: Snake Game",
-        "description": "Recreate this snake game. Match the look and behavior shown in the reference animation: grid-based movement, growing when eating, and game-over on collision. Use HTML, CSS, and JavaScript.",
+        "description": "Recreate this snake game. Match the look and behavior shown in the reference: green checkerboard grid (#a8d949 & #8ecc39), blue snake (#3574e8) with a darker head (#2962cc), apple food, gold trophy with score, game-over on wall/self collision, and arrow key movement. Use HTML, CSS, and JS in a single HTML file.",
         "category": "UI",
         "difficulty": "medium",
         "image_url": "https://media.giphy.com/media/13GIgrGdslD9o0/giphy.gif",

@@ -3,218 +3,327 @@
 <head>
 <meta charset="UTF-8">
 <title>Snake Game</title>
-
 <style>
-body {
-  text-align: center;
-  font-family: Arial, sans-serif;
-  background: #f5f5f5;
-}
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background: #f5f5f5;
+    font-family: Arial, sans-serif;
+    padding: 10px;
+  }
 
-canvas {
-  background: #fff;
-  border: 2px solid #333;
-  margin-top: 20px;
-}
+  canvas#mycanvas {
+    border: 3px solid #4a752c;
+    border-radius: 2px;
+    display: block;
+  }
+  .hud {
+    width: 400px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    border-radius: 10px;
+    background: rgba(255,255,255,0.8);
+    backdrop-filter: blur(6px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    margin-bottom: 8px;
+  }
+  .score {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 700;
+    font-size: 14px;
+    color: #222;
+    user-select: none;
+  }
+  .trophy {
+    width: 22px;
+    height: 22px;
+  }
+  .hint {
+    font-size: 11px;
+    opacity: 0.6;
+    user-select: none;
+  }
+
 </style>
 </head>
-
 <body>
 
-<h1>Snake Game</h1>
+<div class="hud">
+  <div class="score">
+    <svg class="trophy" viewBox="0 0 64 64" aria-hidden="true">
+      <defs>
+        <linearGradient id="g" x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0" stop-color="#ffd54f"/>
+          <stop offset="1" stop-color="#f4b400"/>
+        </linearGradient>
+      </defs>
+      <path fill="url(#g)" d="M20 8h24v8h10v8c0 10-7 18-18 20-1 4-4 7-8 8v4h12v8H24v-8h12v-4c-4-1-7-4-8-8C17 42 10 34 10 24v-8h10V8zm-2 16h-6c0 7 4 12 10 14-2-4-4-9-4-14zm40 0h-6c0 5-2 10-4 14 6-2 10-7 10-14z"/>
+      <path fill="#d18f00" opacity=".35" d="M20 8h24v8H20z"/>
+    </svg>
+    <span>Score: <span id="score-text">0</span></span>
+  </div>
+</div>
 <canvas id="mycanvas"></canvas>
 
+
 <script>
-let canvas, pen, W, H, cs, score, game_over, drawgame;
-let food, snake;
+const canvas = document.getElementById('mycanvas');
+const pen = canvas.getContext('2d');
 
-// ---- INIT ----
-function init() {
-  canvas = document.getElementById('mycanvas');
-  cs = 50; // Cell size
-  // Calculate canvas size to fit whole squares
-  let cols = 16;
-  let rows = 16;
-  W = H = canvas.width = canvas.height = cols * cs;
-  pen = canvas.getContext('2d');
+// Grid config — 20x20 cells at 20px each = 400x400 canvas
+const cols = 20;
+const rows = 20;
+const cs = 20; // cell size
+const W = cols * cs;
+const H = rows * cs;
+canvas.width = W;
+canvas.height = H;
 
-  score = 0;
-  game_over = false;
-  drawgame = 1;
+let score = 0;
+let gameOver = false;
+let gameStarted = false;
+let food = { x: 0, y: 0 };
+let direction = 'right';
+let nextDirection = 'right';
+let snake = [];
+let loopInterval = null;
 
-  food = getRandomFood();
-
-  snake = {
-    init_len: 5,
-    color: "#337AFF",
-    cells: [],
-    direction: "right",
-
-    createSnake: function () {
-      for (let i = this.init_len; i > 0; i--) {
-        this.cells.push({ x: i, y: 0 });
-      }
-    },
-
-    drawSnake: function () {
-      pen.fillStyle = this.color;
-      for (let i = 0; i < this.cells.length; i++) {
-        pen.fillRect(
-          this.cells[i].x * cs,
-          this.cells[i].y * cs,
-          cs - 2,
-          cs - 2
-        );
-      }
-    },
-
-    updateSnake: function () {
-      // Random movement that avoids walls
-      let headX = this.cells[0].x;
-      let headY = this.cells[0].y;
-      let maxX = Math.floor(W / cs) - 1;
-      let maxY = Math.floor(H / cs) - 1;
-      
-      // Randomly change direction sometimes (30% chance)
-      if (Math.random() < 0.3) {
-        let possibleDirections = [];
-        
-        // Check which directions are safe (won't hit walls)
-        if (headX < maxX) possibleDirections.push("right");
-        if (headX > 0) possibleDirections.push("left");
-        if (headY < maxY) possibleDirections.push("down");
-        if (headY > 0) possibleDirections.push("up");
-        
-        // Don't reverse direction
-        let opposite = {
-          "right": "left",
-          "left": "right",
-          "down": "up",
-          "up": "down"
-        };
-        possibleDirections = possibleDirections.filter(d => d !== opposite[this.direction]);
-        
-        if (possibleDirections.length > 0) {
-          this.direction = possibleDirections[Math.floor(Math.random() * possibleDirections.length)];
-        }
-      }
-
-      if (this.direction === "right") headX++;
-      else if (this.direction === "left") headX--;
-      else if (this.direction === "down") headY++;
-      else headY--;
-
-      // food eaten
-      if (headX === food.x && headY === food.y) {
-        score++;
-        food = getRandomFood();
-      } else {
-        this.cells.pop();
-      }
-
-      this.cells.unshift({ x: headX, y: headY });
-
-      // Check bounds
-      if (headX < 0 || headY < 0 || headX > maxX || headY > maxY) {
-        game_over = true;
-      }
-    }
-  };
-
-  snake.createSnake();
-
-  document.addEventListener("keydown", keyPressed);
+// Create initial snake (length 5, starting mid-left)
+function createSnake() {
+  snake = [];
+  for (let i = 4; i >= 0; i--) {
+    snake.push({ x: i + 2, y: Math.floor(rows / 2) });
+  }
 }
 
-// ---- CONTROLS ----
-function keyPressed(e) {
-  if (e.key === "ArrowLeft") snake.direction = "left";
-  else if (e.key === "ArrowRight") snake.direction = "right";
-  else if (e.key === "ArrowDown") snake.direction = "down";
-  else if (e.key === "ArrowUp") snake.direction = "up";
-}
+// ---- DRAWING ----
 
-// ---- DRAW HELPERS ----
-
-// alternating green grid background
 function drawGrid() {
-  let cols = Math.floor(W / cs);
-  let rows = Math.floor(H / cs);
   for (let y = 0; y < rows; y++) {
     for (let x = 0; x < cols; x++) {
-      pen.fillStyle = (x + y) % 2 === 0 ? "#a8d949" : "#8ecc39";
+      pen.fillStyle = (x + y) % 2 === 0 ? '#a8d949' : '#8ecc39';
       pen.fillRect(x * cs, y * cs, cs, cs);
     }
   }
 }
 
-// red circle for apple
-function drawFood(x, y) {
+function drawSnake() {
+  for (let i = 0; i < snake.length; i++) {
+    const s = snake[i];
+    // Head is slightly different shade
+    if (i === 0) {
+      pen.fillStyle = '#2962cc';
+    } else {
+      pen.fillStyle = '#3574e8';
+    }
+    // Draw with 1px gap for grid feel
+    pen.fillRect(s.x * cs + 1, s.y * cs + 1, cs - 2, cs - 2);
+
+    // Eyes on head
+    if (i === 0) {
+      pen.fillStyle = '#fff';
+      const ex = s.x * cs;
+      const ey = s.y * cs;
+      if (direction === 'right') {
+        pen.fillRect(ex + cs - 6, ey + 4, 3, 3);
+        pen.fillRect(ex + cs - 6, ey + cs - 7, 3, 3);
+      } else if (direction === 'left') {
+        pen.fillRect(ex + 3, ey + 4, 3, 3);
+        pen.fillRect(ex + 3, ey + cs - 7, 3, 3);
+      } else if (direction === 'up') {
+        pen.fillRect(ex + 4, ey + 3, 3, 3);
+        pen.fillRect(ex + cs - 7, ey + 3, 3, 3);
+      } else {
+        pen.fillRect(ex + 4, ey + cs - 6, 3, 3);
+        pen.fillRect(ex + cs - 7, ey + cs - 6, 3, 3);
+      }
+    }
+  }
+}
+
+function drawFood() {
   pen.beginPath();
-  pen.fillStyle = "red";
+  pen.fillStyle = '#e03030';
   pen.arc(
-    x * cs + cs / 2,
-    y * cs + cs / 2,
+    food.x * cs + cs / 2,
+    food.y * cs + cs / 2,
     cs / 2.5,
     0,
     Math.PI * 2
   );
   pen.fill();
+
+  // Small leaf/stem
+  pen.fillStyle = '#2a7a2a';
+  pen.fillRect(food.x * cs + cs / 2 - 1, food.y * cs + 2, 2, 4);
 }
 
-// yellow square for trophy
-function drawTrophy() {
-  pen.fillStyle = "gold";
-  pen.fillRect(18, 20, 40, 40);
+function updateScore() {
+  document.getElementById('score-text').textContent = score;
 }
 
-// ---- DRAW ----
+function drawGameOver() {
+  pen.fillStyle = 'rgba(0,0,0,0.55)';
+  pen.fillRect(0, 0, W, H);
+
+  pen.fillStyle = '#fff';
+  pen.font = 'bold 20px Arial, sans-serif';
+  pen.textAlign = 'center';
+  pen.fillText('GAME OVER', W / 2, H / 2 - 12);
+
+  pen.font = '14px Arial, sans-serif';
+  pen.fillText('Score: ' + score, W / 2, H / 2 + 10);
+  pen.fillText('Press Enter to restart', W / 2, H / 2 + 30);
+  pen.textAlign = 'start';
+}
+
+function drawStartScreen() {
+  drawGrid();
+  drawSnake();
+  drawFood();
+  updateScore();
+
+  pen.fillStyle = 'rgba(0,0,0,0.45)';
+  pen.fillRect(0, 0, W, H);
+
+  pen.fillStyle = '#fff';
+  pen.font = 'bold 18px Arial, sans-serif';
+  pen.textAlign = 'center';
+  pen.fillText('Click or Press Enter to Start', W / 2, H / 2);
+  pen.font = '12px Arial, sans-serif';
+  pen.fillText('Use Arrow Keys to move', W / 2, H / 2 + 20);
+  pen.textAlign = 'start';
+}
+
+// ---- LOGIC ----
+
+function getRandomFood() {
+  let fx, fy, onSnake;
+  do {
+    fx = Math.floor(Math.random() * cols);
+    fy = Math.floor(Math.random() * rows);
+    onSnake = snake.some(s => s.x === fx && s.y === fy);
+  } while (onSnake);
+  return { x: fx, y: fy };
+}
+
+function update() {
+  direction = nextDirection;
+
+  const head = { ...snake[0] };
+
+  if (direction === 'right') head.x++;
+  else if (direction === 'left') head.x--;
+  else if (direction === 'down') head.y++;
+  else if (direction === 'up') head.y--;
+
+  // Wall collision
+  if (head.x < 0 || head.y < 0 || head.x >= cols || head.y >= rows) {
+    gameOver = true;
+    return;
+  }
+
+  // Self collision
+  if (snake.some(s => s.x === head.x && s.y === head.y)) {
+    gameOver = true;
+    return;
+  }
+
+  snake.unshift(head);
+
+  // Eat food
+  if (head.x === food.x && head.y === food.y) {
+    score++;
+    food = getRandomFood();
+  } else {
+    snake.pop();
+  }
+}
+
 function draw() {
   pen.clearRect(0, 0, W, H);
-
   drawGrid();
-  snake.drawSnake();
-  drawFood(food.x, food.y);
-  drawTrophy();
-
-  pen.fillStyle = "blue";
-  pen.font = "20px Consolas";
-  pen.fillText(score, 70, 50);
+  drawSnake();
+  drawFood();
+  updateScore();
 }
 
-// ---- UPDATE ----
-function update() {
-  snake.updateSnake();
-}
-
-// ---- FOOD ----
-function getRandomFood() {
-  let maxX = Math.floor(W / cs) - 1;
-  let maxY = Math.floor(H / cs) - 1;
-  let foodX = Math.floor(Math.random() * (maxX + 1));
-  let foodY = Math.floor(Math.random() * (maxY + 1));
-  return { x: foodX, y: foodY };
-}
-
-// ---- GAME LOOP ----
 function gameloop() {
-  if (game_over) {
-    clearInterval(f);
-    let r = window.confirm("GAME OVER!!\nPlay Again?");
-    if (r) location.reload();
+  if (gameOver) {
+    clearInterval(loopInterval);
+    draw();
+    drawGameOver();
+    return;
   }
-
-  if (drawgame === 1) {
-    alert("USE ARROW KEYS TO PLAY\nPRESS ENTER TO START");
-    drawgame++;
-  }
-
-  draw();
   update();
+  draw();
 }
 
-init();
-let f = setInterval(gameloop, 150);
+// ---- CONTROLS ----
+
+const opposites = { right: 'left', left: 'right', up: 'down', down: 'up' };
+
+document.addEventListener('keydown', function (e) {
+  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+    e.preventDefault();
+  }
+
+  if (e.key === 'Enter') {
+    if (!gameStarted || gameOver) {
+      // Reset everything
+      score = 0;
+      gameOver = false;
+      gameStarted = true;
+      direction = 'right';
+      nextDirection = 'right';
+      createSnake();
+      food = getRandomFood();
+      if (loopInterval) clearInterval(loopInterval);
+      loopInterval = setInterval(gameloop, 120);
+    }
+    return;
+  }
+
+  if (!gameStarted || gameOver) return;
+
+  let newDir = null;
+  if (e.key === 'ArrowLeft') newDir = 'left';
+  else if (e.key === 'ArrowRight') newDir = 'right';
+  else if (e.key === 'ArrowDown') newDir = 'down';
+  else if (e.key === 'ArrowUp') newDir = 'up';
+
+  // Prevent reversing into yourself
+  if (newDir && newDir !== opposites[direction]) {
+    nextDirection = newDir;
+  }
+});
+
+// ---- INIT ----
+createSnake();
+food = getRandomFood();
+
+// Click canvas to start/restart too
+canvas.addEventListener('click', function() {
+  if (!gameStarted || gameOver) {
+    score = 0;
+    gameOver = false;
+    gameStarted = true;
+    direction = 'right';
+    nextDirection = 'right';
+    createSnake();
+    food = getRandomFood();
+    if (loopInterval) clearInterval(loopInterval);
+    loopInterval = setInterval(gameloop, 120);
+  }
+});
+
+drawStartScreen();
 </script>
 
 </body>
