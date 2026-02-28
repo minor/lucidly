@@ -262,13 +262,14 @@ export default function ChallengePage() {
       .finally(() => { if (!ignore) setDailyAttemptsLoading(false); });
     return () => { ignore = true; };
   }, [challenge, challengeId, isAuthenticated, auth0Loading, usernameLoading]);
+  const isReasoningModel = selectedModel === 'gpt-5.2-reasoning' || selectedModel === 'grok-4-1-fast-reasoning';
+  const isThinking = isWaitingForFirstToken && isReasoningModel;
+
   // Timer Logic (Merged)
   useEffect(() => {
     // Check for 100% accuracy to auto-pause timer
     const isPerfect = testResults && testResults.total_count > 0 && testResults.passed_count === testResults.total_count;
-    
-    const isReasoningModel = selectedModel === 'gpt-5.2-reasoning' || selectedModel === 'grok-4-1-fast-reasoning';
-    const isThinking = isWaitingForFirstToken && isReasoningModel;
+
 
     // Pause conditions:
     // 1. Waiting for first LLM token (unless it's a reasoning model, then timer keeps running)
@@ -292,7 +293,6 @@ export default function ChallengePage() {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      const isReasoningModel = selectedModel === 'gpt-5.2-reasoning' || selectedModel === 'grok-4-1-fast-reasoning';
       const isPerfect = testResults && testResults.total_count > 0 && testResults.passed_count === testResults.total_count;
       const shouldPause = attemptsExhausted || (isWaitingForFirstToken && !isReasoningModel) || (isExecuting && !isStreaming) || submitState !== 'idle' || (isPerfect && submitState === 'idle');
 
@@ -1721,7 +1721,7 @@ export default function ChallengePage() {
                   <div className="flex gap-4 group">
                     <div className="flex-1 min-w-0">
                       <div className="text-sm leading-relaxed text-foreground">
-                        {isWaitingForFirstToken ? (
+                        {isThinking ? (
                           <div className="flex items-center gap-2 text-muted-foreground py-1 animate-pulse">
                             <Sparkles className="h-4 w-4 text-accent" />
                             <span className="font-medium">Thinking...</span>
