@@ -216,7 +216,7 @@ function wrapJsxAsHtml(code: string, _type: "jsx" | "tsx"): string {
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"><\/script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"><\/script>
   <script src="https://cdn.tailwindcss.com"><\/script>
-  <style>body{margin:0}</style>
+  <style>body{margin:0} #root{min-height:100vh;} #root>*{align-items:flex-start!important;}</style>
 </head>
 <body>
   <div id="root"></div>
@@ -246,7 +246,7 @@ function wrapJsAsHtml(code: string): string {
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Preview</title>
   <script src="https://cdn.tailwindcss.com"><\/script>
-  <style>body{margin:0}</style>
+  <style>body{margin:0} #root{min-height:100vh;} #root>*{align-items:flex-start!important;}</style>
 </head>
 <body>
   ${usesDOM ? '<div id="root"></div>' : "<pre id=\"output\"></pre>"}
@@ -283,7 +283,7 @@ function wrapTsAsHtml(code: string): string {
   <title>Preview</title>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"><\/script>
   <script src="https://cdn.tailwindcss.com"><\/script>
-  <style>body{margin:0}</style>
+  <style>body{margin:0} #root{min-height:100vh;} #root>*{align-items:flex-start!important;}</style>
 </head>
 <body>
   ${usesDOM ? '<div id="root"></div>' : "<pre id=\"output\"></pre>"}
