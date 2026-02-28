@@ -36,6 +36,29 @@ export const metadata: Metadata = {
   icons: {
     icon: "/logo-cropped.svg",
   },
+  openGraph: {
+    title: "NoShot (You're Still LeetCoding)",
+    description:
+      "The competitive platform that benchmarks and gamifies your ability to prompt AI to write code. LeetCode for the AI era.",
+    url: "https://noshot.dev",
+    siteName: "NoShot",
+    images: [
+      {
+        url: "/opengraph-image.png",
+        width: 1200,
+        height: 630,
+        alt: "NoShot",
+      },
+    ],
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "NoShot (You're Still LeetCoding)",
+    description:
+      "The competitive platform that benchmarks and gamifies your ability to prompt AI to write code. LeetCode for the AI era.",
+    images: ["/opengraph-image.png"],
+  },
 };
 
 export default function RootLayout({
