@@ -303,3 +303,66 @@ async def get_overall_leaderboard(
     except Exception as e:
         logger.error(f"Error fetching overall leaderboard: {e}")
         return _EMPTY_LEADERBOARD
+
+
+# ---------------------------------------------------------------------------
+# Scoring session persistence (write-behind cache)
+# ---------------------------------------------------------------------------
+
+
+async def save_scoring_session(session_data: dict) -> None:
+    """Upsert a scoring session snapshot to Supabase.
+
+    Called fire-and-forget from scoring_sessions._persist_async — failures
+    are swallowed here so they never surface to the user.
+    """
+    supabase = get_supabase_client()
+    if not supabase:
+        return
+    try:
+        supabase.table("scoring_sessions").upsert(
+            session_data, on_conflict="id"
+        ).execute()
+    except Exception as e:
+        logger.warning("Failed to persist scoring session to Supabase: %s", e)
+
+
+async def load_scoring_session(session_id: str) -> dict | None:
+    """Fetch a single scoring session row by ID.
+
+    Returns None if not found or Supabase is unavailable.
+    """
+    supabase = get_supabase_client()
+    if not supabase:
+        return None
+    try:
+        response = (
+            supabase.table("scoring_sessions")
+            .select("*")
+            .eq("id", session_id)
+            .limit(1)
+            .execute()
+        )
+        if response.data:
+            return response.data[0]
+        return None
+    except Exception as e:
+        logger.warning("Failed to load scoring session from Supabase: %s", e)
+        return None
+
+
+async def delete_scoring_session_db(session_id: str) -> None:
+    """Delete a scoring session row from Supabase.
+
+    Called fire-and-forget; failures are swallowed.
+    Note: pg_cron already auto-deletes rows older than 1 hour, so this is
+    only needed for explicit deletes (e.g. completed sessions being cleaned up
+    by the application).
+    """
+    supabase = get_supabase_client()
+    if not supabase:
+        return
+    try:
+        supabase.table("scoring_sessions").delete().eq("id", session_id).execute()
+    except Exception as e:
+        logger.warning("Failed to delete scoring session from Supabase: %s", e)

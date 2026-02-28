@@ -565,6 +565,7 @@ async def check_username_available(username: str):
 from scoring_sessions import (
     create_scoring_session,
     get_scoring_session,
+    aget_scoring_session,
     record_turn as ss_record_turn,
     record_partial_turn as ss_record_partial_turn,
     record_processing_time as ss_record_processing_time,
@@ -590,7 +591,7 @@ async def _require_auth_after_session_check(request: Request) -> str:
     try:
         body = await request.json()
         sid = body.get("scoring_session_id") if isinstance(body, dict) else None
-        if sid is not None and get_scoring_session(sid) is None:
+        if sid is not None and await aget_scoring_session(sid) is None:
             raise HTTPException(status_code=410, detail="Scoring session expired or not found")
     except HTTPException:
         raise
@@ -605,7 +606,7 @@ async def _require_auth_after_session_id_check(session_id: str, request: Request
 
     Returns 410 for expired/missing sessions before 401 for unauthenticated requests.
     """
-    if get_scoring_session(session_id) is None:
+    if await aget_scoring_session(session_id) is None:
         raise HTTPException(status_code=410, detail="Scoring session expired or not found")
     override = _resolve_auth(request)
     return await override() if override else await get_current_user(request)
@@ -643,7 +644,7 @@ async def create_scoring_session_endpoint(req: CreateScoringSessionRequest, user
 @app.post("/api/scoring-sessions/{session_id}/submit")
 async def submit_scoring_session(session_id: str, req: SubmitScoreRequest, user_id: str = Depends(_require_auth_after_session_id_check)):
     """Verify accuracy server-side, compute all metrics from the scoring session, and persist to Supabase."""
-    session = get_scoring_session(session_id)  # guaranteed non-None by dependency
+    session = await aget_scoring_session(session_id)  # guaranteed non-None by dependency
     if session.username != user_id:
         raise HTTPException(status_code=403, detail="Session does not belong to this user")
     if session.status != "active":
@@ -1138,7 +1139,7 @@ async def chat_stream(req: ChatRequest, request: Request, user_id: str = Depends
     if not anthropic_messages or anthropic_messages[-1]["role"] != "user":
         raise HTTPException(status_code=400, detail="Last message must be from user")
 
-    if req.scoring_session_id and get_scoring_session(req.scoring_session_id) is None:
+    if req.scoring_session_id and await aget_scoring_session(req.scoring_session_id) is None:
         raise HTTPException(status_code=410, detail="Scoring session expired or not found")
 
     # Resolve system prompt: use product challenge agent context when applicable
@@ -1586,7 +1587,7 @@ class RunTestsResponse(BaseModel):
 @limiter.limit("30/minute")
 async def run_tests(req: RunTestsRequest, request: Request, user_id: str = Depends(_require_auth_after_session_check)) -> RunTestsResponse:
     """Run code against a challenge's test suite in a persistent Modal sandbox."""
-    if req.scoring_session_id and get_scoring_session(req.scoring_session_id) is None:
+    if req.scoring_session_id and await aget_scoring_session(req.scoring_session_id) is None:
         raise HTTPException(status_code=410, detail="Scoring session expired or not found")
 
     challenge = get_challenge_by_id(req.challenge_id)
@@ -1609,7 +1610,7 @@ async def run_tests(req: RunTestsRequest, request: Request, user_id: str = Depen
     passed_count = sum(1 for r in results if r.passed)
 
     if req.scoring_session_id:
-        session = get_scoring_session(req.scoring_session_id)
+        session = await aget_scoring_session(req.scoring_session_id)
         if session and session.status == "active":
             accuracy = passed_count / len(results) if results else 0.0
             session.last_test_accuracy = accuracy
