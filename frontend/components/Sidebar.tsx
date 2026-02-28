@@ -13,10 +13,14 @@ import {
   ClipboardList,
   LogOut,
   LibraryBig,
+  Sun,
+  Moon,
+  Monitor,
 } from "lucide-react";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth0 } from "@auth0/auth0-react";
 import { useUsernameContext } from "@/hooks/UsernameContext";
+import { useTheme, type ThemeMode } from "@/hooks/ThemeContext";
 
 const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
@@ -57,6 +61,7 @@ export function Sidebar({ onNavigate, isMobile }: SidebarProps = {}) {
   const router = useRouter();
   const { isAuthenticated, user, logout } = useAuth0();
   const { username } = useUsernameContext();
+  const { theme, setTheme } = useTheme();
   const [width, setWidth] = useState(DEFAULT_WIDTH);
   const [isResizing, setIsResizing] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -364,17 +369,45 @@ export function Sidebar({ onNavigate, isMobile }: SidebarProps = {}) {
             ref={userBlockRef}
           >
             {logoutOpen && !collapsed && (
-              <button
-                type="button"
-                onClick={() => {
-                  logout({ logoutParams: { returnTo: appUrl } });
-                  setLogoutOpen(false);
-                }}
-                className="flex items-center gap-1.5 rounded-lg border border-border bg-card shadow-lg w-full justify-center px-3 py-2 text-xs font-medium text-muted hover:text-foreground hover:border-foreground/20 transition-colors cursor-pointer mb-1.5"
-              >
-                <LogOut className="h-3.5 w-3.5" />
-                Log out
-              </button>
+              <div className="rounded-lg border border-border bg-card shadow-lg mb-1.5 overflow-hidden">
+                <div className="flex items-center justify-between px-3 py-2">
+                  {(
+                    [
+                      { mode: "light" as ThemeMode, icon: Sun, label: "Light" },
+                      { mode: "dark" as ThemeMode, icon: Moon, label: "Dark" },
+                      { mode: "auto" as ThemeMode, icon: Monitor, label: "Auto" },
+                    ] as const
+                  ).map(({ mode, icon: Icon, label }) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => setTheme(mode)}
+                      className={`flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer ${
+                        theme === mode
+                          ? "bg-accent/15 text-accent"
+                          : "text-muted hover:text-foreground"
+                      }`}
+                      title={label}
+                    >
+                      <Icon className="h-3.5 w-3.5" />
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <div className="border-t border-border">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      logout({ logoutParams: { returnTo: appUrl } });
+                      setLogoutOpen(false);
+                    }}
+                    className="flex items-center gap-1.5 w-full justify-center px-3 py-2 text-xs font-medium text-muted hover:text-foreground transition-colors cursor-pointer"
+                  >
+                    <LogOut className="h-3.5 w-3.5" />
+                    Log out
+                  </button>
+                </div>
+              </div>
             )}
             {collapsed ? (
               <button
@@ -415,18 +448,43 @@ export function Sidebar({ onNavigate, isMobile }: SidebarProps = {}) {
               </button>
             )}
             {logoutOpen && collapsed && (
-              <div className="absolute left-full bottom-2 ml-2 rounded-lg border border-border bg-card shadow-lg z-20 overflow-hidden min-w-[120px]">
-                <button
-                  type="button"
-                  onClick={() => {
-                    logout({ logoutParams: { returnTo: appUrl } });
-                    setLogoutOpen(false);
-                  }}
-                  className="flex items-center gap-1.5 w-full px-3 py-2.5 text-sm text-muted hover:text-foreground hover:bg-muted/10 transition-colors cursor-pointer"
-                >
-                  <LogOut className="h-3.5 w-3.5" />
-                  Log out
-                </button>
+              <div className="absolute left-full bottom-2 ml-2 rounded-lg border border-border bg-card shadow-lg z-20 overflow-hidden min-w-[140px]">
+                <div className="flex items-center justify-center gap-1 px-2 py-2">
+                  {(
+                    [
+                      { mode: "light" as ThemeMode, icon: Sun, label: "Light" },
+                      { mode: "dark" as ThemeMode, icon: Moon, label: "Dark" },
+                      { mode: "auto" as ThemeMode, icon: Monitor, label: "Auto" },
+                    ] as const
+                  ).map(({ mode, icon: Icon, label }) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => setTheme(mode)}
+                      className={`rounded-md p-1.5 transition-colors cursor-pointer ${
+                        theme === mode
+                          ? "bg-accent/15 text-accent"
+                          : "text-muted hover:text-foreground"
+                      }`}
+                      title={label}
+                    >
+                      <Icon className="h-3.5 w-3.5" />
+                    </button>
+                  ))}
+                </div>
+                <div className="border-t border-border">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      logout({ logoutParams: { returnTo: appUrl } });
+                      setLogoutOpen(false);
+                    }}
+                    className="flex items-center gap-1.5 w-full px-3 py-2.5 text-sm text-muted hover:text-foreground hover:bg-muted/10 transition-colors cursor-pointer"
+                  >
+                    <LogOut className="h-3.5 w-3.5" />
+                    Log out
+                  </button>
+                </div>
               </div>
             )}
           </div>

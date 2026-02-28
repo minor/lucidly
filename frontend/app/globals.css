@@ -20,9 +20,9 @@
   --error: #ef4444;
 }
 
-/* Dark mode — activates when user's browser/OS is set to dark mode */
+/* Dark mode — auto (browser preference) */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]):not([data-theme="dark"]) {
     --background: #1c1917;
     --foreground: #fafaf9;
     --sidebar-bg: #171412;
@@ -40,6 +40,26 @@
     --success: #4ade80;
     --error: #f87171;
   }
+}
+
+/* Dark mode — forced via toggle */
+:root[data-theme="dark"] {
+  --background: #1c1917;
+  --foreground: #fafaf9;
+  --sidebar-bg: #171412;
+  --border: #44403c;
+  --muted: #a8a29e;
+  --accent: #f97316;
+  --accent-light: #fdba74;
+  --accent-bg: rgba(249, 115, 22, 0.12);
+  --accent-secondary: #a78bfa;
+  --accent-tertiary: #22d3ee;
+  --card-bg: #292524;
+  --input-bg: #292524;
+  --input-border: #57534e;
+  --code-bg: #141110;
+  --success: #4ade80;
+  --error: #f87171;
 }
 
 @theme inline {
@@ -140,9 +160,12 @@ body {
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
 }
 @media (prefers-color-scheme: dark) {
-  .card-hover:hover {
+  :root:not([data-theme="light"]):not([data-theme="dark"]) .card-hover:hover {
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
   }
+}
+:root[data-theme="dark"] .card-hover:hover {
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
 }
 
 /* Code block styling */
