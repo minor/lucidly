@@ -34,7 +34,7 @@ export const metadata: Metadata = {
   description:
     "The competitive platform that benchmarks and gamifies your ability to prompt AI to write code. LeetCode for the AI era.",
   icons: {
-    icon: "/logo-cropped.svg",
+    icon: "/favicon.png",
   },
   openGraph: {
     title: "NoShot (You're Still LeetCoding)",
