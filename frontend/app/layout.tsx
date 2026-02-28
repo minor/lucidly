@@ -44,7 +44,7 @@ export const metadata: Metadata = {
     siteName: "NoShot",
     images: [
       {
-        url: "/opengraph-image.png",
+        url: "https://noshot.dev/opengraph-image.png",
         width: 1200,
         height: 630,
         alt: "NoShot",
