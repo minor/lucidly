@@ -134,9 +134,12 @@ export default function Home() {
         style={{ animationDelay: "0.4s" }}
       >
         <span>©️ 2026 No Shot</span>
-        <a href="https://x.com/tigeyshark22" target="_blank" rel="noopener noreferrer" className="underline hover:text-foreground transition-colors cursor-pointer">
-          Contact Us
-        </a>
+        <span>
+          Feedback?{" "}
+          <a href="https://x.com/tigeyshark22" target="_blank" rel="noopener noreferrer" className="underline hover:text-foreground transition-colors cursor-pointer">
+            Contact Us
+          </a>
+        </span>
       </footer>
     </div>
   );
