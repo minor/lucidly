@@ -238,6 +238,9 @@ async def list_challenges(category: str | None = None, difficulty: str | None = 
 @app.get("/api/challenges/daily-attempts")
 async def get_daily_attempts(user_id: str = Depends(get_current_user)):
     """Return {challenge_id: attempts_used} for the authenticated user today."""
+    _bypass_ids = {uid.strip() for uid in settings.bypass_limit_user_ids.split(",") if uid.strip()}
+    if user_id in _bypass_ids:
+        return {}
     from database import get_username_by_auth0_id, count_user_attempts_today_bulk
     username = await get_username_by_auth0_id(user_id)
     if not username:
@@ -1082,7 +1085,8 @@ async def chat_stream(req: ChatRequest, request: Request, user_id: str = Depends
     max_turns = 10 if is_product else 4
 
     # Allow bypass users to skip all rate/attempt limits
-    _is_bypass_user = user_id in settings.bypass_limit_user_ids
+    _bypass_ids = {uid.strip() for uid in settings.bypass_limit_user_ids.split(",") if uid.strip()}
+    _is_bypass_user = user_id in _bypass_ids
 
     if not _is_bypass_user and user_turns > max_turns:
         raise HTTPException(status_code=429, detail=f"Turn limit reached (max {max_turns} per conversation).")

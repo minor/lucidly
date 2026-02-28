@@ -40,15 +40,8 @@ class Settings(BaseSettings):
             return [o.strip() for o in v.split(",") if o.strip()]
         return v  # type: ignore[return-value]
 
-    # Auth0 user IDs that bypass per-challenge attempt and turn limits (for testing/admin)
-    bypass_limit_user_ids: list[str] = []
-
-    @field_validator("bypass_limit_user_ids", mode="before")
-    @classmethod
-    def _parse_bypass_ids(cls, v: object) -> list[str]:
-        if isinstance(v, str):
-            return [uid.strip() for uid in v.split(",") if uid.strip()]
-        return v  # type: ignore[return-value]
+    # Comma-separated Auth0 user IDs that bypass per-challenge attempt and turn limits
+    bypass_limit_user_ids: str = ""
 
     # Scoring defaults (medians for normalization)
     median_time_sec: float = 120.0

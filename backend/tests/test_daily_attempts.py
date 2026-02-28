@@ -147,9 +147,9 @@ async def test_chat_stream_rejects_at_daily_limit(auth_client: AsyncClient):
 
 
 @pytest.mark.anyio
-async def test_chat_stream_skips_limit_check_on_later_turns(auth_client: AsyncClient):
-    """Turns after the first should not check or record daily attempts."""
-    mocks = _patch_db()
+async def test_chat_stream_checks_limit_on_later_turns(auth_client: AsyncClient):
+    """Turns after the first should ALSO check the daily limit (but not record a new attempt)."""
+    mocks = _patch_db()  # count = 0, under limit
 
     with (
         patch("database.get_username_by_auth0_id", mocks["get_username_by_auth0_id"]),
@@ -165,8 +165,32 @@ async def test_chat_stream_skips_limit_check_on_later_turns(auth_client: AsyncCl
             "challenge_id": "fizzbuzz",
         })
 
-    # user_turns == 2, so the daily limit check block (user_turns == 1) is skipped
-    mocks["count_user_challenge_attempts_today"].assert_not_awaited()
+    # user_turns == 2 → limit IS checked, but attempt is NOT recorded again
+    mocks["count_user_challenge_attempts_today"].assert_awaited_once_with(MOCK_USERNAME, "fizzbuzz")
+    mocks["record_challenge_attempt"].assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_chat_stream_rejects_at_daily_limit_on_later_turns(auth_client: AsyncClient):
+    """Even on turn 2+, if the daily limit is reached, 429 is returned."""
+    mocks = _patch_db(count_user_challenge_attempts_today=AsyncMock(return_value=5))
+
+    with (
+        patch("database.get_username_by_auth0_id", mocks["get_username_by_auth0_id"]),
+        patch("database.count_user_challenge_attempts_today", mocks["count_user_challenge_attempts_today"]),
+        patch("database.record_challenge_attempt", mocks["record_challenge_attempt"]),
+    ):
+        resp = await auth_client.post("/api/chat/stream", json={
+            "messages": [
+                {"role": "user", "content": "hello"},
+                {"role": "assistant", "content": "hi there"},
+                {"role": "user", "content": "write fizzbuzz"},
+            ],
+            "challenge_id": "fizzbuzz",
+        })
+
+    assert resp.status_code == 429
+    assert "Daily limit" in resp.json()["detail"]
     mocks["record_challenge_attempt"].assert_not_awaited()
 
 
