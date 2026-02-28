@@ -488,12 +488,14 @@ export const MODEL_PRICING: Record<string, { input: number; output: number }> = 
   "gpt-5.2": { input: 1.75, output: 14.0 },
   "gpt-4o": { input: 2.5, output: 10.0 },
   "grok-4-1-fast-reasoning": { input: 0.20, output: 0.50 },
+  "grok-4-1-fast-non-reasoning": { input: 0.20, output: 0.50 },
   "grok-code-fast-1": { input: 0.20, output: 1.50 },
   "sonar": { input: 0.20, output: 1.0 },
   "sonar-pro": { input: 3.0, output: 15.0 },
 };
 
 export const MODELS = [
+  { id:"grok-4-1-fast-non-reasoning", name: "Grok 4.1 Fast Non-Reasoning" },
   { id: "grok-4-1-fast-reasoning", name: "Grok 4.1 Fast Reasoning" },
   { id: "grok-code-fast-1", name: "Grok Code Fast" },
   { id: "gpt-5.2", name: "GPT-5.2 (Instant)" },
