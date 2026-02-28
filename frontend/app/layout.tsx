@@ -32,9 +32,9 @@ const dmSans = DM_Sans({
 export const metadata: Metadata = {
   title: "NoShot (You're Still LeetCoding)",
   description:
-    "The competitive platform that benchmarks and gamifies your ability to prompt AI to write code. Monkeytype for the AI era.",
+    "The competitive platform that benchmarks and gamifies your ability to prompt AI to write code. LeetCode for the AI era.",
   icons: {
-    icon: "/logo.svg",
+    icon: "/logo-cropped.svg",
   },
 };
 
