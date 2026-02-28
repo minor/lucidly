@@ -267,12 +267,15 @@ export default function ChallengePage() {
     // Check for 100% accuracy to auto-pause timer
     const isPerfect = testResults && testResults.total_count > 0 && testResults.passed_count === testResults.total_count;
     
+    const isReasoningModel = selectedModel === 'gpt-5.2-reasoning' || selectedModel === 'grok-4-1-fast-reasoning';
+    const isThinking = isWaitingForFirstToken && isReasoningModel;
+
     // Pause conditions:
-    // 1. Waiting for first LLM token (network/inference latency after prompt submit)
+    // 1. Waiting for first LLM token (unless it's a reasoning model, then timer keeps running)
     // 2. Running tests or code (executing but not streaming chat)
     // 3. Submitting or Finished (submitState !== 'idle')
     // 4. 100% Accuracy achieved
-    const shouldPause = attemptsExhausted || isWaitingForFirstToken || (isExecuting && !isStreaming) || submitState !== 'idle' || (isPerfect && submitState === 'idle');
+    const shouldPause = attemptsExhausted || (isWaitingForFirstToken && !isReasoningModel) || (isExecuting && !isStreaming) || submitState !== 'idle' || (isPerfect && submitState === 'idle');
 
     if (shouldPause) {
       if (!pauseStartTimeRef.current) {
@@ -285,12 +288,13 @@ export default function ChallengePage() {
         pauseStartTimeRef.current = null;
       }
     }
-  }, [attemptsExhausted, isWaitingForFirstToken, isExecuting, isStreaming, submitState, testResults]);
+  }, [attemptsExhausted, isWaitingForFirstToken, isExecuting, isStreaming, submitState, testResults, selectedModel]);
 
   useEffect(() => {
     const interval = setInterval(() => {
+      const isReasoningModel = selectedModel === 'gpt-5.2-reasoning' || selectedModel === 'grok-4-1-fast-reasoning';
       const isPerfect = testResults && testResults.total_count > 0 && testResults.passed_count === testResults.total_count;
-      const shouldPause = attemptsExhausted || isWaitingForFirstToken || (isExecuting && !isStreaming) || submitState !== 'idle' || (isPerfect && submitState === 'idle');
+      const shouldPause = attemptsExhausted || (isWaitingForFirstToken && !isReasoningModel) || (isExecuting && !isStreaming) || submitState !== 'idle' || (isPerfect && submitState === 'idle');
 
       if (!shouldPause) {
         const now = Date.now();
@@ -1717,10 +1721,17 @@ export default function ChallengePage() {
                   <div className="flex gap-4 group">
                     <div className="flex-1 min-w-0">
                       <div className="text-sm leading-relaxed text-foreground">
-                        <div className="whitespace-pre-wrap break-words">
-                          {currentStreamingMessage}
-                          <span className="inline-block w-0.5 h-4 bg-foreground ml-1 align-middle animate-pulse" />
-                        </div>
+                        {isWaitingForFirstToken ? (
+                          <div className="flex items-center gap-2 text-muted-foreground py-1 animate-pulse">
+                            <Sparkles className="h-4 w-4 text-accent" />
+                            <span className="font-medium">Thinking...</span>
+                          </div>
+                        ) : (
+                          <div className="whitespace-pre-wrap break-words">
+                            {currentStreamingMessage}
+                            <span className="inline-block w-0.5 h-4 bg-foreground ml-1 align-middle animate-pulse" />
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
