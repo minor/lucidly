@@ -672,11 +672,23 @@ export default function ChallengePage() {
       score: previewScore,
       cost: currentCost,
     };
-
     try {
-      const sessionId = scoringSessionIdRef.current;
+      let sessionId = scoringSessionIdRef.current;
       if (!sessionId) {
-        throw new Error("No scoring session — please refresh the page");
+        try {
+          console.log("session id expired, creating new session")
+          const token = await getAccessTokenSilently();
+          setAuthToken(token);
+          const res = await createScoringSession({ challenge_id: challengeId });
+          sessionId = res.session_id;
+          scoringSessionIdRef.current = sessionId;
+        } catch {
+          toast.error("Failed to create scoring session. Please retry.");
+          setSubmitState("idle");
+          setScoreBarFrozen(false);
+          setScoreLoading(false);
+          return;
+        }
       }
 
       const scores = await submitScore(sessionId, {
