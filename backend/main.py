@@ -13,6 +13,8 @@ import sentry_sdk
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 from sentry_sdk.integrations.starlette import StarletteIntegration
 
+from contextlib import asynccontextmanager
+
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -78,29 +80,10 @@ from session_events import (
 )
 from interviews import interview_router
 
+
 # ---------------------------------------------------------------------------
 # App setup
 # ---------------------------------------------------------------------------
-
-app = FastAPI(title="No Shot", version="0.1.0")
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-
-
-@app.on_event("startup")
-def _configure_agent_trace_logging():
-    """Run in the worker process so [agent_trace] appears in the console and in the debug log."""
-    import sys
-    _agent_log = logging.getLogger("agent_runner")
-    _agent_log.setLevel(logging.INFO)
-    if not _agent_log.handlers:
-        _h = logging.StreamHandler(sys.stderr)
-        _h.setLevel(logging.INFO)
-        _h.setFormatter(logging.Formatter("%(message)s"))
-        _h.terminator = "\n"
-        _agent_log.addHandler(_h)
-        _agent_log.propagate = False
-
 
 _CLEANUP_INTERVAL_SECONDS = 300  # run every 5 minutes
 
@@ -115,9 +98,32 @@ async def _session_cleanup_loop() -> None:
             logging.getLogger(__name__).exception("Error during session cleanup")
 
 
-@app.on_event("startup")
-def _start_session_cleanup() -> None:
-    asyncio.get_event_loop().create_task(_session_cleanup_loop())
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """Application lifespan: configure logging and start background tasks on startup."""
+    import sys
+    # Configure agent trace logger so [agent_trace] lines appear in the console.
+    _agent_log = logging.getLogger("agent_runner")
+    _agent_log.setLevel(logging.INFO)
+    if not _agent_log.handlers:
+        _h = logging.StreamHandler(sys.stderr)
+        _h.setLevel(logging.INFO)
+        _h.setFormatter(logging.Formatter("%(message)s"))
+        _h.terminator = "\n"
+        _agent_log.addHandler(_h)
+        _agent_log.propagate = False
+
+    # Start background session-cleanup loop.
+    cleanup_task = asyncio.get_event_loop().create_task(_session_cleanup_loop())
+
+    yield  # application runs
+
+    cleanup_task.cancel()
+
+
+app = FastAPI(title="No Shot", version="0.1.0", lifespan=_lifespan)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 app.add_middleware(SlowAPIMiddleware)
@@ -565,6 +571,7 @@ async def check_username_available(username: str):
 from scoring_sessions import (
     create_scoring_session,
     get_scoring_session,
+    aget_scoring_session,
     record_turn as ss_record_turn,
     record_partial_turn as ss_record_partial_turn,
     record_processing_time as ss_record_processing_time,
@@ -590,7 +597,7 @@ async def _require_auth_after_session_check(request: Request) -> str:
     try:
         body = await request.json()
         sid = body.get("scoring_session_id") if isinstance(body, dict) else None
-        if sid is not None and get_scoring_session(sid) is None:
+        if sid is not None and await aget_scoring_session(sid) is None:
             raise HTTPException(status_code=410, detail="Scoring session expired or not found")
     except HTTPException:
         raise
@@ -605,7 +612,7 @@ async def _require_auth_after_session_id_check(session_id: str, request: Request
 
     Returns 410 for expired/missing sessions before 401 for unauthenticated requests.
     """
-    if get_scoring_session(session_id) is None:
+    if await aget_scoring_session(session_id) is None:
         raise HTTPException(status_code=410, detail="Scoring session expired or not found")
     override = _resolve_auth(request)
     return await override() if override else await get_current_user(request)
@@ -643,7 +650,7 @@ async def create_scoring_session_endpoint(req: CreateScoringSessionRequest, user
 @app.post("/api/scoring-sessions/{session_id}/submit")
 async def submit_scoring_session(session_id: str, req: SubmitScoreRequest, user_id: str = Depends(_require_auth_after_session_id_check)):
     """Verify accuracy server-side, compute all metrics from the scoring session, and persist to Supabase."""
-    session = get_scoring_session(session_id)  # guaranteed non-None by dependency
+    session = await aget_scoring_session(session_id)  # guaranteed non-None by dependency
     if session.username != user_id:
         raise HTTPException(status_code=403, detail="Session does not belong to this user")
     if session.status != "active":
@@ -1138,7 +1145,7 @@ async def chat_stream(req: ChatRequest, request: Request, user_id: str = Depends
     if not anthropic_messages or anthropic_messages[-1]["role"] != "user":
         raise HTTPException(status_code=400, detail="Last message must be from user")
 
-    if req.scoring_session_id and get_scoring_session(req.scoring_session_id) is None:
+    if req.scoring_session_id and await aget_scoring_session(req.scoring_session_id) is None:
         raise HTTPException(status_code=410, detail="Scoring session expired or not found")
 
     # Resolve system prompt: use product challenge agent context when applicable
@@ -1586,7 +1593,7 @@ class RunTestsResponse(BaseModel):
 @limiter.limit("30/minute")
 async def run_tests(req: RunTestsRequest, request: Request, user_id: str = Depends(_require_auth_after_session_check)) -> RunTestsResponse:
     """Run code against a challenge's test suite in a persistent Modal sandbox."""
-    if req.scoring_session_id and get_scoring_session(req.scoring_session_id) is None:
+    if req.scoring_session_id and await aget_scoring_session(req.scoring_session_id) is None:
         raise HTTPException(status_code=410, detail="Scoring session expired or not found")
 
     challenge = get_challenge_by_id(req.challenge_id)
@@ -1609,7 +1616,7 @@ async def run_tests(req: RunTestsRequest, request: Request, user_id: str = Depen
     passed_count = sum(1 for r in results if r.passed)
 
     if req.scoring_session_id:
-        session = get_scoring_session(req.scoring_session_id)
+        session = await aget_scoring_session(req.scoring_session_id)
         if session and session.status == "active":
             accuracy = passed_count / len(results) if results else 0.0
             session.last_test_accuracy = accuracy
