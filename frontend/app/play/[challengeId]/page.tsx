@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { getChallenge, runTests, runCode, createSandbox, terminateSandbox, MODEL_PRICING, MODELS, createVercelSandbox, updateVercelSandboxCode, stopVercelSandbox, streamPromptFeedback, createScoringSession, submitScore, setAuthToken } from "@/lib/api";
+import { getChallenge, runTests, runCode, createSandbox, terminateSandbox, MODEL_PRICING, MODELS, createVercelSandbox, updateVercelSandboxCode, stopVercelSandbox, streamPromptFeedback, createScoringSession, submitScore, setAuthToken, getDailyAttempts } from "@/lib/api";
 import { PromptInput } from "@/components/PromptInput";
 import { ScoreBar } from "@/components/ScoreBar";
 import { SimpleMarkdown } from "@/components/SimpleMarkdown";
@@ -40,8 +40,8 @@ import { useUsername } from "@/hooks/useUsername";
 export default function ChallengePage() {
   const params = useParams();
   const router = useRouter();
-  const { user, isAuthenticated, loginWithRedirect, getAccessTokenSilently } = useAuth0();
-  const { username, loading: usernameLoading } = useUsername(user);
+  const { user, isAuthenticated, isLoading: auth0Loading, loginWithRedirect, getAccessTokenSilently } = useAuth0();
+  const { username, loading: usernameLoading } = useUsername(user, auth0Loading);
   const [showAuthOverlay, setShowAuthOverlay] = useState(false);
   const challengeId = params.challengeId as string;
 
@@ -130,6 +130,10 @@ export default function ChallengePage() {
   // Scoring session (server-side tamper-proof stat tracking)
   const scoringSessionIdRef = useRef<string | null>(null);
   const [sessionExpired, setSessionExpired] = useState(false);
+
+  // Daily attempt tracking
+  const [attemptsExhausted, setAttemptsExhausted] = useState(false);
+  const [dailyAttemptsLoading, setDailyAttemptsLoading] = useState(true);
 
   const handleSessionExpired = useCallback((errMsg?: string) => {
     const isExpired = errMsg && /expired|not found/i.test(errMsg);
@@ -235,6 +239,29 @@ export default function ChallengePage() {
       .catch((err) => console.error("Failed to create scoring session:", err));
     return () => { ignore = true; };
   }, [challenge, challengeId, isAuthenticated, usernameLoading, username, user, getAccessTokenSilently]);
+
+  // Fetch daily attempts on load to check if exhausted
+  useEffect(() => {
+    // Auth still initializing — wait
+    if (auth0Loading || usernameLoading) return;
+    // Unauthenticated — no limit applies, clear loading immediately
+    if (!isAuthenticated) {
+      setDailyAttemptsLoading(false);
+      return;
+    }
+    // Challenge not yet loaded — wait (initializing handles the spinner)
+    if (!challenge) return;
+    let ignore = false;
+    getDailyAttempts()
+      .then((data) => {
+        if (ignore) return;
+        const used = data[challengeId] ?? 0;
+        if (used >= 5) setAttemptsExhausted(true);
+      })
+      .catch(() => {})
+      .finally(() => { if (!ignore) setDailyAttemptsLoading(false); });
+    return () => { ignore = true; };
+  }, [challenge, challengeId, isAuthenticated, auth0Loading, usernameLoading]);
   // Timer Logic (Merged)
   useEffect(() => {
     // Check for 100% accuracy to auto-pause timer
@@ -245,7 +272,7 @@ export default function ChallengePage() {
     // 2. Running tests or code (executing but not streaming chat)
     // 3. Submitting or Finished (submitState !== 'idle')
     // 4. 100% Accuracy achieved
-    const shouldPause = isWaitingForFirstToken || (isExecuting && !isStreaming) || submitState !== 'idle' || (isPerfect && submitState === 'idle');
+    const shouldPause = attemptsExhausted || isWaitingForFirstToken || (isExecuting && !isStreaming) || submitState !== 'idle' || (isPerfect && submitState === 'idle');
 
     if (shouldPause) {
       if (!pauseStartTimeRef.current) {
@@ -258,12 +285,12 @@ export default function ChallengePage() {
         pauseStartTimeRef.current = null;
       }
     }
-  }, [isWaitingForFirstToken, isExecuting, isStreaming, submitState, testResults]);
+  }, [attemptsExhausted, isWaitingForFirstToken, isExecuting, isStreaming, submitState, testResults]);
 
   useEffect(() => {
     const interval = setInterval(() => {
       const isPerfect = testResults && testResults.total_count > 0 && testResults.passed_count === testResults.total_count;
-      const shouldPause = isWaitingForFirstToken || (isExecuting && !isStreaming) || submitState !== 'idle' || (isPerfect && submitState === 'idle');
+      const shouldPause = attemptsExhausted || isWaitingForFirstToken || (isExecuting && !isStreaming) || submitState !== 'idle' || (isPerfect && submitState === 'idle');
 
       if (!shouldPause) {
         const now = Date.now();
@@ -272,7 +299,7 @@ export default function ChallengePage() {
       }
     }, 1000);
     return () => clearInterval(interval);
-  }, [isWaitingForFirstToken, isExecuting, isStreaming, submitState, testResults]);
+  }, [attemptsExhausted, isWaitingForFirstToken, isExecuting, isStreaming, submitState, testResults]);
 
   // Resize handler
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
@@ -608,7 +635,7 @@ export default function ChallengePage() {
   const productParts = challenge?.product_parts ?? [];
 
   const handleSubmitSolution = async () => {
-    if (sessionExpired || submitState !== "idle") return;
+    if (sessionExpired || attemptsExhausted || submitState !== "idle") return;
 
     // Freeze the score bar stats for display (informational only)
     const currentElapsed = elapsed;
@@ -695,6 +722,7 @@ export default function ChallengePage() {
   };
 
   const handleRetry = () => {
+    if (attemptsExhausted) return;
     setMessages([]);
     setLastTurnAborted(false);
     setRenderedCode("");
@@ -780,7 +808,7 @@ export default function ChallengePage() {
   };
 
   const handleSubmit = async (prompt: string, model: string) => {
-    if (sessionExpired) return;
+    if (sessionExpired || attemptsExhausted) return;
     const maxTurns = isProductChallenge ? 10 : 4;
     if (!prompt.trim() || isStreaming || isExecuting || submitState !== "idle" || totalTurns >= maxTurns) return;
 
@@ -841,6 +869,20 @@ export default function ChallengePage() {
           abortControllerRef.current = null;
           return;
         }
+        // Daily limit exhausted — disable UI and undo the speculative user message
+        if (/daily limit/i.test(error)) {
+          setAttemptsExhausted(true);
+          setMessages(messages); // revert to messages before this turn
+          setTotalTurns((t) => Math.max(0, t - 1));
+          setCurrentStreamingMessage("");
+          setIsStreaming(false);
+          setIsExecuting(false);
+          setIsWaitingForFirstToken(false);
+          setEstimatedTokens(0);
+          abortControllerRef.current = null;
+          toast.error("Daily attempt limit reached for this challenge.");
+          return;
+        }
         const errorMessage: ChatMessage = {
           role: "assistant",
           content: `Error: ${error}`,
@@ -893,7 +935,7 @@ export default function ChallengePage() {
 </body>
 </html>`;
 
-  if (initializing || (isAuthenticated && usernameLoading)) {
+  if (initializing || (isAuthenticated && usernameLoading) || dailyAttemptsLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <Loader2 className="h-6 w-6 animate-spin text-muted" />
@@ -1714,20 +1756,21 @@ export default function ChallengePage() {
                 onModelChange={setSelectedModel}
                 fixedModel={isProductChallenge && productPart === 1 ? "gpt-5.2" : undefined}
                 placeholder={(() => {
+                  if (attemptsExhausted) return "No attempts remaining today";
                   const maxT = isProductChallenge ? 10 : 4;
                   const remaining = maxT - totalTurns;
                   if (remaining <= 0) return `Turn limit reached`;
                   const base = isProductChallenge && productPart === 1 ? "Ask the CRO..." : "Ask anything...";
                   return `${base} (${remaining} turn${remaining === 1 ? "" : "s"} left)`;
                 })()}
-                disabled={sessionExpired || submitState === "completed" || totalTurns >= (isProductChallenge ? 10 : 4)}
+                disabled={sessionExpired || attemptsExhausted || submitState === "completed" || totalTurns >= (isProductChallenge ? 10 : 4)}
                 submitDisabled={isStreaming || isExecuting || submitState === "pending"}
                 extraButton={
                   <button
                     type="button"
                     onClick={submitState === "completed" ? handleRetry : handleSubmitSolution}
                     disabled={
-                      sessionExpired ||
+                      sessionExpired || attemptsExhausted ||
                       submitState === "pending" ||
                       isExecuting ||
                       isStreaming ||

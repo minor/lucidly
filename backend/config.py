@@ -40,6 +40,9 @@ class Settings(BaseSettings):
             return [o.strip() for o in v.split(",") if o.strip()]
         return v  # type: ignore[return-value]
 
+    # Comma-separated Auth0 user IDs that bypass per-challenge attempt and turn limits
+    bypass_limit_user_ids: str = ""
+
     # Scoring defaults (medians for normalization)
     median_time_sec: float = 120.0
     median_tokens: int = 500

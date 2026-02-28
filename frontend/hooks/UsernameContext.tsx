@@ -14,8 +14,8 @@ interface UsernameContextValue {
 const UsernameContext = createContext<UsernameContextValue | null>(null);
 
 export function UsernameProvider({ children }: { children: ReactNode }) {
-  const { user } = useAuth0();
-  const value = useUsername(user);
+  const { user, isLoading: auth0Loading } = useAuth0();
+  const value = useUsername(user, auth0Loading);
   return (
     <UsernameContext.Provider value={value}>
       {children}

@@ -14,7 +14,7 @@ import { getUsername as fetchUsername, setUsername as saveUsername } from "@/lib
  *  - needsUsername: true when the user is logged in but hasn't picked a name yet
  *  - loading: true while fetching the initial username from the server
  */
-export function useUsername(user: User | undefined) {
+export function useUsername(user: User | undefined, auth0Loading = false) {
   const [username, setUsernameState] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -22,6 +22,8 @@ export function useUsername(user: User | undefined) {
 
   // Load from Supabase on mount / user change
   useEffect(() => {
+    // Auth0 still initialising — keep loading=true so needsUsername stays false
+    if (auth0Loading) return;
     if (!auth0Id) {
       setLoading(false);
       return;
@@ -39,7 +41,7 @@ export function useUsername(user: User | undefined) {
     return () => {
       cancelled = true;
     };
-  }, [auth0Id]);
+  }, [auth0Id, auth0Loading]);
 
   const setUsername = useCallback(
     async (name: string) => {

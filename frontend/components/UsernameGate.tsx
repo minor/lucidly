@@ -10,10 +10,10 @@ import { setAuthToken } from "@/lib/api";
  * if they haven't already. Renders nothing otherwise.
  */
 export function UsernameGate() {
-  const { user, isAuthenticated, getAccessTokenSilently } = useAuth0();
-  const { needsUsername, setUsername } = useUsernameContext();
+  const { user, isAuthenticated, isLoading: auth0Loading, getAccessTokenSilently } = useAuth0();
+  const { needsUsername, setUsername, loading: usernameLoading } = useUsernameContext();
 
-  if (!isAuthenticated || !needsUsername) return null;
+  if (auth0Loading || usernameLoading || !isAuthenticated || !needsUsername) return null;
 
   const handleConfirm = async (name: string) => {
     const token = await getAccessTokenSilently();
