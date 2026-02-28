@@ -696,6 +696,10 @@ export default function ChallengePage() {
           ...(scores.total_turns !== undefined && { turns: scores.total_turns }),
           ...(scores.total_tokens !== undefined && { tokens: scores.total_tokens }),
           ...(scores.total_cost !== undefined && { cost: scores.total_cost }),
+          ...(isProductChallenge && {
+            accuracy: scores.accuracy_score / 1000,
+            score: scores.accuracy_score / 10,
+          }),
         };
       }
 
@@ -1014,12 +1018,31 @@ export default function ChallengePage() {
                 {showScoreExplainer && (
                   <div className="absolute left-1/2 -translate-x-1/2 top-full mt-3 w-56 rounded-lg border border-border bg-background p-2.5 text-left text-xs text-muted leading-relaxed shadow-lg z-10 animate-in fade-in slide-in-from-top-1 duration-150">
                     <p className="mb-1 font-semibold text-foreground text-[11px] uppercase tracking-wider">Scoring</p>
-                    <p>
-                      ELO-style rating (0–1000) weighted by{" "}
-                      <span className="text-foreground font-medium">Accuracy 70%</span>,{" "}
-                      <span className="text-foreground font-medium">Speed 15%</span>, and{" "}
-                      <span className="text-foreground font-medium">Cost 15%</span>.
-                    </p>
+                    {isProductChallenge ? (
+                      <p>
+                        Score (0–1000) weighted by{" "}
+                        <span className="text-foreground font-medium">PRD Quality 80%</span> (Feasibility, Expertise, Clarity, Discovery Alignment),{" "}
+                        <span className="text-foreground font-medium">Turns 10%</span>,{" "}
+                        <span className="text-foreground font-medium">Speed 5%</span>, and{" "}
+                        <span className="text-foreground font-medium">Cost 5%</span>.
+                      </p>
+                    ) : hasFunctionTests ? (
+                      <p>
+                        Score (0–1000) weighted by{" "}
+                        <span className="text-foreground font-medium">Accuracy 80%</span>,{" "}
+                        <span className="text-foreground font-medium">Turns 5%</span>,{" "}
+                        <span className="text-foreground font-medium">Speed 10%</span>, and{" "}
+                        <span className="text-foreground font-medium">Cost 5%</span>.
+                      </p>
+                    ) : (
+                      <p>
+                        Score (0–1000) weighted by{" "}
+                        <span className="text-foreground font-medium">Accuracy 60%</span>,{" "}
+                        <span className="text-foreground font-medium">Speed 15%</span>,{" "}
+                        <span className="text-foreground font-medium">Turns 10%</span>, and{" "}
+                        <span className="text-foreground font-medium">Cost 15%</span>.
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
@@ -1027,8 +1050,9 @@ export default function ChallengePage() {
 
             <div className="mb-6 flex justify-center">
               <ScoreBar 
-                accuracy={isProductChallenge ? undefined : finalScores.accuracy_score / 1000}
-                score={isProductChallenge ? undefined : (frozenStatsRef.current?.score)}
+                accuracy={finalScores.accuracy_score / 1000}
+                accuracyLabel={isProductChallenge ? "Quality" : "Accuracy"}
+                score={isProductChallenge ? finalScores.accuracy_score / 10 : (frozenStatsRef.current?.score)}
                 compositeScore={finalScores.composite_score}
                 turns={frozenStatsRef.current?.turns || 0}
                 tokens={frozenStatsRef.current?.tokens || 0}
@@ -1111,6 +1135,7 @@ export default function ChallengePage() {
           tokens={scoreBarFrozen && frozenStatsRef.current ? frozenStatsRef.current.tokens : Math.round(totalTokens + totalInputTokens + estimatedTokens)}
           elapsedSec={scoreBarFrozen && frozenStatsRef.current ? frozenStatsRef.current.elapsed : elapsed}
           accuracy={scoreBarFrozen && frozenStatsRef.current ? frozenStatsRef.current.accuracy : (testResults ? testResults.passed_count / testResults.total_count : undefined)}
+          accuracyLabel={isProductChallenge ? "Quality" : "Accuracy"}
           score={
             scoreBarFrozen && frozenStatsRef.current
               ? frozenStatsRef.current.score

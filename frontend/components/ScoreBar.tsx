@@ -17,6 +17,8 @@ interface ScoreBarProps {
   hideTurns?: boolean;
   /** When true, show an info tooltip indicating metrics are live estimates */
   showEstimateInfo?: boolean;
+  /** Override the "Accuracy" label (e.g. "Quality" for PRD challenges) */
+  accuracyLabel?: string;
 }
 
 export function ScoreBar({
@@ -31,6 +33,7 @@ export function ScoreBar({
   maxTurns,
   hideTurns = false,
   showEstimateInfo = false,
+  accuracyLabel = "Accuracy",
 }: ScoreBarProps) {
   const formatTime = (sec: number) => {
     const m = Math.floor(sec / 60);
@@ -109,7 +112,7 @@ export function ScoreBar({
               )}
             </p>
             <p className="text-[10px] text-muted uppercase tracking-wider">
-              Accuracy
+              {accuracyLabel}
             </p>
           </div>
         </div>
