@@ -299,7 +299,7 @@ export default function LeaderboardPage() {
                         key={entry.username}
                         className={`border-b border-border last:border-0 transition-colors ${
                           highlighted
-                            ? "bg-[#fff7ed]"
+                            ? "bg-[#fff7ed] dark:bg-orange-950/40"
                             : "hover:bg-muted/5"
                         }`}
                       >
@@ -331,7 +331,7 @@ export default function LeaderboardPage() {
                         key={entry.id || entry.username}
                         className={`border-b border-border last:border-0 transition-colors ${
                           highlighted
-                            ? "bg-[#fff7ed]"
+                            ? "bg-[#fff7ed] dark:bg-orange-950/40"
                             : "hover:bg-muted/5"
                         }`}
                       >

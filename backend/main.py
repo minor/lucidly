@@ -776,7 +776,12 @@ async def submit_scoring_session(session_id: str, req: SubmitScoreRequest, user_
 
     # --- 5. Write to Supabase ---
     try:
-        from database import save_challenge_session
+        from database import save_challenge_session, get_username_by_auth0_id
+
+        # Resolve the Auth0 user ID to the chosen display name so the leaderboard
+        # shows readable names instead of raw Auth0 IDs like "auth0|abc123".
+        # Falls back to the raw ID if the user hasn't set a display name yet.
+        display_username = await get_username_by_auth0_id(session.username) or session.username
 
         db_session_id = await save_challenge_session(
             challenge_id=session.challenge_id,
@@ -784,7 +789,7 @@ async def submit_scoring_session(session_id: str, req: SubmitScoreRequest, user_
             category=challenge.category,
             difficulty=difficulty,
             model=session.model,
-            username=session.username,
+            username=display_username,
             accuracy=accuracy,
             time_seconds=elapsed_sec,
             total_tokens=total_tokens,
