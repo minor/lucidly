@@ -1080,17 +1080,25 @@ async def chat_stream(req: ChatRequest, request: Request, user_id: str = Depends
         _ch = get_challenge_by_id(req.challenge_id)
         is_product = _ch is not None and getattr(_ch, "category", None) == "product"
     max_turns = 10 if is_product else 4
-    if user_turns > max_turns:
+
+    # Allow bypass users to skip all rate/attempt limits
+    _is_bypass_user = user_id in settings.bypass_limit_user_ids
+
+    if not _is_bypass_user and user_turns > max_turns:
         raise HTTPException(status_code=429, detail=f"Turn limit reached (max {max_turns} per conversation).")
 
-    if req.challenge_id and user_turns == 1:
+    if not _is_bypass_user and req.challenge_id:
         from database import get_username_by_auth0_id, count_user_challenge_attempts_today, record_challenge_attempt
         username = await get_username_by_auth0_id(user_id)
         if username:
-            count = await count_user_challenge_attempts_today(username, req.challenge_id)
+            try:
+                count = await count_user_challenge_attempts_today(username, req.challenge_id)
+            except Exception:
+                raise HTTPException(status_code=503, detail="Unable to verify daily attempts. Please try again.")
             if count >= 5:
                 raise HTTPException(status_code=429, detail="Daily limit reached (max 5 attempts per challenge).")
-            await record_challenge_attempt(username, req.challenge_id)
+            if user_turns == 1:
+                await record_challenge_attempt(username, req.challenge_id)
 
     # Convert messages to Anthropic format (or OpenAI format if using OpenRouter)
     anthropic_messages = []

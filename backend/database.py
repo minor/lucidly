@@ -137,7 +137,7 @@ async def count_user_challenge_attempts_today(username: str, challenge_id: str) 
     """Count how many attempts a user has started for a specific challenge today."""
     supabase = get_supabase_client()
     if not supabase:
-        return 0
+        raise RuntimeError("Supabase unavailable — cannot verify daily attempts")
     try:
         from datetime import date
         today = date.today().isoformat()
@@ -152,7 +152,7 @@ async def count_user_challenge_attempts_today(username: str, challenge_id: str) 
         return response.count or 0
     except Exception as e:
         logger.error(f"Error counting daily attempts: {e}")
-        return 0
+        raise
 
 
 async def count_user_attempts_today_bulk(username: str) -> dict[str, int]:

@@ -274,7 +274,8 @@ export async function streamChat(
 
   if (!response.ok) {
     if (response.status === 429) {
-      onError?.("Rate limit exceeded. Please wait a moment and try again.");
+      const errBody = await response.json().catch(() => ({ detail: "Rate limit exceeded. Please wait a moment and try again." }));
+      onError?.(errBody.detail || "Rate limit exceeded. Please wait a moment and try again.");
       return;
     }
     const error = await response.json().catch(() => ({ detail: response.statusText }));
