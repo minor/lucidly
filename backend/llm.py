@@ -153,6 +153,7 @@ def run_function_tests_local(code: str, test_suite: list[dict]) -> tuple[float, 
 CODING_SYSTEM_PROMPT = (
     "You are a code generation assistant. The user will describe what they want built. "
     "You must output the code inside a single markdown code block (e.g. ```html then newline then your code then ```). "
+    "ALWAYS use ``` tags when outputting code."
     "The code should be complete, runnable, and match the user's requirements. "
     "For UI challenges, output one complete HTML document (inline CSS/JS is fine). "
 )
@@ -234,12 +235,14 @@ class LLM:
             image_data_url=image_data_url,
         )
 
-        response = await self.client.chat.completions.create(
-            model=model or self.model,
-            messages=messages,
-            max_completion_tokens=max_tokens or self.max_tokens,
-            temperature=temperature if temperature is not None else self.temperature,
-        )
+        create_kwargs = {
+            "model": model or self.model,
+            "messages": messages,
+            "max_completion_tokens": max_tokens or self.max_tokens,
+            "temperature": temperature if temperature is not None else self.temperature,
+        }
+
+        response = await self.client.chat.completions.create(**create_kwargs)
 
         choice = response.choices[0]
         response_text = choice.message.content or ""

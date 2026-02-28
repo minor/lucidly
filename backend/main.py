@@ -1006,7 +1006,7 @@ async def session_ws(ws: WebSocket, session_id: str):
                         llm_instance = llm
 
                     # GPT-5 Mini and Nano require temperature=1
-                    temperature = 1.0 if model in ["gpt-5-mini", "gpt-5-nano"] else None
+                    temperature = None
 
                     async for chunk in llm_instance.stream(
                         prompt_text,
@@ -1419,7 +1419,7 @@ async def chat_stream(req: ChatRequest, request: Request, user_id: str = Depends
                 
                 full_response = ""
                 _first_chunk_at = None
-                temperature = 1.0 if model in ["gpt-5-mini", "gpt-5-nano"] else None
+                temperature = None
                 
                 async for chunk in claude_llm.stream(
                     current_prompt,

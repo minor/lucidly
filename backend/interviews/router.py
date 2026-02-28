@@ -251,7 +251,7 @@ async def submit_prompt(room_id: str, session_id: str, req: SubmitPromptRequest,
 
         try:
             # GPT-5 Mini and Nano require temperature=1
-            temperature = 1.0 if model in ["gpt-5-mini", "gpt-5-nano"] else None
+            temperature = None
 
             async for chunk in llm_instance.stream(
                 req.prompt,
