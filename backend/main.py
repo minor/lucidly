@@ -63,6 +63,8 @@ from sessions import (
 )
 from evaluation import (
     compute_composite_score,
+    compute_function_composite_score,
+    compute_prd_composite_score,
     run_function_tests_detailed,
     TestGenerator,
     GeneratedTestSuite,
@@ -740,14 +742,23 @@ async def submit_scoring_session(session_id: str, req: SubmitScoreRequest, user_
 
     # --- 4. Compute composite score ---
     difficulty = getattr(challenge, "difficulty", "medium") or "medium"
-    scores = compute_composite_score(
-        accuracy=accuracy,
-        elapsed_sec=elapsed_sec,
-        total_tokens=total_tokens,
-        total_turns=total_turns,
-        difficulty=difficulty,
-        total_cost=total_cost,
-    )
+    if has_tests and not is_ui and not is_product:
+        scores = compute_function_composite_score(
+            accuracy=accuracy,
+            elapsed_sec=elapsed_sec,
+            total_tokens=total_tokens,
+            total_turns=total_turns,
+            total_cost=total_cost,
+        )
+    else:
+        scores = compute_composite_score(
+            accuracy=accuracy,
+            elapsed_sec=elapsed_sec,
+            total_tokens=total_tokens,
+            total_turns=total_turns,
+            difficulty=difficulty,
+            total_cost=total_cost,
+        )
 
     if is_product and (req.prd_content or "").strip():
         try:
@@ -770,7 +781,14 @@ async def submit_scoring_session(session_id: str, req: SubmitScoreRequest, user_
             )
             llm_response = await feedback_llm.generate(prompt, temperature=0.4)
             _, total_100 = _parse_prd_section_scores(llm_response.response_text)
-            scores["composite_score"] = min(100, max(0, total_100))
+            logger.info(f"PRD score: {total_100}")
+            scores = compute_prd_composite_score(
+                prd_score_100=total_100,
+                elapsed_sec=elapsed_sec,
+                total_tokens=total_tokens,
+                total_turns=total_turns,
+                total_cost=total_cost,
+            )
         except Exception as e:
             logger.warning("PRD grading failed during submit: %s", e)
 
@@ -1845,7 +1863,7 @@ PROMPT_FEEDBACK_SYSTEM_PROMPT = (
 
 PROMPT_FEEDBACK_PRD_SYSTEM_PROMPT = (
     "You are a concise, supportive product and PRD reviewer. You evaluate Product Requirements "
-    "Documents along clear dimensions (feasibility, expertise, clarity, etc.) and give direct, "
+    "Documents along clear dimensions (feasibility, expertise, clarity, alignment with discovery, research, etc. ) and give direct, "
     "actionable feedback. Be warm but specific. Quote the PRD when relevant. No letter grades — "
     "use dimension labels and short narrative instead."
 )
@@ -1980,18 +1998,19 @@ def _parse_prd_section_scores(text: str) -> tuple[list[tuple[str, int]], int]:
 
 
 def _append_prd_score_block(feedback_text: str) -> str:
-    """Parse dimension scores from PRD feedback and append a 'PRD Score: X/100' block."""
+    """Parse dimension scores from PRD feedback and append a 'PRD Score: X/1000' block."""
     scores, total_100 = _parse_prd_section_scores(feedback_text)
     if not scores:
         return feedback_text
-    lines = ["\n\n---\n\n### PRD Score: **{} / 100**\n".format(total_100)]
+    total_1000 = min(1000, max(0, total_100 * 10))
+    lines = ["\n\n---\n\n### PRD Score: **{} / 1000**\n".format(total_1000)]
     for name, score in scores:
         lines.append("- {}: {}/10\n".format(name, score))
     n = len(scores)
     if n == 5:
-        lines.append("\n(Sum of five dimensions × 100 ÷ 50 = total out of 100.)")
+        lines.append("\n(Sum of five dimensions × 100 ÷ 50, scaled to 0–1000.)")
     else:
-        lines.append("\n(Sum of four dimensions × 10 ÷ 4 = total out of 100.)")
+        lines.append("\n(Sum of four dimensions × 10 ÷ 4, scaled to 0–1000.)")
     return feedback_text + "".join(lines)
 
 

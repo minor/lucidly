@@ -10,6 +10,8 @@ from .evaluator import ChallengeEvaluator, EvaluationResult
 from .test_generator import TestGenerator, GeneratedTestSuite
 from .scoring import (
     compute_composite_score,
+    compute_function_composite_score,
+    compute_prd_composite_score,
     compute_accuracy_function,
     compute_accuracy_text,
     run_function_tests_detailed,
@@ -21,6 +23,8 @@ __all__ = [
     "TestGenerator",
     "GeneratedTestSuite",
     "compute_composite_score",
+    "compute_function_composite_score",
+    "compute_prd_composite_score",
     "compute_accuracy_function",
     "compute_accuracy_text",
     "run_function_tests_detailed",

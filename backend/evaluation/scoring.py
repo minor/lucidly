@@ -194,6 +194,144 @@ def compute_composite_score(
         "composite_score": elo_score,
     }
 
+def compute_function_composite_score(
+    accuracy: float,
+    elapsed_sec: float,
+    total_tokens: int,
+    total_turns: int,
+    total_cost: float = 0.0,
+) -> dict:
+    """
+    Composite score for function/debug challenges.
+
+    Weights: Accuracy 80%, Turns 10%, Time 5%, Cost 5%.
+    Uses the same component curves as standard scoring.
+
+    Parameters:
+    - accuracy: 0-1 (fraction of tests passed)
+    - elapsed_sec: time taken in seconds
+    - total_tokens: total tokens used (kept for API compat)
+    - total_turns: number of conversation turns (max 4)
+    - total_cost: cost in dollars
+    """
+    accuracy_pct = accuracy * 100
+
+    if accuracy_pct <= 0:
+        return {
+            "accuracy_score": 0,
+            "speed_score": 500,
+            "token_score": 500,
+            "turn_score": 500,
+            "composite_score": 0,
+        }
+
+    # --- ACCURACY --- (same power-1.5 curve)
+    accuracy_normalized = max(0, min(accuracy_pct, 100)) / 100
+    accuracy_component = math.pow(accuracy_normalized, 1.5)
+    accuracy_component = accuracy_component * 2 - 1
+
+    # --- TIME --- (same tanh curve, 160s neutral)
+    time_reference = 160
+    time_component = math.tanh((time_reference - elapsed_sec) / 45)
+
+    # --- COST --- (same log10 curve, $0.05 neutral)
+    cost_reference = 0.005
+    if total_cost > 0:
+        cost_component = -math.log10(total_cost / cost_reference)
+        cost_component = max(-1, min(1, cost_component))
+    else:
+        cost_component = 1
+
+    # --- TURNS --- (linear across 1-4)
+    num_turns_clamped = max(1, min(total_turns, 4))
+    turns_component = 1 - 2 * (num_turns_clamped - 1) / 3
+
+    # --- WEIGHTED COMBINATION ---
+    combined = (
+        0.80 * accuracy_component
+        + 0.05 * turns_component
+        + 0.10 * time_component
+        + 0.05 * cost_component
+    )
+
+    composite = 500 + combined * 500
+
+    # Low-accuracy penalty (same as standard scoring)
+    if accuracy_normalized < 0.20:
+        penalty = math.pow(accuracy_normalized / 0.20, 2)
+        composite *= penalty
+
+    composite = max(0, min(1000, round(composite)))
+
+    return {
+        "accuracy_score": round((accuracy_component + 1) / 2 * 1000),
+        "speed_score": round((time_component + 1) / 2 * 1000),
+        "token_score": round((cost_component + 1) / 2 * 1000),
+        "turn_score": round((turns_component + 1) / 2 * 1000),
+        "composite_score": composite,
+    }
+
+
+def compute_prd_composite_score(
+    prd_score_100: int,
+    elapsed_sec: float,
+    total_tokens: int,
+    total_turns: int,
+    total_cost: float = 0.0,
+) -> dict:
+    """
+    Composite score for PRD/product challenges.
+
+    Weights: PRD quality 80%, Turns 10%, Time 5%, Cost 5%.
+    All components are mapped to [-1, +1], then combined into a 0-1000 scale.
+
+    Parameters:
+    - prd_score_100: LLM-graded PRD quality score (0-100)
+    - elapsed_sec: time taken in seconds
+    - total_tokens: total tokens used (kept for API compat)
+    - total_turns: number of conversation turns (max 10 for product)
+    - total_cost: cost in dollars
+    """
+    # --- PRD QUALITY (replaces accuracy) ---
+    prd_normalized = max(0, min(prd_score_100, 100)) / 100
+    prd_component = prd_normalized * 2 - 1  # 0→-1, 50→0, 100→+1
+
+    # --- TIME --- (same curve as standard scoring)
+    time_reference = 300
+    time_component = math.tanh((time_reference - elapsed_sec) / 45)
+
+    # --- COST --- (same curve as standard scoring)
+    cost_reference = 0.005
+    if total_cost > 0:
+        cost_component = -math.log10(total_cost / cost_reference)
+        cost_component = max(-1, min(1, cost_component))
+    else:
+        cost_component = 1
+
+    # --- TURNS --- (linear across 1-10 for product challenges)
+    num_turns_clamped = max(1, min(total_turns, 10))
+    turns_component = 1 - 2 * (num_turns_clamped - 1) / 9
+
+    # --- WEIGHTED COMBINATION ---
+    combined = (
+        0.80 * prd_component
+        + 0.10 * turns_component
+        + 0.05 * time_component
+        + 0.05 * cost_component
+    )
+
+    composite = 500 + combined * 500
+    composite = max(0, min(1000, round(composite)))
+
+    return {
+        "accuracy_score": round((prd_component + 1) / 2 * 1000),
+        "speed_score": round((time_component + 1) / 2 * 1000),
+        "token_score": round((cost_component + 1) / 2 * 1000),
+        "turn_score": round((turns_component + 1) / 2 * 1000),
+        "composite_score": composite,
+    }
+
+
 async def run_function_tests(sandbox_id: str, code: str, test_suite: list[dict]) -> list[bool]:
     """
     Run test cases via a persistent Modal sandbox. Returns list of booleans.
