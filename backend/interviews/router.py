@@ -5,7 +5,7 @@ import json
 import logging
 import time
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from config import settings, MODEL_PRICING, limiter
@@ -26,7 +26,25 @@ from . import realtime
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/interviews", tags=["interviews"])
+# DISABLED: Interview mode backend endpoints.
+# To re-enable Interview mode API routes, set this to True.
+INTERVIEW_MODE_ENABLED = False
+
+
+def _require_interview_mode_enabled() -> None:
+    if INTERVIEW_MODE_ENABLED:
+        return
+    raise HTTPException(
+        status_code=410,
+        detail="Interview mode is currently disabled.",
+    )
+
+
+router = APIRouter(
+    prefix="/api/interviews",
+    tags=["interviews"],
+    dependencies=[Depends(_require_interview_mode_enabled)],
+)
 
 
 # ---------------------------------------------------------------------------

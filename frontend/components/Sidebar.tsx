@@ -24,14 +24,12 @@ import { useTheme, type ThemeMode } from "@/hooks/ThemeContext";
 
 const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
+// DISABLED: Set to true to re-enable Interview Mode in sidebar UI.
+const INTERVIEW_MODE_ENABLED = false;
+
 const MODES = [
   { id: "arena", label: "Arena Mode", icon: Zap, href: "/play" },
-  {
-    id: "interview",
-    label: "Interview Mode",
-    icon: ClipboardList,
-    href: "/interview/create",
-  },
+  { id: "interview", label: "Interview Mode", icon: ClipboardList, href: "/interview/create" },
 ] as const;
 
 const ARENA_NAV = [
@@ -41,7 +39,6 @@ const ARENA_NAV = [
   { href: "/leaderboard", label: "Leaderboard", icon: Trophy },
   { href: "/resources", label: "Resources", icon: LibraryBig },
 ];
-
 const INTERVIEW_NAV = [
   { href: "/interview/create", label: "Create Interview", icon: PlusCircle },
 ];
@@ -230,9 +227,11 @@ export function Sidebar({ onNavigate, isMobile }: SidebarProps = {}) {
 
         {/* Mode selector — same row styling as nav, visible when collapsed (icon only) */}
         {(() => {
-          const isInterviewMode = pathname.startsWith("/interview");
-          const currentMode = isInterviewMode ? MODES[1] : MODES[0];
+          const availableModes = INTERVIEW_MODE_ENABLED ? MODES : [MODES[0]];
+          const isInterviewMode = INTERVIEW_MODE_ENABLED && pathname.startsWith("/interview");
+          const currentMode = isInterviewMode ? availableModes[1] : availableModes[0];
           const CurrentIcon = currentMode.icon;
+          const canSwitchModes = availableModes.length > 1;
           return (
             <div
               ref={modeBlockRef}
@@ -240,8 +239,10 @@ export function Sidebar({ onNavigate, isMobile }: SidebarProps = {}) {
             >
               {collapsed ? (
                 <button
-                  onClick={() => setModeOpen(!modeOpen)}
-                  className="flex items-center justify-center rounded-lg py-2 min-h-[40px] w-10 mx-auto text-muted hover:text-foreground transition-colors cursor-pointer"
+                  onClick={() => canSwitchModes && setModeOpen(!modeOpen)}
+                  className={`flex items-center justify-center rounded-lg py-2 min-h-[40px] w-10 mx-auto text-muted transition-colors ${
+                    canSwitchModes ? "hover:text-foreground cursor-pointer" : "cursor-default"
+                  }`}
                   title={currentMode.label}
                 >
                   <CurrentIcon className="h-4 w-4 shrink-0" />
@@ -249,20 +250,24 @@ export function Sidebar({ onNavigate, isMobile }: SidebarProps = {}) {
               ) : (
                 <>
                   <button
-                    onClick={() => setModeOpen(!modeOpen)}
-                    className="flex items-center gap-3 rounded-lg px-3 py-2 min-h-[40px] text-sm font-medium text-muted hover:text-foreground transition-colors w-full min-w-0 cursor-pointer"
+                    onClick={() => canSwitchModes && setModeOpen(!modeOpen)}
+                    className={`flex items-center gap-3 rounded-lg px-3 py-2 min-h-[40px] text-sm font-medium text-muted transition-colors w-full min-w-0 ${
+                      canSwitchModes ? "hover:text-foreground cursor-pointer" : "cursor-default"
+                    }`}
                   >
                     <CurrentIcon className="h-4 w-4 shrink-0" />
                     <span className="whitespace-nowrap overflow-hidden min-w-0 flex-1 text-left">
                       {currentMode.label}
                     </span>
-                    <ChevronDown
-                      className={`h-3 w-3 shrink-0 transition-transform ${modeOpen ? "rotate-180" : ""}`}
-                    />
+                    {canSwitchModes && (
+                      <ChevronDown
+                        className={`h-3 w-3 shrink-0 transition-transform ${modeOpen ? "rotate-180" : ""}`}
+                      />
+                    )}
                   </button>
-                  {modeOpen && (
+                  {canSwitchModes && modeOpen && (
                     <div className="absolute left-2 right-2 top-full mt-1 rounded-lg border border-border bg-card shadow-lg z-20 overflow-hidden">
-                      {MODES.map((mode) => {
+                      {availableModes.map((mode) => {
                         const Icon = mode.icon;
                         const isActive = mode.id === currentMode.id;
                         return (
@@ -290,9 +295,9 @@ export function Sidebar({ onNavigate, isMobile }: SidebarProps = {}) {
                   )}
                 </>
               )}
-              {collapsed && modeOpen && (
+              {collapsed && canSwitchModes && modeOpen && (
                 <div className="absolute left-full top-0 ml-1 rounded-lg border border-border bg-card shadow-lg z-20 overflow-hidden min-w-[180px]">
-                  {MODES.map((mode) => {
+                  {availableModes.map((mode) => {
                     const Icon = mode.icon;
                     const isActive = mode.id === currentMode.id;
                     return (
@@ -324,7 +329,8 @@ export function Sidebar({ onNavigate, isMobile }: SidebarProps = {}) {
 
         {/* Navigation */}
         {(() => {
-          const isInterviewMode = pathname.startsWith("/interview");
+          const isInterviewMode =
+            INTERVIEW_MODE_ENABLED && pathname.startsWith("/interview");
           const navItems = isInterviewMode ? INTERVIEW_NAV : ARENA_NAV;
           return (
             <nav className="flex-1 px-2 py-3 space-y-1 min-w-0 overflow-y-auto">

@@ -3,6 +3,11 @@
 import pytest
 from httpx import AsyncClient
 
+# Keep this in sync with backend/interviews/router.py.
+# DISABLED: Interview mode endpoints are blocked (410).
+# To re-enable interview tests for rate limiting, set this to True.
+INTERVIEW_MODE_ENABLED = False
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -92,6 +97,18 @@ async def test_session_prompt_rate_limit(client: AsyncClient):
 
 
 @pytest.mark.anyio
+@pytest.mark.skipif(INTERVIEW_MODE_ENABLED, reason="Interview mode enabled; use rate-limit test instead.")
+async def test_interview_endpoint_disabled(client: AsyncClient):
+    """/api/interviews/* — disabled (410 Gone)."""
+    resp = await client.post(
+        "/api/interviews/fakeroom/sessions/fakesession/prompt",
+        json={"prompt": "test"},
+    )
+    assert resp.status_code == 410
+
+
+@pytest.mark.anyio
+@pytest.mark.skipif(not INTERVIEW_MODE_ENABLED, reason="Interview mode disabled; endpoint should return 410.")
 async def test_interview_prompt_rate_limit(client: AsyncClient):
     """/api/interviews/{room}/sessions/{session}/prompt — 20/minute"""
     await _exhaust_rate_limit(
