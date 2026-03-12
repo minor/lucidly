@@ -29,7 +29,7 @@ _SECRET = (settings.agent_internal_secret or "dev-secret").encode()
 def _make_state(user_id: str) -> str:
     nonce = secrets.token_urlsafe(16)
     payload = f"{user_id}:{nonce}"
-    sig = hmac.new(_SECRET, payload.encode(), hashlib.sha256).hexdigest()
+    sig = hmac.HMAC(_SECRET, payload.encode(), hashlib.sha256).hexdigest()
     return f"{payload}:{sig}"
 
 
@@ -44,7 +44,7 @@ def _verify_state(state: str) -> str | None:
         user_id_nonce = state[:last_colon]
         sig = state[last_colon + 1:]
         user_id = state[:second_last_colon]
-        expected = hmac.new(_SECRET, user_id_nonce.encode(), hashlib.sha256).hexdigest()
+        expected = hmac.HMAC(_SECRET, user_id_nonce.encode(), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(sig, expected):
             return None
         return user_id
@@ -54,13 +54,13 @@ def _verify_state(state: str) -> str | None:
 
 _POPUP_CLOSE_HTML = """<!DOCTYPE html>
 <html><body><script>
-  window.opener && window.opener.postMessage({{type: "oauth_success", provider: "{provider}"}}, "*");
+  window.opener && window.opener.postMessage({{type: "oauth_success", provider: "{provider}"}}, document.referrer || "*");
   window.close();
 </script></body></html>"""
 
 _POPUP_ERROR_HTML = """<!DOCTYPE html>
 <html><body><p>OAuth failed: {error}</p><script>
-  window.opener && window.opener.postMessage({{type: "oauth_error", provider: "{provider}", error: "{error}"}}, "*");
+  window.opener && window.opener.postMessage({{type: "oauth_error", provider: "{provider}", error: "{error}"}}, document.referrer || "*");
   window.close();
 </script></body></html>"""
 
