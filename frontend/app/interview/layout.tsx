@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 
 // DISABLED: Interview mode frontend routes.
 // To re-enable /interview/* pages, set this to true.
-const INTERVIEW_MODE_ENABLED = false;
+const INTERVIEW_MODE_ENABLED = true;
 
 interface InterviewLayoutProps {
   children: ReactNode;
