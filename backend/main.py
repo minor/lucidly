@@ -79,6 +79,7 @@ from session_events import (
     unsubscribe_session_events,
 )
 from interviews import interview_router
+from integrations.router import router as integrations_router
 
 
 # ---------------------------------------------------------------------------
@@ -137,6 +138,7 @@ app.add_middleware(
 
 # Mount interview router
 app.include_router(interview_router)
+app.include_router(integrations_router)
 
 # Default LLM instance (can be overridden per-request)
 llm = LLM()
