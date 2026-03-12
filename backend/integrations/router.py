@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 
-from auth import get_current_user
+from auth import get_current_user, _decode_token
 from config import settings
 from integrations import linear as linear_client
 from integrations import github as github_client
@@ -80,7 +80,15 @@ async def get_status(user_id: str = Depends(get_current_user)):
 # ---------------------------------------------------------------------------
 
 @router.get("/linear/connect")
-async def linear_connect(user_id: str = Depends(get_current_user)):
+async def linear_connect(token: str = Query(...)):
+    """Redirect to Linear OAuth. Token passed as query param since this opens in a popup (no auth header)."""
+    try:
+        payload = await _decode_token(token)
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token")
+    except HTTPException:
+        raise
     state = _make_state(user_id)
     url = linear_client.get_linear_oauth_url(state)
     return RedirectResponse(url)
@@ -104,7 +112,15 @@ async def linear_callback(code: str = Query(...), state: str = Query(...)):
 # ---------------------------------------------------------------------------
 
 @router.get("/github/connect")
-async def github_connect(user_id: str = Depends(get_current_user)):
+async def github_connect(token: str = Query(...)):
+    """Redirect to GitHub OAuth. Token passed as query param since this opens in a popup (no auth header)."""
+    try:
+        payload = await _decode_token(token)
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token")
+    except HTTPException:
+        raise
     state = _make_state(user_id)
     url = github_client.get_github_oauth_url(state)
     return RedirectResponse(url)

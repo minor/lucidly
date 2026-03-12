@@ -1,12 +1,14 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useAuth0 } from "@auth0/auth0-react";
 import { getIntegrationStatus } from "@/lib/api";
 import type { IntegrationStatus } from "@/lib/types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export function useIntegrationStatus() {
+  const { getAccessTokenSilently } = useAuth0();
   const [status, setStatus] = useState<IntegrationStatus>({ linear: false, github: false });
   const [loading, setLoading] = useState(true);
 
@@ -28,7 +30,8 @@ export function useIntegrationStatus() {
   const connectProvider = useCallback(
     (provider: "linear" | "github"): Promise<void> => {
       return new Promise((resolve, reject) => {
-        const url = `${API_BASE}/api/integrations/${provider}/connect`;
+        getAccessTokenSilently().then((token) => {
+        const url = `${API_BASE}/api/integrations/${provider}/connect?token=${encodeURIComponent(token)}`;
         const popup = window.open(url, `connect_${provider}`, "width=600,height=700");
 
         if (!popup) {
@@ -55,9 +58,10 @@ export function useIntegrationStatus() {
             refresh().then(resolve).catch(reject);
           }
         }, 500);
+        }).catch(reject);
       });
     },
-    [refresh]
+    [refresh, getAccessTokenSilently]
   );
 
   return { status, loading, refresh, connectProvider };
