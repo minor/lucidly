@@ -53,7 +53,7 @@ async def test_get_pr_changed_files():
         assert files[0]["filename"] == "src/pagination.py"
 
 
-def test_find_test_file_content_maps_correctly():
+def test_candidate_test_paths_maps_correctly():
     changed = [
         {"filename": "src/pagination.py"},
         {"filename": "utils/helpers.py"},

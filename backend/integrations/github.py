@@ -2,6 +2,7 @@
 
 import re
 import urllib.parse
+from pathlib import Path
 import httpx
 from config import settings
 
@@ -36,7 +37,10 @@ async def exchange_github_code(code: str) -> str:
             headers={"Accept": "application/json"},
         )
         resp.raise_for_status()
-        return resp.json()["access_token"]
+        data = resp.json()
+        if "error" in data:
+            raise ValueError(f"GitHub OAuth error: {data.get('error_description', data['error'])}")
+        return data["access_token"]
 
 
 def _parse_pr_url(pr_url: str) -> tuple[str, str, int] | None:
@@ -64,7 +68,7 @@ def _candidate_test_paths(changed_files: list[dict]) -> list[str]:
     for f in changed_files:
         name = f["filename"]
         basename = name.split("/")[-1]
-        stem = basename.replace(".py", "").replace(".ts", "").replace(".js", "")
+        stem = Path(basename).stem
         candidates.append(f"tests/test_{stem}.py")
         candidates.append(f"tests/{stem}_test.py")
         candidates.append(f"__tests__/{stem}.test.ts")
