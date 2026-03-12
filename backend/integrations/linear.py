@@ -1,7 +1,7 @@
 """Linear OAuth client and API helpers."""
 
 import httpx
-import secrets
+import urllib.parse
 from config import settings
 
 LINEAR_AUTHORIZE_URL = "https://linear.app/oauth/authorize"
@@ -11,13 +11,13 @@ LINEAR_API_URL = "https://api.linear.app/graphql"
 
 def get_linear_oauth_url(state: str) -> str:
     redirect_uri = f"{settings.integration_redirect_base_url}/api/integrations/linear/callback"
-    params = (
-        f"client_id={settings.linear_client_id}"
-        f"&redirect_uri={redirect_uri}"
-        f"&response_type=code"
-        f"&scope=read"
-        f"&state={state}"
-    )
+    params = urllib.parse.urlencode({
+        "client_id": settings.linear_client_id,
+        "redirect_uri": redirect_uri,
+        "response_type": "code",
+        "scope": "read",
+        "state": state,
+    })
     return f"{LINEAR_AUTHORIZE_URL}?{params}"
 
 
@@ -96,7 +96,7 @@ async def get_linear_issue(token: str, issue_id: str) -> dict:
         return resp.json()["data"]["issue"]
 
 
-def get_github_pr_numbers_from_issue(issue: dict) -> list[str]:
+def get_github_pr_urls_from_issue(issue: dict) -> list[str]:
     """Extract GitHub PR URLs from Linear issue attachments."""
     pr_urls = []
     attachments = issue.get("attachments", {}).get("nodes", [])
