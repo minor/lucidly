@@ -12,6 +12,9 @@ import type {
   InterviewConfig,
   InterviewSession,
   InterviewReport,
+  IntegrationStatus,
+  LinearIssue,
+  GeneratedChallenge,
 } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -991,4 +994,24 @@ export async function setUsername(auth0Id: string, username: string): Promise<st
   }
   const data = await res.json();
   return data.username;
+}
+
+// ---------------------------------------------------------------------------
+// Integrations (Linear + GitHub)
+// ---------------------------------------------------------------------------
+
+export async function getIntegrationStatus(): Promise<IntegrationStatus> {
+  return fetchJSON<IntegrationStatus>("/api/integrations/status");
+}
+
+export async function searchLinearIssues(query: string): Promise<LinearIssue[]> {
+  const q = encodeURIComponent(query);
+  return fetchJSON<LinearIssue[]>(`/api/integrations/linear/issues?query=${q}`);
+}
+
+export async function generateChallengeFromIssue(issueId: string): Promise<GeneratedChallenge> {
+  return fetchJSON<GeneratedChallenge>("/api/integrations/generate-challenge", {
+    method: "POST",
+    body: JSON.stringify({ issue_id: issueId }),
+  });
 }

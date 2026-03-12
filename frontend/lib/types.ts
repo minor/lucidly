@@ -230,3 +230,29 @@ export interface InterviewReport {
   room: InterviewRoom;
   sessions: InterviewSessionReport[];
 }
+
+// ---------------------------------------------------------------------------
+// Integrations
+// ---------------------------------------------------------------------------
+
+export interface IntegrationStatus {
+  linear: boolean;
+  github: boolean;
+}
+
+export interface LinearIssue {
+  id: string;
+  identifier: string;
+  title: string;
+  description: string | null;
+  branchName: string | null;
+  url: string;
+}
+
+export interface GeneratedChallenge {
+  title: string;
+  description: string;
+  starter_code: string;
+  test_cases: Array<{ input: string; expected_output: string }>;
+  source: "existing_tests" | "llm_generated";
+}
