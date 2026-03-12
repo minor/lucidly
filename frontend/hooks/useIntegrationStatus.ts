@@ -31,6 +31,11 @@ export function useIntegrationStatus() {
         const url = `${API_BASE}/api/integrations/${provider}/connect`;
         const popup = window.open(url, `connect_${provider}`, "width=600,height=700");
 
+        if (!popup) {
+          reject(new Error("Popup was blocked. Please allow popups for this site."));
+          return;
+        }
+
         const handler = (event: MessageEvent) => {
           if (event.data?.type === "oauth_success" && event.data?.provider === provider) {
             window.removeEventListener("message", handler);
