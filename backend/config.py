@@ -67,6 +67,17 @@ class Settings(BaseSettings):
     supabase_url: str = ""
     supabase_service_key: str = ""
 
+    # Linear OAuth
+    linear_client_id: str = ""
+    linear_client_secret: str = ""
+
+    # GitHub OAuth
+    github_oauth_client_id: str = ""
+    github_oauth_client_secret: str = ""
+
+    # Base URL for OAuth redirect URIs (e.g. https://app.lucidly.com or http://localhost:8000)
+    integration_redirect_base_url: str = "http://localhost:8000"
+
     # Browserbase / Stagehand (optional: for agent view_reference_page tool)
     browserbase_api_key: str = ""
     browserbase_project_id: str = ""
