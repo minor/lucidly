@@ -19,6 +19,8 @@ import {
   addInterviewChallenge,
 } from "@/lib/api";
 import type { InterviewConfig } from "@/lib/types";
+import { LinearImportModal } from "@/components/interview/LinearImportModal";
+import type { GeneratedChallenge } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
 // Types for local form state
@@ -90,6 +92,7 @@ export default function CreateInterviewPage() {
   const [copied, setCopied] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showLinearModal, setShowLinearModal] = useState(false);
 
   // ---- Challenge helpers ----
 
@@ -143,6 +146,21 @@ export default function CreateInterviewPage() {
       prev >= challenges.length - 1 ? Math.max(0, prev - 1) : prev
     );
   };
+
+  const handleLinearImport = useCallback(
+    (generated: GeneratedChallenge) => {
+      updateChallenge(activeChallengeIdx, {
+        title: generated.title,
+        description: generated.description,
+        starter_code: generated.starter_code,
+        test_cases: generated.test_cases.length > 0
+          ? generated.test_cases
+          : [{ ...EMPTY_TEST_CASE }],
+        category: "coding",
+      });
+    },
+    [activeChallengeIdx, updateChallenge]
+  );
 
   // ---- Submission ----
 
@@ -374,14 +392,23 @@ export default function CreateInterviewPage() {
           {/* ================= STEP 2 ================= */}
           {step === 2 && (
             <div className="space-y-6">
-              <div>
-                <h2 className="text-lg font-semibold mb-1">
-                  Add Challenges
-                </h2>
-                <p className="text-sm text-muted">
-                  Create the questions candidates will solve. For coding
-                  questions, add test cases.
-                </p>
+              <div className="flex items-start justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold mb-1">Add Challenges</h2>
+                  <p className="text-sm text-muted">
+                    Create the questions candidates will solve. For coding
+                    questions, add test cases.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowLinearModal(true)}
+                  className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs text-muted hover:text-foreground hover:border-accent transition-colors cursor-pointer shrink-0"
+                >
+                  <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M3.5 19.5 15 8l-1.5-1.5L2 18zm16.5-12L11.5 16l1.5 1.5L21 9zM12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z"/>
+                  </svg>
+                  Import from Linear
+                </button>
               </div>
 
               {/* Challenge tabs */}
@@ -680,6 +707,12 @@ export default function CreateInterviewPage() {
           )}
         </div>
       </div>
+      {showLinearModal && (
+        <LinearImportModal
+          onImport={handleLinearImport}
+          onClose={() => setShowLinearModal(false)}
+        />
+      )}
     </div>
   );
 }
