@@ -28,8 +28,9 @@ async def test_exchange_code_returns_token():
         mock_client.post = AsyncMock(return_value=mock_response)
         mock_client_cls.return_value = mock_client
 
-        token = await exchange_linear_code("code123")
-        assert token == "tok_test"
+        access_token, refresh_token = await exchange_linear_code("code123")
+        assert access_token == "tok_test"
+        assert refresh_token is None
 
 
 @pytest.mark.asyncio
