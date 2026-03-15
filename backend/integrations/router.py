@@ -194,9 +194,14 @@ async def generate_challenge(
     issue = await _call_linear_with_refresh(user_id, linear_client.get_linear_issue, req.issue_id)
 
     changed_files: list[dict] = []
-    test_file_contents: list[str] = []
+    test_files: list[dict] = []
     ci_annotations: list[dict] = []
     base_source_files: list[dict] = []
+    pr_owner: str | None = None
+    pr_repo: str | None = None
+    base_sha: str | None = None
+    head_sha: str | None = None
+    is_merged: bool = False
 
     if github_token:
         pr_urls = linear_client.get_github_pr_urls_from_issue(issue)
@@ -206,13 +211,19 @@ async def generate_challenge(
             pr_info = await github_client.get_pr_info(github_token, pr_url)
             if pr_info:
                 changed_files = pr_info["changed_files"]
-                test_file_contents = pr_info["test_file_contents"]
+                test_files = pr_info["test_files"]
                 ci_annotations = pr_info["ci_annotations"]
                 base_source_files = pr_info["base_source_files"]
+                base_sha = pr_info["base_sha"]
+                head_sha = pr_info["head_sha"]
+                is_merged = pr_info["is_merged"]
+                parsed = github_client._parse_pr_url(pr_url)
+                if parsed:
+                    pr_owner, pr_repo, _ = parsed
                 print(
-                    f"[generate-challenge] is_merged={pr_info['is_merged']} "
+                    f"[generate-challenge] is_merged={is_merged} "
                     f"changed_files={[f['filename'] for f in changed_files]} "
-                    f"test_files={len(test_file_contents)} "
+                    f"test_files={len(test_files)} "
                     f"ci_annotations={len(ci_annotations)} "
                     f"base_source={len(base_source_files)}"
                 )
@@ -220,5 +231,17 @@ async def generate_challenge(
     else:
         print("[generate-challenge] No GitHub token — skipping PR fetch")
 
-    result = await build_challenge_from_issue(issue, changed_files, test_file_contents, ci_annotations, base_source_files)
+    result = await build_challenge_from_issue(
+        issue,
+        changed_files,
+        test_files,
+        ci_annotations,
+        base_source_files,
+        user_id=user_id,
+        pr_owner=pr_owner,
+        pr_repo=pr_repo,
+        base_sha=base_sha,
+        head_sha=head_sha,
+        is_merged=is_merged,
+    )
     return result

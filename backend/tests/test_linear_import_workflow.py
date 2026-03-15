@@ -1,11 +1,14 @@
 """
 End-to-end workflow tests for the Linear → GitHub → generate-challenge pipeline.
 
-Covers four scenarios:
+Covers scenarios:
   1. Happy path  — Linear issue with GitHub PR, test file found → parse existing tests
   2. Diff fallback — PR found, but no test file → LLM generates from diff
   3. No GitHub    — user hasn't connected GitHub → LLM generates from issue only
   4. No PR link   — Linear issue has no GitHub attachment → LLM generates from issue only
+  5. Linear not connected → 400
+  6. Merged PR → repo_context populated in response
+  7. Merged PR but extraction falls back → _extract_stubs, repo_context still set
 """
 import pytest
 from unittest.mock import patch, AsyncMock, MagicMock
@@ -97,9 +100,10 @@ async def test_generate_challenge_uses_existing_tests(auth_client):
         mock_issue.return_value = LINEAR_ISSUE
         mock_pr.return_value = {
             "changed_files": CHANGED_FILES,
-            "test_file_contents": [EXISTING_TEST_FILE],
+            "test_files": [{"path": "tests/test_pagination.py", "content": EXISTING_TEST_FILE}],
             "ci_annotations": [],
             "base_source_files": [],
+            "base_sha": "base456",
             "head_sha": "abc123",
             "is_merged": False,
         }
@@ -143,9 +147,10 @@ async def test_generate_challenge_fallback_to_diff(auth_client):
         mock_issue.return_value = LINEAR_ISSUE
         mock_pr.return_value = {
             "changed_files": CHANGED_FILES,
-            "test_file_contents": [],
+            "test_files": [],
             "ci_annotations": [],
             "base_source_files": [],
+            "base_sha": "base456",
             "head_sha": "abc123",
             "is_merged": False,
         }
@@ -242,3 +247,112 @@ async def test_generate_challenge_linear_not_connected(auth_client):
         )
     assert resp.status_code == 400
     assert "linear not connected" in resp.json()["detail"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Scenario 6: Merged PR → repo_context populated in response
+# ---------------------------------------------------------------------------
+
+BUGGY_SOURCE = """\
+def paginate(items, page, size):
+    return items[(page-1)*size : page*size + 1]
+"""
+
+
+@pytest.mark.asyncio
+async def test_generate_challenge_merged_pr_repo_context(auth_client):
+    """Merged PR: repo_context is set in response with challenge_test_ids."""
+    pr_fixed = ["tests/test_pagination.py::test_paginate_last_page"]
+
+    with (
+        patch("integrations.store.get_integration") as mock_store,
+        patch("integrations.generate.get_integration", return_value="ghp_tok"),
+        patch("integrations.linear.get_linear_issue", new_callable=AsyncMock) as mock_issue,
+        patch("integrations.github.get_pr_info", new_callable=AsyncMock) as mock_pr,
+        patch("integrations.generate.LLM") as MockLLM,
+        patch("integrations.generate.discover_pr_fixed_tests", new_callable=AsyncMock) as mock_discover,
+    ):
+        mock_store.side_effect = lambda uid, provider: (
+            "lin_tok" if provider == "linear" else "ghp_tok"
+        )
+        mock_issue.return_value = LINEAR_ISSUE
+        mock_pr.return_value = {
+            "changed_files": CHANGED_FILES,
+            "test_files": [{"path": "tests/test_pagination.py", "content": EXISTING_TEST_FILE}],
+            "ci_annotations": [],
+            "base_source_files": [{"filename": "src/pagination.py", "content": BUGGY_SOURCE}],
+            "base_sha": "base456",
+            "head_sha": "abc123",
+            "is_merged": True,
+        }
+        mock_discover.return_value = pr_fixed
+
+        instance = MockLLM.return_value
+        instance.generate = AsyncMock(return_value=_llm_response(PARSED_TEST_CASES_JSON))
+
+        resp = await auth_client.post(
+            "/api/integrations/generate-challenge",
+            json={"issue_id": "ISSUE-123"},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["repo_context"]["owner"] == "myorg"
+    assert data["repo_context"]["repo"] == "myrepo"
+    assert data["repo_context"]["base_sha"] == "base456"
+    assert data["repo_context"]["challenge_test_ids"] == pr_fixed
+    assert "test_files" in data
+    assert data["test_files"][0]["path"] == "tests/test_pagination.py"
+    # Starter code should contain the extracted function (paginate)
+    assert "def paginate" in data["starter_code"]
+
+
+# ---------------------------------------------------------------------------
+# Scenario 7: Merged PR but extraction falls back → _extract_stubs, repo_context still set
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_generate_challenge_merged_pr_fallback_repo_context_still_set(auth_client):
+    """When function extraction yields nothing, repo_context is still returned."""
+    # discovery returns a test ID whose name does not match any function in the source
+    pr_fixed = ["tests/test_pagination.py::test_setup_teardown"]  # "setup_teardown" not in source
+
+    with (
+        patch("integrations.store.get_integration") as mock_store,
+        patch("integrations.generate.get_integration", return_value="ghp_tok"),
+        patch("integrations.linear.get_linear_issue", new_callable=AsyncMock) as mock_issue,
+        patch("integrations.github.get_pr_info", new_callable=AsyncMock) as mock_pr,
+        patch("integrations.generate.LLM") as MockLLM,
+        patch("integrations.generate.discover_pr_fixed_tests", new_callable=AsyncMock) as mock_discover,
+    ):
+        mock_store.side_effect = lambda uid, provider: (
+            "lin_tok" if provider == "linear" else "ghp_tok"
+        )
+        mock_issue.return_value = LINEAR_ISSUE
+        mock_pr.return_value = {
+            "changed_files": CHANGED_FILES,
+            "test_files": [{"path": "tests/test_pagination.py", "content": EXISTING_TEST_FILE}],
+            "ci_annotations": [],
+            "base_source_files": [{"filename": "src/pagination.py", "content": BUGGY_SOURCE}],
+            "base_sha": "base456",
+            "head_sha": "abc123",
+            "is_merged": True,
+        }
+        mock_discover.return_value = pr_fixed
+
+        instance = MockLLM.return_value
+        instance.generate = AsyncMock(return_value=_llm_response(PARSED_TEST_CASES_JSON))
+
+        resp = await auth_client.post(
+            "/api/integrations/generate-challenge",
+            json={"issue_id": "ISSUE-123"},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    # repo_context is still set even on fallback
+    assert "repo_context" in data
+    assert data["repo_context"]["challenge_test_ids"] == pr_fixed
+    # starter_code came from _extract_stubs (contains "def paginate" from the diff patch)
+    assert "def paginate" in data["starter_code"]
