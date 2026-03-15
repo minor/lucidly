@@ -1,6 +1,6 @@
-"""In-memory challenge store with 3 challenges."""
+"""In-memory challenge store with challenges loaded from JSON."""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class TestCase(BaseModel):
@@ -14,6 +14,14 @@ class ProductPart(BaseModel):
     description: str
 
 
+class RepoContext(BaseModel):
+    owner: str
+    repo: str
+    base_sha: str
+    file_path: str               # repo-relative path of the selected source file
+    challenge_test_ids: list[str]  # PR-fixed test node IDs; empty = run full suite
+
+
 class Challenge(BaseModel):
     id: str
     title: str
@@ -23,12 +31,15 @@ class Challenge(BaseModel):
     target_code: str | None = None
     test_suite: list[TestCase] | None = None
     starter_code: str | None = None
-    image_url: str | None = None  # URL or path to challenge visual (image/gif)
-    embed_url: str | None = None  # URL to embed as live page (e.g. for animated UIs)
-    html_url: str | None = None  # Path to HTML file to render as reference
-    # Product-type challenges: multi-part flow (discovery → PRD) with roleplay agent
+    image_url: str | None = None
+    embed_url: str | None = None
+    html_url: str | None = None
     product_parts: list[ProductPart] | None = None
-    agent_context: str | None = None  # System prompt for roleplay agent (e.g. CRO)
+    agent_context: str | None = None
+    # GitHub repo-context fields (populated for merged-PR challenges)
+    user_id: str | None = None
+    repo_context: RepoContext | None = None
+    test_files: list[dict] = Field(default_factory=list)  # [{path, content}] at HEAD SHA
 
 
 # ---------------------------------------------------------------------------
