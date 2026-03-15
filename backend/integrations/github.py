@@ -78,10 +78,10 @@ async def get_file_content(token: str, owner: str, repo: str, path: str, ref: st
         return resp.text
 
 
-async def get_all_test_files(token: str, owner: str, repo: str, ref: str = "HEAD") -> list[str]:
-    """Fetch all test files from common test directories in the repo."""
+async def get_all_test_files(token: str, owner: str, repo: str, ref: str = "HEAD") -> list[dict]:
+    """Fetch all test files from common test directories. Returns [{path, content}]."""
     test_dirs = ["tests", "__tests__", "test"]
-    all_contents: list[str] = []
+    all_files: list[dict] = []
 
     async with httpx.AsyncClient() as client:
         for test_dir in test_dirs:
@@ -96,16 +96,20 @@ async def get_all_test_files(token: str, owner: str, repo: str, ref: str = "HEAD
             entries = resp.json()
             if not isinstance(entries, list):
                 continue
-            test_files = [
+            test_paths = [
                 e["path"] for e in entries
                 if e["type"] == "file" and _is_test_file(e["path"])
             ]
-            results = await asyncio.gather(
-                *[get_file_content(token, owner, repo, path, ref=ref) for path in test_files]
+            contents = await asyncio.gather(
+                *[get_file_content(token, owner, repo, path, ref=ref) for path in test_paths]
             )
-            all_contents.extend(c for c in results if c)
+            all_files.extend(
+                {"path": path, "content": content}
+                for path, content in zip(test_paths, contents)
+                if content
+            )
 
-    return all_contents
+    return all_files
 
 
 async def _get_check_run_annotations(token: str, owner: str, repo: str, check_run_id: int) -> list[dict]:
@@ -143,9 +147,10 @@ async def get_ci_test_annotations(token: str, owner: str, repo: str, sha: str) -
 
 class PRInfo(TypedDict):
     changed_files: list[dict]
-    test_file_contents: list[str]
+    test_files: list[dict]       # renamed from test_file_contents; [{path, content}]
     ci_annotations: list[dict]
     base_source_files: list[dict]  # [{filename, content}] at base SHA — merged PRs only
+    base_sha: str                  # NEW
     head_sha: str
     is_merged: bool
 
@@ -201,7 +206,7 @@ async def get_pr_info(token: str, pr_url: str) -> PRInfo | None:
             *[get_file_content(token, owner, repo, p, ref=head_sha) for p in test_filenames],
             *[get_file_content(token, owner, repo, p, ref=base_sha) for p in source_filenames],
         )
-        test_contents = await get_all_test_files(token, owner, repo, ref=head_sha)
+        test_files = await get_all_test_files(token, owner, repo, ref=head_sha)
         base_source_files = [
             {"filename": name, "content": content}
             for name, content in zip(source_filenames, all_results[n_tests:])
@@ -209,20 +214,22 @@ async def get_pr_info(token: str, pr_url: str) -> PRInfo | None:
         ]
         return PRInfo(
             changed_files=changed_files,
-            test_file_contents=test_contents,
+            test_files=test_files,
             ci_annotations=[],
             base_source_files=base_source_files,
+            base_sha=base_sha,
             head_sha=head_sha,
             is_merged=True,
         )
     else:
         ci_annotations = await get_ci_test_annotations(token, owner, repo, head_sha)
-        test_contents = await get_all_test_files(token, owner, repo, ref=head_sha)
+        test_files = await get_all_test_files(token, owner, repo, ref=head_sha)
         return PRInfo(
             changed_files=changed_files,
-            test_file_contents=test_contents,
+            test_files=test_files,
             ci_annotations=ci_annotations,
             base_source_files=[],
+            base_sha=base_sha,
             head_sha=head_sha,
             is_merged=False,
         )

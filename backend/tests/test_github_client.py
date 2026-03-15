@@ -59,3 +59,34 @@ def test_is_test_file():
     assert _is_test_file("__tests__/pagination.test.ts")
     assert not _is_test_file("src/pagination.py")
     assert not _is_test_file(".github/workflows/test.yaml")
+
+
+@pytest.mark.asyncio
+async def test_get_all_test_files_returns_path_content_dicts():
+    """get_all_test_files now returns [{path, content}] dicts."""
+    dir_resp = MagicMock()
+    dir_resp.status_code = 200
+    dir_resp.raise_for_status = MagicMock()
+    dir_resp.json.return_value = [
+        {"type": "file", "path": "tests/test_foo.py"},
+    ]
+    file_resp = MagicMock()
+    file_resp.status_code = 200
+    file_resp.raise_for_status = MagicMock()
+    file_resp.text = "def test_foo(): assert True"
+
+    with patch("httpx.AsyncClient") as mock_cls:
+        mc = AsyncMock()
+        mc.__aenter__ = AsyncMock(return_value=mc)
+        mc.__aexit__ = AsyncMock(return_value=False)
+        mc.get = AsyncMock(side_effect=[dir_resp, MagicMock(status_code=404, raise_for_status=MagicMock()), MagicMock(status_code=404, raise_for_status=MagicMock())])
+        mock_cls.return_value = mc
+
+        with patch("integrations.github.get_file_content", new_callable=AsyncMock) as mock_fc:
+            mock_fc.return_value = "def test_foo(): assert True"
+            result = await get_all_test_files("ghp_test", "owner", "repo")
+
+    assert isinstance(result, list)
+    assert len(result) == 1
+    assert result[0]["path"] == "tests/test_foo.py"
+    assert result[0]["content"] == "def test_foo(): assert True"
