@@ -14,6 +14,9 @@ if str(Path(__file__).parent.parent) not in sys.path:
 from challenges import Challenge, TestCase
 from modal_execution import ModalExecutor, ExecutionType
 from .test_generator import GeneratedTestSuite
+from integrations.github_runner import run_in_repo_context
+from integrations import store
+from llm import run_function_tests_local
 
 
 @dataclass
@@ -201,15 +204,16 @@ class ChallengeEvaluator:
         self,
         challenge: Challenge,
         generated_code: str,
-        test_suite: GeneratedTestSuite | None,
+        generated_test_suite: GeneratedTestSuite | None = None,
     ) -> EvaluationResult:
         """
-        Evaluate function challenges by running test cases in-process.
-        Prioritizes challenge.test_suite if available, otherwise uses generated test suite.
+        Evaluate function challenges. Routes to Modal repo-context execution when
+        challenge.repo_context is present; otherwise uses run_function_tests_local.
         """
-        from llm import run_function_tests_local
-        
-        # Prioritize challenge's test_suite if available
+        if challenge.repo_context:
+            return await self._evaluate_with_repo_context(challenge, generated_code)
+
+        # Existing local execution path (unchanged)
         if challenge.test_suite:
             test_dicts = [t.model_dump() for t in challenge.test_suite]
             accuracy, test_results = run_function_tests_local(generated_code, test_dicts)
@@ -219,10 +223,9 @@ class ChallengeEvaluator:
                 details={"test_count": len(test_results), "source": "challenge_test_suite"},
                 execution_output=None,
             )
-        
-        # Fall back to generated test suite
-        if test_suite and test_suite.test_cases:
-            test_dicts = [t.model_dump() for t in test_suite.test_cases]
+
+        if generated_test_suite and generated_test_suite.test_cases:
+            test_dicts = [t.model_dump() for t in generated_test_suite.test_cases]
             accuracy, test_results = run_function_tests_local(generated_code, test_dicts)
             return EvaluationResult(
                 accuracy=accuracy,
@@ -230,13 +233,45 @@ class ChallengeEvaluator:
                 details={"test_count": len(test_results), "source": "generated_test_suite"},
                 execution_output=None,
             )
-        
-        # No test cases available
+
         return EvaluationResult(
             accuracy=0.0,
             test_results=None,
             details={"error": "No test cases available"},
             execution_output=None,
+        )
+
+    async def _evaluate_with_repo_context(
+        self,
+        challenge: Challenge,
+        generated_code: str,
+    ) -> EvaluationResult:
+        """Evaluate by injecting code into repo at base SHA and running PR-fixed tests on Modal."""
+        github_token = store.get_integration(challenge.user_id, "github") if challenge.user_id else None
+        if not github_token:
+            return EvaluationResult(
+                accuracy=0.0,
+                test_results=None,
+                details={"error": "github_token_missing"},
+            )
+
+        results, pytest_stdout = await run_in_repo_context(
+            github_token,
+            challenge.repo_context,
+            generated_code,
+            challenge.test_files,
+        )
+
+        booleans = [r["passed"] for r in results]
+        return EvaluationResult(
+            accuracy=sum(booleans) / len(booleans) if booleans else 0.0,
+            test_results=booleans,
+            details={
+                "source": "repo_context",
+                "test_count": len(booleans),
+                "test_details": results,
+            },
+            execution_output=pytest_stdout[:2000],
         )
 
     async def _evaluate_api(
