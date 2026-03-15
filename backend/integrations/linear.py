@@ -21,8 +21,8 @@ def get_linear_oauth_url(state: str) -> str:
     return f"{LINEAR_AUTHORIZE_URL}?{params}"
 
 
-async def exchange_linear_code(code: str) -> str:
-    """Exchange authorization code for access token. Returns the access token."""
+async def exchange_linear_code(code: str) -> tuple[str, str | None]:
+    """Exchange authorization code for (access_token, refresh_token)."""
     redirect_uri = f"{settings.integration_redirect_base_url}/api/integrations/linear/callback"
     async with httpx.AsyncClient() as client:
         resp = await client.post(
@@ -36,7 +36,25 @@ async def exchange_linear_code(code: str) -> str:
             },
         )
         resp.raise_for_status()
-        return resp.json()["access_token"]
+        data = resp.json()
+        return data["access_token"], data.get("refresh_token")
+
+
+async def refresh_linear_token(refresh_token: str) -> tuple[str, str | None]:
+    """Exchange a refresh token for a new (access_token, refresh_token)."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            LINEAR_TOKEN_URL,
+            data={
+                "client_id": settings.linear_client_id,
+                "client_secret": settings.linear_client_secret,
+                "refresh_token": refresh_token,
+                "grant_type": "refresh_token",
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data["access_token"], data.get("refresh_token")
 
 
 async def get_linear_issues(token: str, query: str = "") -> list[dict]:
@@ -97,11 +115,22 @@ async def get_linear_issue(token: str, issue_id: str) -> dict:
 
 
 def get_github_pr_urls_from_issue(issue: dict) -> list[str]:
-    """Extract GitHub PR URLs from Linear issue attachments."""
+    """Extract GitHub PR URLs from Linear issue attachments and description text."""
+    import re
     pr_urls = []
+
+    # Attachments (set by Linear-GitHub integration auto-linking)
     attachments = issue.get("attachments", {}).get("nodes", [])
     for att in attachments:
-        if att.get("sourceType") == "github_pull_request" or "github.com" in att.get("url", ""):
-            if "/pull/" in att.get("url", ""):
-                pr_urls.append(att["url"])
+        url = att.get("url", "")
+        if "/pull/" in url and "github.com" in url:
+            pr_urls.append(url)
+
+    # Fallback: scan description text for GitHub PR URLs (handles bare URLs and [text](<url>) format)
+    description = issue.get("description") or ""
+    for match in re.finditer(r"https://github\.com/[^\s\)>\]]+/pull/\d+", description):
+        url = match.group(0).rstrip(".,;")
+        if url not in pr_urls:
+            pr_urls.append(url)
+
     return pr_urls

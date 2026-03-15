@@ -147,11 +147,20 @@ export default function CreateInterviewPage() {
     );
   };
 
+  const stripGitHubUrls = (text: string) =>
+    text
+      // Linear format: [text](<github-url>) or standard [text](github-url) → text
+      .replace(/\[([^\]]*)\]\(<?https?:\/\/github\.com[^)>]*>?\)/g, "$1")
+      // bare github URLs
+      .replace(/https?:\/\/github\.com\/\S+/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+
   const handleLinearImport = useCallback(
     (generated: GeneratedChallenge) => {
       updateChallenge(activeChallengeIdx, {
-        title: generated.title,
-        description: generated.description,
+        title: stripGitHubUrls(generated.title),
+        description: stripGitHubUrls(generated.description),
         starter_code: generated.starter_code,
         test_cases: generated.test_cases.length > 0
           ? generated.test_cases
@@ -430,15 +439,23 @@ export default function CreateInterviewPage() {
                       </span>
                     )}
                     {challenges.length > 1 && (
-                      <button
+                      <span
+                        role="button"
+                        tabIndex={0}
                         onClick={(e) => {
                           e.stopPropagation();
                           removeChallenge(i);
                         }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.stopPropagation();
+                            removeChallenge(i);
+                          }
+                        }}
                         className="ml-1 text-muted hover:text-red-400 cursor-pointer"
                       >
                         <Trash2 className="h-3 w-3" />
-                      </button>
+                      </span>
                     )}
                   </button>
                 ))}

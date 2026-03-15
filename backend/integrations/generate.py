@@ -45,10 +45,26 @@ async def parse_test_cases_from_file(test_file_content: str) -> list[dict]:
         return []
 
 
-async def generate_test_cases_from_diff(title: str, description: str, diff_text: str) -> list[dict]:
-    """Generate test cases from issue description and PR diff."""
+def _format_ci_failures(annotations: list[dict]) -> str:
+    """Format CI failure annotations into a readable string for the LLM prompt."""
+    if not annotations:
+        return ""
+    lines = ["CI test failures:"]
+    for a in annotations:
+        title = a.get("title") or a.get("path", "unknown test")
+        message = a.get("message", "")
+        lines.append(f"- {title}: {message}" if message else f"- {title}")
+    return "\n".join(lines)
+
+
+async def generate_test_cases_from_diff(
+    title: str, description: str, diff_text: str, ci_failures: str = ""
+) -> list[dict]:
+    """Generate test cases from issue description, PR diff, and optional CI failure info."""
     llm = LLM(model=settings.default_model, system_prompt=_GENERATE_SYSTEM)
     prompt = f"Issue: {title}\n\nDescription:\n{description}\n\nCode diff:\n```diff\n{diff_text}\n```"
+    if ci_failures:
+        prompt += f"\n\n{ci_failures}"
     response = await llm.generate(prompt)
     try:
         return _extract_json(response.response_text)
@@ -61,10 +77,13 @@ async def build_challenge_from_issue(
     issue: dict,
     changed_files: list[dict],
     test_file_contents: list[str],
+    ci_annotations: list[dict] | None = None,
+    base_source_files: list[dict] | None = None,
 ) -> dict:
     """
     Given a Linear issue + GitHub PR data, return a populated challenge dict.
     Tries to use existing tests first; falls back to LLM generation.
+    CI annotations (from check run failures) are included in the LLM prompt when available.
     """
     title = issue.get("title", "")
     description = issue.get("description", "") or ""
@@ -83,9 +102,15 @@ async def build_challenge_from_issue(
             f"--- {f['filename']}\n{f.get('patch', '')}"
             for f in changed_files
         )
-        test_cases = await generate_test_cases_from_diff(title, description, diff_text)
+        failures_text = _format_ci_failures(ci_annotations or [])
+        test_cases = await generate_test_cases_from_diff(title, description, diff_text, failures_text)
 
-    starter_code = _extract_stubs(changed_files)
+    # For merged PRs: use the actual buggy source files as starter code.
+    # For open PRs: extract function stubs from the diff.
+    if base_source_files:
+        starter_code = "\n\n".join(f["content"] for f in base_source_files)
+    else:
+        starter_code = _extract_stubs(changed_files)
 
     return {
         "title": title,

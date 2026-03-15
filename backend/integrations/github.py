@@ -1,8 +1,9 @@
 """GitHub OAuth client and REST API helpers."""
 
+import asyncio
 import re
 import urllib.parse
-from pathlib import Path
+from typing import TypedDict
 import httpx
 from config import settings
 
@@ -62,21 +63,6 @@ async def get_pr_changed_files(token: str, owner: str, repo: str, pr_number: int
         return resp.json()
 
 
-def _candidate_test_paths(changed_files: list[dict]) -> list[str]:
-    """Generate candidate test file paths for a list of changed source files."""
-    candidates = []
-    for f in changed_files:
-        name = f["filename"]
-        basename = name.split("/")[-1]
-        stem = Path(basename).stem
-        candidates.append(f"tests/test_{stem}.py")
-        candidates.append(f"tests/{stem}_test.py")
-        candidates.append(f"__tests__/{stem}.test.ts")
-        dir_part = "/".join(name.split("/")[:-1])
-        if dir_part:
-            candidates.append(f"{dir_part}/tests/test_{stem}.py")
-    return list(dict.fromkeys(candidates))  # deduplicate, preserve order
-
 
 async def get_file_content(token: str, owner: str, repo: str, path: str, ref: str = "HEAD") -> str | None:
     """Fetch raw file content from GitHub. Returns None if not found."""
@@ -92,23 +78,98 @@ async def get_file_content(token: str, owner: str, repo: str, path: str, ref: st
         return resp.text
 
 
-async def find_test_file_content(
-    token: str, owner: str, repo: str, changed_files: list[dict], ref: str = "HEAD"
-) -> list[str]:
-    """Return content of any test files found for the changed source files."""
-    candidates = _candidate_test_paths(changed_files)
-    found = []
-    for path in candidates:
-        content = await get_file_content(token, owner, repo, path, ref)
-        if content:
-            found.append(content)
-    return found
+async def get_all_test_files(token: str, owner: str, repo: str, ref: str = "HEAD") -> list[str]:
+    """Fetch all test files from common test directories in the repo."""
+    test_dirs = ["tests", "__tests__", "test"]
+    all_contents: list[str] = []
+
+    async with httpx.AsyncClient() as client:
+        for test_dir in test_dirs:
+            resp = await client.get(
+                f"{GITHUB_API_BASE}/repos/{owner}/{repo}/contents/{test_dir}",
+                params={"ref": ref},
+                headers={"Authorization": f"token {token}", "Accept": "application/vnd.github+json"},
+            )
+            if resp.status_code == 404:
+                continue
+            resp.raise_for_status()
+            entries = resp.json()
+            if not isinstance(entries, list):
+                continue
+            test_files = [
+                e["path"] for e in entries
+                if e["type"] == "file" and _is_test_file(e["path"])
+            ]
+            results = await asyncio.gather(
+                *[get_file_content(token, owner, repo, path, ref=ref) for path in test_files]
+            )
+            all_contents.extend(c for c in results if c)
+
+    return all_contents
 
 
-async def get_pr_info(token: str, pr_url: str) -> tuple[list[dict], list[str], str] | None:
+async def _get_check_run_annotations(token: str, owner: str, repo: str, check_run_id: int) -> list[dict]:
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"{GITHUB_API_BASE}/repos/{owner}/{repo}/check-runs/{check_run_id}/annotations",
+            params={"per_page": 100},
+            headers={"Authorization": f"token {token}", "Accept": "application/vnd.github+json"},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
+async def get_ci_test_annotations(token: str, owner: str, repo: str, sha: str) -> list[dict]:
     """
-    Given a GitHub PR URL, return (changed_files, test_file_contents, head_sha).
-    Returns None if the URL can't be parsed.
+    Return failure annotations from CI check runs for a commit.
+    Annotations include test file paths and failure messages from pytest/jest/etc.
+    """
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"{GITHUB_API_BASE}/repos/{owner}/{repo}/commits/{sha}/check-runs",
+            params={"per_page": 100},
+            headers={"Authorization": f"token {token}", "Accept": "application/vnd.github+json"},
+        )
+        resp.raise_for_status()
+        check_runs = resp.json().get("check_runs", [])
+
+    all_annotations: list[dict] = []
+    for run in check_runs:
+        annotations = await _get_check_run_annotations(token, owner, repo, run["id"])
+        failures = [a for a in annotations if a.get("annotation_level") in ("failure", "warning")]
+        all_annotations.extend(failures)
+    return all_annotations
+
+
+class PRInfo(TypedDict):
+    changed_files: list[dict]
+    test_file_contents: list[str]
+    ci_annotations: list[dict]
+    base_source_files: list[dict]  # [{filename, content}] at base SHA — merged PRs only
+    head_sha: str
+    is_merged: bool
+
+
+def _is_test_file(filename: str) -> bool:
+    basename = filename.split("/")[-1]
+    return (
+        basename.startswith("test_")
+        or basename.endswith("_test.py")
+        or basename.endswith((".test.ts", ".test.js", ".spec.ts", ".spec.js"))
+        or "/tests/" in filename
+        or "/__tests__/" in filename
+    )
+
+
+async def get_pr_info(token: str, pr_url: str) -> PRInfo | None:
+    """
+    Given a GitHub PR URL, return a PRInfo dict.
+
+    Merged PRs: test files are taken directly from files changed in the PR;
+    source files at base SHA are returned as starter code (the buggy version).
+
+    Open PRs: test files come from CI failure annotations, falling back to
+    path guessing; no base source files.
     """
     parsed = _parse_pr_url(pr_url)
     if not parsed:
@@ -121,8 +182,47 @@ async def get_pr_info(token: str, pr_url: str) -> tuple[list[dict], list[str], s
             headers={"Authorization": f"token {token}", "Accept": "application/vnd.github+json"},
         )
         pr_resp.raise_for_status()
-        head_sha = pr_resp.json()["head"]["sha"]
+        pr_data = pr_resp.json()
+
+    head_sha = pr_data["head"]["sha"]
+    base_sha = pr_data["base"]["sha"]
+    is_merged = bool(pr_data.get("merged_at"))
 
     changed_files = await get_pr_changed_files(token, owner, repo, pr_number)
-    test_contents = await find_test_file_content(token, owner, repo, changed_files, ref=head_sha)
-    return changed_files, test_contents, head_sha
+
+    if is_merged:
+        # Test files changed in the PR are the ground truth for the challenge
+        test_filenames = [f["filename"] for f in changed_files if _is_test_file(f["filename"])]
+        source_filenames = [f["filename"] for f in changed_files if not _is_test_file(f["filename"])]
+
+        # Fetch all files in parallel: test files at head, source files at base (buggy version)
+        n_tests = len(test_filenames)
+        all_results = await asyncio.gather(
+            *[get_file_content(token, owner, repo, p, ref=head_sha) for p in test_filenames],
+            *[get_file_content(token, owner, repo, p, ref=base_sha) for p in source_filenames],
+        )
+        test_contents = await get_all_test_files(token, owner, repo, ref=head_sha)
+        base_source_files = [
+            {"filename": name, "content": content}
+            for name, content in zip(source_filenames, all_results[n_tests:])
+            if content
+        ]
+        return PRInfo(
+            changed_files=changed_files,
+            test_file_contents=test_contents,
+            ci_annotations=[],
+            base_source_files=base_source_files,
+            head_sha=head_sha,
+            is_merged=True,
+        )
+    else:
+        ci_annotations = await get_ci_test_annotations(token, owner, repo, head_sha)
+        test_contents = await get_all_test_files(token, owner, repo, ref=head_sha)
+        return PRInfo(
+            changed_files=changed_files,
+            test_file_contents=test_contents,
+            ci_annotations=ci_annotations,
+            base_source_files=[],
+            head_sha=head_sha,
+            is_merged=False,
+        )

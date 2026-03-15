@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 # DISABLED: Interview mode backend endpoints.
 # To re-enable Interview mode API routes, set this to True.
-INTERVIEW_MODE_ENABLED = False
+INTERVIEW_MODE_ENABLED = True
 
 
 def _require_interview_mode_enabled() -> None:

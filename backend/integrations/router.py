@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 
+import httpx
 from auth import get_current_user, _decode_token
 from config import settings
 from integrations import linear as linear_client
@@ -100,8 +101,8 @@ async def linear_callback(code: str = Query(...), state: str = Query(...)):
     if not user_id:
         return HTMLResponse(_POPUP_ERROR_HTML.format(provider="linear", error="Invalid state"), status_code=400)
     try:
-        token = await linear_client.exchange_linear_code(code)
-        store.upsert_integration(user_id, "linear", token)
+        access_token, refresh_token = await linear_client.exchange_linear_code(code)
+        store.upsert_integration(user_id, "linear", access_token, refresh_token)
         return HTMLResponse(_POPUP_CLOSE_HTML.format(provider="linear"))
     except Exception as e:
         logger.error("Linear callback error: %s", e)
@@ -143,15 +144,37 @@ async def github_callback(code: str = Query(...), state: str = Query(...)):
 # Linear issues list
 # ---------------------------------------------------------------------------
 
+async def _get_fresh_linear_token(user_id: str) -> str:
+    """Return a valid Linear access token, refreshing it if necessary."""
+    token = store.get_integration(user_id, "linear")
+    if not token:
+        raise HTTPException(status_code=400, detail="Linear not connected")
+    return token
+
+
+async def _call_linear_with_refresh(user_id: str, fn, *args, **kwargs):
+    """Call a Linear API function, auto-refreshing the token on 401."""
+    token = await _get_fresh_linear_token(user_id)
+    try:
+        return await fn(token, *args, **kwargs)
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code != 401:
+            raise
+    # Token expired — try to refresh
+    refresh_token = store.get_refresh_token(user_id, "linear")
+    if not refresh_token:
+        raise HTTPException(status_code=401, detail="Linear token expired. Please reconnect.")
+    new_access, new_refresh = await linear_client.refresh_linear_token(refresh_token)
+    store.upsert_integration(user_id, "linear", new_access, new_refresh)
+    return await fn(new_access, *args, **kwargs)
+
+
 @router.get("/linear/issues")
 async def list_linear_issues(
     query: str = "",
     user_id: str = Depends(get_current_user),
 ):
-    token = store.get_integration(user_id, "linear")
-    if not token:
-        raise HTTPException(status_code=400, detail="Linear not connected")
-    issues = await linear_client.get_linear_issues(token, query=query)
+    issues = await _call_linear_with_refresh(user_id, linear_client.get_linear_issues, query=query)
     return issues
 
 # ---------------------------------------------------------------------------
@@ -167,24 +190,35 @@ async def generate_challenge(
     req: GenerateChallengeRequest,
     user_id: str = Depends(get_current_user),
 ):
-    linear_token = store.get_integration(user_id, "linear")
-    if not linear_token:
-        raise HTTPException(status_code=400, detail="Linear not connected")
-
     github_token = store.get_integration(user_id, "github")
-
-    issue = await linear_client.get_linear_issue(linear_token, req.issue_id)
+    issue = await _call_linear_with_refresh(user_id, linear_client.get_linear_issue, req.issue_id)
 
     changed_files: list[dict] = []
     test_file_contents: list[str] = []
+    ci_annotations: list[dict] = []
+    base_source_files: list[dict] = []
 
     if github_token:
         pr_urls = linear_client.get_github_pr_urls_from_issue(issue)
+        print(f"[generate-challenge] issue description: {repr(issue.get('description', '')[:300])}")
+        print(f"[generate-challenge] PR URLs from issue: {pr_urls}")
         for pr_url in pr_urls[:1]:
             pr_info = await github_client.get_pr_info(github_token, pr_url)
             if pr_info:
-                changed_files, test_file_contents, _ = pr_info
+                changed_files = pr_info["changed_files"]
+                test_file_contents = pr_info["test_file_contents"]
+                ci_annotations = pr_info["ci_annotations"]
+                base_source_files = pr_info["base_source_files"]
+                print(
+                    f"[generate-challenge] is_merged={pr_info['is_merged']} "
+                    f"changed_files={[f['filename'] for f in changed_files]} "
+                    f"test_files={len(test_file_contents)} "
+                    f"ci_annotations={len(ci_annotations)} "
+                    f"base_source={len(base_source_files)}"
+                )
                 break
+    else:
+        print("[generate-challenge] No GitHub token — skipping PR fetch")
 
-    result = await build_challenge_from_issue(issue, changed_files, test_file_contents)
+    result = await build_challenge_from_issue(issue, changed_files, test_file_contents, ci_annotations, base_source_files)
     return result

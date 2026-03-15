@@ -5,8 +5,8 @@ from integrations.github import (
     get_github_oauth_url,
     exchange_github_code,
     get_pr_changed_files,
-    find_test_file_content,
-    get_file_content,
+    get_all_test_files,
+    _is_test_file,
 )
 
 
@@ -53,12 +53,9 @@ async def test_get_pr_changed_files():
         assert files[0]["filename"] == "src/pagination.py"
 
 
-def test_candidate_test_paths_maps_correctly():
-    changed = [
-        {"filename": "src/pagination.py"},
-        {"filename": "utils/helpers.py"},
-    ]
-    from integrations.github import _candidate_test_paths
-    paths = _candidate_test_paths(changed)
-    assert "tests/test_pagination.py" in paths
-    assert "tests/test_helpers.py" in paths
+def test_is_test_file():
+    assert _is_test_file("tests/test_pagination.py")
+    assert _is_test_file("tests/pagination_test.py")
+    assert _is_test_file("__tests__/pagination.test.ts")
+    assert not _is_test_file("src/pagination.py")
+    assert not _is_test_file(".github/workflows/test.yaml")
