@@ -8,10 +8,8 @@ import time
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from challenges import Challenge
 from config import settings, MODEL_PRICING, limiter
 from evaluation import compute_composite_score
-from evaluation.evaluator import ChallengeEvaluator
 from llm import LLM
 
 from .models import (
@@ -32,22 +30,6 @@ logger = logging.getLogger(__name__)
 # DISABLED: Interview mode backend endpoints.
 # To re-enable Interview mode API routes, set this to True.
 INTERVIEW_MODE_ENABLED = True
-
-# Module-level evaluator instance (mirrors main.py pattern)
-_evaluator = ChallengeEvaluator()
-
-
-def _to_challenge(ic: InterviewChallenge) -> Challenge:
-    """Adapt an InterviewChallenge to the canonical Challenge type for evaluation."""
-    return Challenge(
-        id=ic.id,
-        title=ic.title,
-        description=ic.description,
-        category=ic.category,
-        difficulty="medium",  # interviews don't carry difficulty; use neutral default
-        starter_code=ic.starter_code,
-        test_suite=ic.test_suite,
-    )
 
 
 def _require_interview_mode_enabled() -> None:
@@ -307,24 +289,32 @@ async def submit_prompt(room_id: str, session_id: str, req: SubmitPromptRequest,
             # Extract code from response
             generated_code = LLM.extract_code_blocks(full_response)
 
-            # Auto-evaluate using the same evaluator as the regular challenge flow.
-            # update_session_accuracy runs before add_turn so accuracy_at_turn is
-            # set on the turn object; add_turn only writes token aggregates and does
-            # not overwrite the accuracy column.
+            # Auto-evaluate using the same sandbox path as the play page.
             accuracy = 0.0
             test_results = None
-            eval_details = None
-            if challenge:
+            if challenge and challenge.category == "function" and challenge.test_suite:
+                sandbox_id = None
                 try:
-                    eval_result = await _evaluator.evaluate(
-                        _to_challenge(challenge), generated_code
-                    )
-                    accuracy = eval_result.accuracy
-                    test_results = eval_result.test_results
-                    eval_details = eval_result.details
+                    from sandbox import create_sandbox, terminate_sandbox
+                    from evaluation import run_function_tests_detailed
+                    sandbox_id = await create_sandbox()
+                    test_dicts = [
+                        tc if isinstance(tc, dict) else tc.model_dump()
+                        for tc in challenge.test_suite
+                    ]
+                    raw_results = await run_function_tests_detailed(sandbox_id, generated_code, test_dicts)
+                    passed = sum(1 for r in raw_results if r.get("passed", False))
+                    accuracy = passed / len(raw_results) if raw_results else 0.0
+                    test_results = raw_results
                     store.update_session_accuracy(session_id, accuracy)
                 except Exception:
                     logger.exception("Auto-eval failed for session %s", session_id)
+                finally:
+                    if sandbox_id:
+                        try:
+                            await terminate_sandbox(sandbox_id)
+                        except Exception:
+                            pass
 
             # Estimate tokens
             est_prompt_tokens = len(req.prompt.split()) * 2
@@ -362,7 +352,7 @@ async def submit_prompt(room_id: str, session_id: str, req: SubmitPromptRequest,
                 "timestamp": time.time(),
             })
 
-            yield f"data: {json.dumps({'type': 'done', 'content': full_response, 'generated_code': generated_code, 'input_tokens': est_prompt_tokens, 'output_tokens': est_response_tokens, 'cost': cost, 'total_tokens': _total_tokens, 'total_turns': _total_turns, 'accuracy': accuracy, 'test_results': test_results, 'evaluation_details': eval_details})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'content': full_response, 'generated_code': generated_code, 'input_tokens': est_prompt_tokens, 'output_tokens': est_response_tokens, 'cost': cost, 'total_tokens': _total_tokens, 'total_turns': _total_turns, 'accuracy': accuracy, 'test_results': test_results})}\n\n"
 
         except Exception as e:
             logger.error("Interview prompt streaming error: %s", e)

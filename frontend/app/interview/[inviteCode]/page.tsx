@@ -20,7 +20,7 @@ import type {
   InterviewSession,
   InterviewChallenge,
 } from "@/lib/types";
-import type { ChatMessage } from "@/lib/api";
+import type { ChatMessage, TestCaseResult } from "@/lib/api";
 import {
   Loader2,
   Sparkles,
@@ -72,7 +72,7 @@ export default function CandidateInterviewPage() {
   const [estimatedTokens, setEstimatedTokens] = useState(0);
 
   // Test results (updated after each turn)
-  const [testResults, setTestResults] = useState<boolean[] | null>(null);
+  const [testResults, setTestResults] = useState<TestCaseResult[] | null>(null);
   const [latestAccuracy, setLatestAccuracy] = useState<number | null>(null);
   const [testTab, setTestTab] = useState<"results" | "code">("results");
 
@@ -713,65 +713,72 @@ export default function CandidateInterviewPage() {
                       {testResults && (
                         <span
                           className={`text-xs font-medium ${
-                            testResults.every(Boolean)
+                            testResults.every((r) => r.passed)
                               ? "text-green-500"
                               : "text-red-400"
                           }`}
                         >
-                          {testResults.filter(Boolean).length}/{testResults.length} passed
+                          {testResults.filter((r) => r.passed).length}/{testResults.length} passed
                         </span>
                       )}
                     </div>
 
                     <div className="flex-1 min-h-0 overflow-y-auto">
                       {testTab === "results" ? (
-                        testResults && activeChallenge?.test_suite ? (
+                        testResults ? (
                           <div className="p-4 space-y-2">
                             {/* Summary banner */}
                             <div
                               className={`rounded-lg px-3 py-2 text-xs font-medium ${
-                                testResults.every(Boolean)
+                                testResults.every((r) => r.passed)
                                   ? "bg-green-500/10 text-green-500"
                                   : "bg-red-400/10 text-red-400"
                               }`}
                             >
-                              {testResults.every(Boolean)
+                              {testResults.every((r) => r.passed)
                                 ? "✓ All tests passed!"
-                                : `✗ ${testResults.filter((r) => !r).length} test(s) failed`}
+                                : `✗ ${testResults.filter((r) => !r.passed).length} test(s) failed`}
                             </div>
                             {/* Individual results */}
-                            {activeChallenge.test_suite.map((tc, i) => {
-                              const passed = testResults[i];
-                              return (
-                                <div
-                                  key={i}
-                                  className={`rounded-lg border px-3 py-2 text-xs ${
-                                    passed
-                                      ? "border-green-500/20 bg-green-500/5"
-                                      : "border-red-400/20 bg-red-400/5"
-                                  }`}
-                                >
-                                  <div className="flex items-center gap-2 mb-1">
-                                    {passed ? (
-                                      <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0" />
-                                    ) : (
-                                      <XCircle className="h-3.5 w-3.5 text-red-400 shrink-0" />
-                                    )}
-                                    <span className="font-mono text-foreground truncate">
-                                      {tc.input}
-                                    </span>
-                                  </div>
-                                  {!passed && (
-                                    <div className="ml-5 mt-1 text-xs font-mono">
-                                      <div className="text-muted">
-                                        Expected:{" "}
-                                        <span className="text-green-500">{tc.expected_output}</span>
-                                      </div>
-                                    </div>
+                            {testResults.map((tc, i) => (
+                              <div
+                                key={i}
+                                className={`rounded-lg border px-3 py-2 text-xs ${
+                                  tc.passed
+                                    ? "border-green-500/20 bg-green-500/5"
+                                    : "border-red-400/20 bg-red-400/5"
+                                }`}
+                              >
+                                <div className="flex items-center gap-2 mb-1">
+                                  {tc.passed ? (
+                                    <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0" />
+                                  ) : (
+                                    <XCircle className="h-3.5 w-3.5 text-red-400 shrink-0" />
                                   )}
+                                  <span className="font-mono text-foreground truncate">
+                                    {tc.input}
+                                  </span>
                                 </div>
-                              );
-                            })}
+                                {!tc.passed && (
+                                  <div className="ml-5 mt-1 space-y-0.5 text-xs font-mono">
+                                    {tc.error ? (
+                                      <div className="text-red-400">Error: {tc.error}</div>
+                                    ) : (
+                                      <>
+                                        <div className="text-muted">
+                                          Expected:{" "}
+                                          <span className="text-green-500">{tc.expected}</span>
+                                        </div>
+                                        <div className="text-muted">
+                                          Got:{" "}
+                                          <span className="text-red-400">{tc.actual}</span>
+                                        </div>
+                                      </>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
                           </div>
                         ) : (
                           <div className="flex items-center justify-center h-full">

@@ -752,8 +752,7 @@ export async function streamInterviewPrompt(
     total_tokens: number;
     total_turns: number;
     accuracy: number;
-    test_results: boolean[] | null;
-    evaluation_details: Record<string, unknown> | null;
+    test_results: TestCaseResult[] | null;
   }) => void,
   onError?: (error: string) => void,
   signal?: AbortSignal
@@ -827,7 +826,6 @@ export async function streamInterviewPrompt(
                 total_turns: data.total_turns || 0,
                 accuracy: data.accuracy ?? 0,
                 test_results: data.test_results ?? null,
-                evaluation_details: data.evaluation_details ?? null,
               });
             } else if (data.type === "error") {
               onError?.(data.message || "Unknown error");
@@ -851,7 +849,6 @@ export async function streamInterviewPrompt(
         total_turns: 0,
         accuracy: 0,
         test_results: null,
-        evaluation_details: null,
       });
       return;
     }
