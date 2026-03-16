@@ -30,6 +30,8 @@ import {
   GripHorizontal,
   Trophy,
   AlertTriangle,
+  CheckCircle2,
+  XCircle,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -67,6 +69,10 @@ export default function CandidateInterviewPage() {
   const [totalTokens, setTotalTokens] = useState(0);
   const [totalCost, setTotalCost] = useState(0);
   const [estimatedTokens, setEstimatedTokens] = useState(0);
+
+  // Test results (updated after each turn)
+  const [testResults, setTestResults] = useState<boolean[] | null>(null);
+  const [latestAccuracy, setLatestAccuracy] = useState<number | null>(null);
 
   // Model
   const [selectedModel, setSelectedModel] = useState("grok-4-1-fast-non-reasoning");
@@ -192,10 +198,10 @@ export default function CandidateInterviewPage() {
     if (assistantMessages.length === 0) return;
     const latest = assistantMessages[assistantMessages.length - 1];
 
-    if (activeChallenge?.category === "frontend") {
+    if (activeChallenge?.category === "UI") {
       const extracted = extractRenderableUI(latest.content);
       if (extracted) setRenderedCode(extracted.html);
-    } else if (activeChallenge?.category === "coding") {
+    } else if (activeChallenge?.category === "function") {
       const code = extractPythonCode(latest.content);
       if (code) setLatestCode(code);
     }
@@ -282,6 +288,10 @@ export default function CandidateInterviewPage() {
         setTotalTurns(data.total_turns || 0);
         if (data.cost) setTotalCost((c) => c + data.cost);
         setEstimatedTokens(0);
+        if (data.test_results !== null) {
+          setTestResults(data.test_results);
+          setLatestAccuracy(data.accuracy);
+        }
         abortControllerRef.current = null;
       },
       (err) => {
@@ -347,8 +357,8 @@ export default function CandidateInterviewPage() {
   };
 
   // ---- Derived ----
-  const isFrontend = activeChallenge?.category === "frontend";
-  const isCoding = activeChallenge?.category === "coding";
+  const isFrontend = activeChallenge?.category === "UI";
+  const isCoding = activeChallenge?.category === "function";
   const hasOutput = isFrontend || (isCoding && latestCode);
   const timeLimitSec = (room?.config.time_limit_minutes ?? 45) * 60;
   const timeRemaining = Math.max(0, timeLimitSec - elapsed);
@@ -596,32 +606,57 @@ export default function CandidateInterviewPage() {
                 </div>
               )}
 
-              {/* Show test cases if interviewer allows */}
-              {activeChallenge?.category === "coding" &&
+              {/* Show test cases + results if interviewer allows */}
+              {activeChallenge?.category === "function" &&
                 room.config.show_test_results_to_candidate &&
-                activeChallenge.test_cases &&
-                activeChallenge.test_cases.length > 0 && (
+                activeChallenge.test_suite &&
+                activeChallenge.test_suite.length > 0 && (
                   <div className="mt-4">
-                    <h3 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">
-                      Test Cases
-                    </h3>
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="text-xs font-semibold text-muted uppercase tracking-wider">
+                        Test Cases
+                      </h3>
+                      {latestAccuracy !== null && (
+                        <span className="text-xs font-medium text-muted">
+                          {testResults
+                            ? `${testResults.filter(Boolean).length}/${testResults.length} passed`
+                            : `${Math.round(latestAccuracy * 100)}%`}
+                        </span>
+                      )}
+                    </div>
                     <div className="space-y-1.5">
-                      {activeChallenge.test_cases.map((tc, i) => (
-                        <div
-                          key={i}
-                          className="rounded-lg bg-code-bg px-3 py-2 text-xs font-mono"
-                        >
-                          <span className="text-muted">Input:</span>{" "}
-                          {typeof tc === "object" && "input" in tc
-                            ? tc.input
-                            : String(tc)}
-                          <br />
-                          <span className="text-muted">Expected:</span>{" "}
-                          {typeof tc === "object" && "expected_output" in tc
-                            ? tc.expected_output
-                            : ""}
-                        </div>
-                      ))}
+                      {activeChallenge.test_suite.map((tc, i) => {
+                        const passed = testResults ? testResults[i] : undefined;
+                        return (
+                          <div
+                            key={i}
+                            className={`rounded-lg px-3 py-2 text-xs font-mono flex gap-2 items-start ${
+                              passed === true
+                                ? "bg-green-500/10 border border-green-500/20"
+                                : passed === false
+                                ? "bg-red-500/10 border border-red-500/20"
+                                : "bg-code-bg"
+                            }`}
+                          >
+                            <div className="shrink-0 mt-0.5">
+                              {passed === true ? (
+                                <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
+                              ) : passed === false ? (
+                                <XCircle className="h-3.5 w-3.5 text-red-400" />
+                              ) : (
+                                <div className="h-3.5 w-3.5 rounded-full border border-muted/40" />
+                              )}
+                            </div>
+                            <div>
+                              <span className="text-muted">Input:</span>{" "}
+                              {tc.input}
+                              <br />
+                              <span className="text-muted">Expected:</span>{" "}
+                              {tc.expected_output}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 )}

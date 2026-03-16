@@ -35,9 +35,9 @@ interface ChallengeForm {
   id: string; // local key
   title: string;
   description: string;
-  category: "coding" | "frontend" | "system_design";
+  category: "function" | "UI" | "system";
   starter_code: string;
-  test_cases: TestCaseInput[];
+  test_suite: TestCaseInput[];
 }
 
 const EMPTY_TEST_CASE: TestCaseInput = { input: "", expected_output: "" };
@@ -47,9 +47,9 @@ function newChallengeForm(): ChallengeForm {
     id: crypto.randomUUID(),
     title: "",
     description: "",
-    category: "coding",
+    category: "function",
     starter_code: "",
-    test_cases: [{ ...EMPTY_TEST_CASE }],
+    test_suite: [{ ...EMPTY_TEST_CASE }],
   };
 }
 
@@ -57,9 +57,9 @@ const CATEGORY_META: Record<
   string,
   { label: string; icon: typeof Code; color: string }
 > = {
-  coding: { label: "Coding", icon: Code, color: "text-blue-500" },
-  frontend: { label: "Frontend", icon: Globe, color: "text-green-500" },
-  system_design: { label: "System Design", icon: Layout, color: "text-purple-500" },
+  function: { label: "Coding", icon: Code, color: "text-blue-500" },
+  UI: { label: "Frontend", icon: Globe, color: "text-green-500" },
+  system: { label: "System Design", icon: Layout, color: "text-purple-500" },
 };
 
 // ---------------------------------------------------------------------------
@@ -109,14 +109,14 @@ export default function CreateInterviewPage() {
 
   const addTestCase = useCallback(() => {
     updateChallenge(activeChallengeIdx, {
-      test_cases: [...activeChallenge.test_cases, { ...EMPTY_TEST_CASE }],
+      test_suite: [...activeChallenge.test_suite, { ...EMPTY_TEST_CASE }],
     });
   }, [activeChallengeIdx, activeChallenge, updateChallenge]);
 
   const removeTestCase = useCallback(
     (tcIdx: number) => {
       updateChallenge(activeChallengeIdx, {
-        test_cases: activeChallenge.test_cases.filter((_, i) => i !== tcIdx),
+        test_suite: activeChallenge.test_suite.filter((_, i) => i !== tcIdx),
       });
     },
     [activeChallengeIdx, activeChallenge, updateChallenge]
@@ -125,7 +125,7 @@ export default function CreateInterviewPage() {
   const updateTestCase = useCallback(
     (tcIdx: number, field: "input" | "expected_output", value: string) => {
       updateChallenge(activeChallengeIdx, {
-        test_cases: activeChallenge.test_cases.map((tc, i) =>
+        test_suite: activeChallenge.test_suite.map((tc, i) =>
           i === tcIdx ? { ...tc, [field]: value } : tc
         ),
       });
@@ -162,10 +162,10 @@ export default function CreateInterviewPage() {
         title: stripGitHubUrls(generated.title),
         description: stripGitHubUrls(generated.description),
         starter_code: generated.starter_code,
-        test_cases: generated.test_cases.length > 0
+        test_suite: generated.test_cases.length > 0
           ? generated.test_cases
           : [{ ...EMPTY_TEST_CASE }],
-        category: "coding",
+        category: "function",
       });
     },
     [activeChallengeIdx, updateChallenge]
@@ -195,7 +195,7 @@ export default function CreateInterviewPage() {
       // Add challenges
       for (const ch of challenges) {
         if (!ch.title.trim() || !ch.description.trim()) continue;
-        const validTests = ch.test_cases.filter(
+        const validTests = ch.test_suite.filter(
           (tc) => tc.input.trim() || tc.expected_output.trim()
         );
         await addInterviewChallenge(room.id, {
@@ -203,8 +203,8 @@ export default function CreateInterviewPage() {
           description: ch.description,
           category: ch.category,
           starter_code: ch.starter_code || undefined,
-          test_cases:
-            ch.category === "coding" && validTests.length > 0
+          test_suite:
+            ch.category === "function" && validTests.length > 0
               ? validTests
               : undefined,
         });
@@ -494,7 +494,7 @@ export default function CreateInterviewPage() {
                     </label>
                     <div className="flex flex-wrap gap-2">
                       {(
-                        ["coding", "frontend", "system_design"] as const
+                        ["function", "UI", "system"] as const
                       ).map((cat) => {
                         const meta = CATEGORY_META[cat];
                         const Icon = meta.icon;
@@ -560,8 +560,8 @@ export default function CreateInterviewPage() {
                     />
                   </div>
 
-                  {/* Test Cases (coding only) */}
-                  {activeChallenge.category === "coding" && (
+                  {/* Test Cases (function only) */}
+                  {activeChallenge.category === "function" && (
                     <div>
                       <div className="flex items-center justify-between mb-2">
                         <label className="text-sm font-medium">
@@ -576,7 +576,7 @@ export default function CreateInterviewPage() {
                         </button>
                       </div>
                       <div className="space-y-2">
-                        {activeChallenge.test_cases.map((tc, tcIdx) => (
+                        {activeChallenge.test_suite.map((tc, tcIdx) => (
                           <div
                             key={tcIdx}
                             className="flex items-start gap-2 rounded-lg border border-border p-3"
@@ -609,7 +609,7 @@ export default function CreateInterviewPage() {
                                 className="w-full rounded-md border border-input-border bg-input px-3 py-1.5 text-xs font-mono focus:border-accent focus:outline-none"
                               />
                             </div>
-                            {activeChallenge.test_cases.length > 1 && (
+                            {activeChallenge.test_suite.length > 1 && (
                               <button
                                 onClick={() => removeTestCase(tcIdx)}
                                 className="mt-1 text-muted hover:text-red-400 cursor-pointer"

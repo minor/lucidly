@@ -667,7 +667,7 @@ export async function addInterviewChallenge(
     category: string;
     starter_code?: string;
     solution_code?: string;
-    test_cases?: { input: string; expected_output: string }[];
+    test_suite?: { input: string; expected_output: string }[];
     reference_html?: string;
   }
 ): Promise<InterviewChallenge> {
@@ -751,6 +751,9 @@ export async function streamInterviewPrompt(
     cost: number;
     total_tokens: number;
     total_turns: number;
+    accuracy: number;
+    test_results: boolean[] | null;
+    evaluation_details: Record<string, unknown> | null;
   }) => void,
   onError?: (error: string) => void,
   signal?: AbortSignal
@@ -822,6 +825,9 @@ export async function streamInterviewPrompt(
                 cost: data.cost || 0,
                 total_tokens: data.total_tokens || 0,
                 total_turns: data.total_turns || 0,
+                accuracy: data.accuracy ?? 0,
+                test_results: data.test_results ?? null,
+                evaluation_details: data.evaluation_details ?? null,
               });
             } else if (data.type === "error") {
               onError?.(data.message || "Unknown error");
@@ -843,6 +849,9 @@ export async function streamInterviewPrompt(
         cost: 0,
         total_tokens: 0,
         total_turns: 0,
+        accuracy: 0,
+        test_results: null,
+        evaluation_details: null,
       });
       return;
     }

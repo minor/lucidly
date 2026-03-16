@@ -159,10 +159,10 @@ export interface InterviewChallenge {
   id: string;
   title: string;
   description: string;
-  category: string; // coding, frontend, system_design
+  category: string; // function, UI, system
   starter_code: string | null;
   solution_code: string | null;
-  test_cases: InterviewTestCase[] | null;
+  test_suite: InterviewTestCase[] | null;
   reference_html: string | null;
   sort_order: number;
 }
