@@ -32,6 +32,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   XCircle,
+  FlaskConical,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -73,6 +74,7 @@ export default function CandidateInterviewPage() {
   // Test results (updated after each turn)
   const [testResults, setTestResults] = useState<boolean[] | null>(null);
   const [latestAccuracy, setLatestAccuracy] = useState<number | null>(null);
+  const [testTab, setTestTab] = useState<"results" | "code">("results");
 
   // Model
   const [selectedModel, setSelectedModel] = useState("grok-4-1-fast-non-reasoning");
@@ -343,6 +345,9 @@ export default function CandidateInterviewPage() {
     setCurrentStreamingMessage("");
     setSubmitState("idle");
     setFinalScores(null);
+    setTestResults(null);
+    setLatestAccuracy(null);
+    setTestTab("results");
 
     // Start a new session for the new challenge
     if (joined && candidateName) {
@@ -359,7 +364,7 @@ export default function CandidateInterviewPage() {
   // ---- Derived ----
   const isFrontend = activeChallenge?.category === "UI";
   const isCoding = activeChallenge?.category === "function";
-  const hasOutput = isFrontend || (isCoding && latestCode);
+  const hasOutput = isFrontend || isCoding;
   const timeLimitSec = (room?.config.time_limit_minutes ?? 45) * 60;
   const timeRemaining = Math.max(0, timeLimitSec - elapsed);
 
@@ -606,60 +611,6 @@ export default function CandidateInterviewPage() {
                 </div>
               )}
 
-              {/* Show test cases + results if interviewer allows */}
-              {activeChallenge?.category === "function" &&
-                room.config.show_test_results_to_candidate &&
-                activeChallenge.test_suite &&
-                activeChallenge.test_suite.length > 0 && (
-                  <div className="mt-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <h3 className="text-xs font-semibold text-muted uppercase tracking-wider">
-                        Test Cases
-                      </h3>
-                      {latestAccuracy !== null && (
-                        <span className="text-xs font-medium text-muted">
-                          {testResults
-                            ? `${testResults.filter(Boolean).length}/${testResults.length} passed`
-                            : `${Math.round(latestAccuracy * 100)}%`}
-                        </span>
-                      )}
-                    </div>
-                    <div className="space-y-1.5">
-                      {activeChallenge.test_suite.map((tc, i) => {
-                        const passed = testResults ? testResults[i] : undefined;
-                        return (
-                          <div
-                            key={i}
-                            className={`rounded-lg px-3 py-2 text-xs font-mono flex gap-2 items-start ${
-                              passed === true
-                                ? "bg-green-500/10 border border-green-500/20"
-                                : passed === false
-                                ? "bg-red-500/10 border border-red-500/20"
-                                : "bg-code-bg"
-                            }`}
-                          >
-                            <div className="shrink-0 mt-0.5">
-                              {passed === true ? (
-                                <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
-                              ) : passed === false ? (
-                                <XCircle className="h-3.5 w-3.5 text-red-400" />
-                              ) : (
-                                <div className="h-3.5 w-3.5 rounded-full border border-muted/40" />
-                              )}
-                            </div>
-                            <div>
-                              <span className="text-muted">Input:</span>{" "}
-                              {tc.input}
-                              <br />
-                              <span className="text-muted">Expected:</span>{" "}
-                              {tc.expected_output}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
             </div>
           </div>
 
@@ -732,16 +683,111 @@ export default function CandidateInterviewPage() {
                   </>
                 )}
 
-                {isCoding && latestCode && (
+                {isCoding && (
                   <>
-                    <div className="flex items-center justify-between border-b border-border px-4 py-2.5 shrink-0 bg-background/80">
-                      <h3 className="text-sm font-semibold text-foreground">
-                        Generated Code
-                      </h3>
+                    <div className="flex items-center justify-between border-b border-border px-4 py-2 shrink-0">
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => setTestTab("results")}
+                          className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer ${
+                            testTab === "results"
+                              ? "bg-accent/10 text-accent"
+                              : "text-muted hover:text-foreground"
+                          }`}
+                        >
+                          <FlaskConical className="h-3 w-3" />
+                          Tests
+                        </button>
+                        <button
+                          onClick={() => setTestTab("code")}
+                          className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer ${
+                            testTab === "code"
+                              ? "bg-accent/10 text-accent"
+                              : "text-muted hover:text-foreground"
+                          }`}
+                        >
+                          <Code className="h-3 w-3" />
+                          Code
+                        </button>
+                      </div>
+                      {testResults && (
+                        <span
+                          className={`text-xs font-medium ${
+                            testResults.every(Boolean)
+                              ? "text-green-500"
+                              : "text-red-400"
+                          }`}
+                        >
+                          {testResults.filter(Boolean).length}/{testResults.length} passed
+                        </span>
+                      )}
                     </div>
-                    <pre className="flex-1 min-h-0 overflow-auto p-4 bg-code-bg text-xs font-mono">
-                      <code>{latestCode}</code>
-                    </pre>
+
+                    <div className="flex-1 min-h-0 overflow-y-auto">
+                      {testTab === "results" ? (
+                        testResults && activeChallenge?.test_suite ? (
+                          <div className="p-4 space-y-2">
+                            {/* Summary banner */}
+                            <div
+                              className={`rounded-lg px-3 py-2 text-xs font-medium ${
+                                testResults.every(Boolean)
+                                  ? "bg-green-500/10 text-green-500"
+                                  : "bg-red-400/10 text-red-400"
+                              }`}
+                            >
+                              {testResults.every(Boolean)
+                                ? "✓ All tests passed!"
+                                : `✗ ${testResults.filter((r) => !r).length} test(s) failed`}
+                            </div>
+                            {/* Individual results */}
+                            {activeChallenge.test_suite.map((tc, i) => {
+                              const passed = testResults[i];
+                              return (
+                                <div
+                                  key={i}
+                                  className={`rounded-lg border px-3 py-2 text-xs ${
+                                    passed
+                                      ? "border-green-500/20 bg-green-500/5"
+                                      : "border-red-400/20 bg-red-400/5"
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-2 mb-1">
+                                    {passed ? (
+                                      <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0" />
+                                    ) : (
+                                      <XCircle className="h-3.5 w-3.5 text-red-400 shrink-0" />
+                                    )}
+                                    <span className="font-mono text-foreground truncate">
+                                      {tc.input}
+                                    </span>
+                                  </div>
+                                  {!passed && (
+                                    <div className="ml-5 mt-1 text-xs font-mono">
+                                      <div className="text-muted">
+                                        Expected:{" "}
+                                        <span className="text-green-500">{tc.expected_output}</span>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-center h-full">
+                            <span className="text-sm text-muted">No test results yet</span>
+                          </div>
+                        )
+                      ) : latestCode ? (
+                        <pre className="h-full overflow-auto p-4 bg-code-bg text-xs font-mono">
+                          <code>{latestCode}</code>
+                        </pre>
+                      ) : (
+                        <div className="flex items-center justify-center h-full">
+                          <span className="text-sm text-muted">No code yet</span>
+                        </div>
+                      )}
+                    </div>
                   </>
                 )}
               </div>

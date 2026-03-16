@@ -61,13 +61,16 @@ def _row_to_room(row: dict) -> InterviewRoom:
     if isinstance(challenges_data, str):
         challenges_data = json.loads(challenges_data)
 
+    # Normalize legacy category values to the canonical names used since the rename.
+    _CATEGORY_MAP = {"coding": "function", "frontend": "UI", "system_design": "system"}
+
     challenges = []
     for ch in challenges_data:
         challenges.append(InterviewChallenge(
             id=ch["id"],
             title=ch["title"],
             description=ch["description"],
-            category=ch["category"],
+            category=_CATEGORY_MAP.get(ch["category"], ch["category"]),
             starter_code=ch.get("starter_code"),
             solution_code=ch.get("solution_code"),
             test_suite=ch["test_suite"] if "test_suite" in ch else ch.get("test_cases"),  # compat: old rows used test_cases
