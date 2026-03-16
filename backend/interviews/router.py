@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 
 from config import settings, MODEL_PRICING, limiter
 from evaluation import compute_composite_score
+from llm import LLM
 
 from .models import (
     CreateRoomRequest,
@@ -18,7 +19,6 @@ from .models import (
     UpdateRoomRequest,
     StartSessionRequest,
     SubmitPromptRequest,
-    InterviewTestCase,
     InterviewTurn,
 )
 from . import store
@@ -127,7 +127,7 @@ async def add_challenge(room_id: str, req: AddChallengeRequest):
         category=req.category,
         starter_code=req.starter_code,
         solution_code=req.solution_code,
-        test_cases=[tc.model_dump() for tc in req.test_cases] if req.test_cases else None,
+        test_suite=[tc.model_dump() for tc in req.test_suite] if req.test_suite else None,
         reference_html=req.reference_html,
     )
     if challenge is None:
@@ -139,11 +139,11 @@ async def add_challenge(room_id: str, req: AddChallengeRequest):
 async def update_challenge(room_id: str, challenge_id: str, req: UpdateChallengeRequest):
     """Update an existing challenge."""
     updates = req.model_dump(exclude_none=True)
-    # Serialize test_cases if present
-    if "test_cases" in updates and updates["test_cases"] is not None:
-        updates["test_cases"] = [
-            tc.model_dump() if isinstance(tc, InterviewTestCase) else tc
-            for tc in updates["test_cases"]
+    # Serialize test_suite if present
+    if "test_suite" in updates and updates["test_suite"] is not None:
+        updates["test_suite"] = [
+            tc.model_dump() if hasattr(tc, "model_dump") else tc
+            for tc in updates["test_suite"]
         ]
     challenge = store.update_challenge(room_id, challenge_id, **updates)
     if challenge is None:
@@ -253,10 +253,9 @@ async def submit_prompt(room_id: str, session_id: str, req: SubmitPromptRequest,
     # Get the challenge for system prompt context
     challenge = store.get_challenge(room_id, session.challenge_id)
     system_prompt = "You are a code generation assistant. Generate clean, working code based on the user's prompt. Provide the code in markdown code blocks."
-    if challenge and challenge.category == "frontend":
+    if challenge and challenge.category == "UI":
         system_prompt = "You are a frontend code generation assistant. Generate clean, working HTML/CSS/JavaScript or React code. Always provide complete, self-contained code in markdown code blocks."
 
-    from llm import LLM
     llm_instance = LLM(
         model=model,
         system_prompt=system_prompt,
@@ -389,7 +388,7 @@ async def complete_session(room_id: str, session_id: str):
 
 @router.post("/{room_id}/sessions/{session_id}/run-tests")
 async def run_tests(room_id: str, session_id: str, code: str | None = None):
-    """Run code against a challenge's test cases. Uses the session's latest code if none provided."""
+    """Run code against a challenge's test suite. Uses the session's latest code if none provided."""
     session = store.get_session(session_id)
     if session is None or session.room_id != room_id:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -397,7 +396,7 @@ async def run_tests(room_id: str, session_id: str, code: str | None = None):
     challenge = store.get_challenge(room_id, session.challenge_id)
     if challenge is None:
         raise HTTPException(status_code=404, detail="Challenge not found")
-    if not challenge.test_cases:
+    if not challenge.test_suite:
         raise HTTPException(status_code=400, detail="Challenge has no test cases")
 
     test_code = code or session.final_code
@@ -412,10 +411,9 @@ async def run_tests(room_id: str, session_id: str, code: str | None = None):
     try:
         sandbox_id = await create_sandbox()
         test_dicts = (
-            [tc if isinstance(tc, dict) else tc.model_dump() for tc in challenge.test_cases]
+            [tc if isinstance(tc, dict) else tc.model_dump() for tc in challenge.test_suite]
         )
-        raw_results = await run_function_tests_detailed(sandbox_id, test_code, test_dicts)
-        results = raw_results
+        results = await run_function_tests_detailed(sandbox_id, test_code, test_dicts)
         passed_count = sum(1 for r in results if r.get("passed", False))
         total_count = len(results)
 

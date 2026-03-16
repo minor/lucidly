@@ -1,11 +1,7 @@
 """Pydantic models for Interview mode."""
 
 from pydantic import BaseModel
-
-
-class InterviewTestCase(BaseModel):
-    input: str
-    expected_output: str
+from challenges import TestCase  # reuse canonical test case model
 
 
 class InterviewChallenge(BaseModel):
@@ -13,10 +9,10 @@ class InterviewChallenge(BaseModel):
     id: str
     title: str
     description: str
-    category: str  # coding, frontend, system_design
+    category: str  # function, UI, system
     starter_code: str | None = None
     solution_code: str | None = None
-    test_cases: list[InterviewTestCase] | None = None
+    test_suite: list[TestCase] | None = None
     reference_html: str | None = None
     sort_order: int = 0
 
@@ -24,15 +20,15 @@ class InterviewChallenge(BaseModel):
 class InterviewConfig(BaseModel):
     """Room-level configuration set by interviewer."""
     time_limit_minutes: int = 45
-    allowed_models: list[str] | None = None  # None = all allowed
-    max_token_budget: int | None = None  # None = unlimited
+    allowed_models: list[str] | None = None
+    max_token_budget: int | None = None
     show_test_results_to_candidate: bool = True
 
 
 class InterviewRoom(BaseModel):
     """An interview room created by an interviewer."""
     id: str
-    created_by: str  # interviewer name / email
+    created_by: str
     title: str
     company_name: str = ""
     invite_code: str
@@ -50,6 +46,7 @@ class InterviewTurn(BaseModel):
     generated_code: str = ""
     prompt_tokens: int = 0
     response_tokens: int = 0
+    accuracy_at_turn: float = 0.0
     timestamp: float = 0.0
 
 
@@ -85,10 +82,10 @@ class CreateRoomRequest(BaseModel):
 class AddChallengeRequest(BaseModel):
     title: str
     description: str
-    category: str  # coding, frontend, system_design
+    category: str  # function, UI, system
     starter_code: str | None = None
     solution_code: str | None = None
-    test_cases: list[InterviewTestCase] | None = None
+    test_suite: list[TestCase] | None = None
     reference_html: str | None = None
 
 
@@ -98,7 +95,7 @@ class UpdateChallengeRequest(BaseModel):
     category: str | None = None
     starter_code: str | None = None
     solution_code: str | None = None
-    test_cases: list[InterviewTestCase] | None = None
+    test_suite: list[TestCase] | None = None
     reference_html: str | None = None
 
 
