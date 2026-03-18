@@ -38,6 +38,8 @@ interface ChallengeForm {
   category: "function" | "UI" | "system";
   starter_code: string;
   test_suite: TestCaseInput[];
+  repo_context?: Record<string, unknown> | null;
+  test_files?: { path: string; content: string }[];
 }
 
 const EMPTY_TEST_CASE: TestCaseInput = { input: "", expected_output: "" };
@@ -166,6 +168,8 @@ export default function CreateInterviewPage() {
           ? generated.test_cases
           : [{ ...EMPTY_TEST_CASE }],
         category: "function",
+        repo_context: generated.repo_context ?? null,
+        test_files: generated.test_files ?? [],
       });
     },
     [activeChallengeIdx, updateChallenge]
@@ -207,6 +211,8 @@ export default function CreateInterviewPage() {
             ch.category === "function" && validTests.length > 0
               ? validTests
               : undefined,
+          repo_context: ch.repo_context ?? undefined,
+          test_files: ch.test_files,
         });
       }
 
@@ -560,67 +566,78 @@ export default function CreateInterviewPage() {
                     />
                   </div>
 
-                  {/* Test Cases (function only) */}
+                  {/* Test Cases (function only, no repo_context) */}
                   {activeChallenge.category === "function" && (
-                    <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <label className="text-sm font-medium">
-                          Test Cases
-                        </label>
-                        <button
-                          onClick={addTestCase}
-                          className="flex items-center gap-1 text-xs text-accent hover:text-accent/80 cursor-pointer"
-                        >
-                          <Plus className="h-3 w-3" />
-                          Add test case
-                        </button>
+                    activeChallenge.repo_context ? (
+                      <div className="rounded-lg border border-accent/20 bg-accent/5 px-4 py-3 text-sm text-accent">
+                        {(() => {
+                          const ids = (activeChallenge.repo_context as Record<string, unknown>)?.challenge_test_ids as string[] | undefined;
+                          return ids?.length
+                            ? `${ids.length} test${ids.length === 1 ? "" : "s"} automatically detected from PR`
+                            : "Tests automatically detected from PR (full suite will run)";
+                        })()}
                       </div>
-                      <div className="space-y-2">
-                        {activeChallenge.test_suite.map((tc, tcIdx) => (
-                          <div
-                            key={tcIdx}
-                            className="flex items-start gap-2 rounded-lg border border-border p-3"
+                    ) : (
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <label className="text-sm font-medium">
+                            Test Cases
+                          </label>
+                          <button
+                            onClick={addTestCase}
+                            className="flex items-center gap-1 text-xs text-accent hover:text-accent/80 cursor-pointer"
                           >
-                            <div className="flex-1 space-y-2">
-                              <input
-                                type="text"
-                                value={tc.input}
-                                onChange={(e) =>
-                                  updateTestCase(
-                                    tcIdx,
-                                    "input",
-                                    e.target.value
-                                  )
-                                }
-                                placeholder="Input: e.g. two_sum([2,7,11,15], 9)"
-                                className="w-full rounded-md border border-input-border bg-input px-3 py-1.5 text-xs font-mono focus:border-accent focus:outline-none"
-                              />
-                              <input
-                                type="text"
-                                value={tc.expected_output}
-                                onChange={(e) =>
-                                  updateTestCase(
-                                    tcIdx,
-                                    "expected_output",
-                                    e.target.value
-                                  )
-                                }
-                                placeholder="Expected: e.g. [0, 1]"
-                                className="w-full rounded-md border border-input-border bg-input px-3 py-1.5 text-xs font-mono focus:border-accent focus:outline-none"
-                              />
+                            <Plus className="h-3 w-3" />
+                            Add test case
+                          </button>
+                        </div>
+                        <div className="space-y-2">
+                          {activeChallenge.test_suite.map((tc, tcIdx) => (
+                            <div
+                              key={tcIdx}
+                              className="flex items-start gap-2 rounded-lg border border-border p-3"
+                            >
+                              <div className="flex-1 space-y-2">
+                                <input
+                                  type="text"
+                                  value={tc.input}
+                                  onChange={(e) =>
+                                    updateTestCase(
+                                      tcIdx,
+                                      "input",
+                                      e.target.value
+                                    )
+                                  }
+                                  placeholder="Input: e.g. two_sum([2,7,11,15], 9)"
+                                  className="w-full rounded-md border border-input-border bg-input px-3 py-1.5 text-xs font-mono focus:border-accent focus:outline-none"
+                                />
+                                <input
+                                  type="text"
+                                  value={tc.expected_output}
+                                  onChange={(e) =>
+                                    updateTestCase(
+                                      tcIdx,
+                                      "expected_output",
+                                      e.target.value
+                                    )
+                                  }
+                                  placeholder="Expected: e.g. [0, 1]"
+                                  className="w-full rounded-md border border-input-border bg-input px-3 py-1.5 text-xs font-mono focus:border-accent focus:outline-none"
+                                />
+                              </div>
+                              {activeChallenge.test_suite.length > 1 && (
+                                <button
+                                  onClick={() => removeTestCase(tcIdx)}
+                                  className="mt-1 text-muted hover:text-red-400 cursor-pointer"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              )}
                             </div>
-                            {activeChallenge.test_suite.length > 1 && (
-                              <button
-                                onClick={() => removeTestCase(tcIdx)}
-                                className="mt-1 text-muted hover:text-red-400 cursor-pointer"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
-                            )}
-                          </div>
-                        ))}
+                          ))}
+                        </div>
                       </div>
-                    </div>
+                    )
                   )}
                 </div>
               )}

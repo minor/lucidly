@@ -1,6 +1,7 @@
 """Modal-based GitHub repo execution for challenge creation and evaluation."""
 import ast
 import json
+import os
 import subprocess
 import tarfile
 import tempfile
@@ -9,8 +10,17 @@ from pathlib import Path
 
 import httpx
 import modal
+from pydantic import BaseModel
 
-from challenges import RepoContext
+
+class RepoContext(BaseModel):
+    owner: str
+    repo: str
+    base_sha: str
+    file_paths: list[str]
+    challenge_test_ids: list[str]
+    github_token: str | None = None
+    file_path: str | None = None  # legacy
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +85,7 @@ def _run_pytest_impl(repo_root: Path, test_ids: list[str] | None = None) -> list
     subprocess.run(
         ["pytest", *args, "--tb=no", "-q", "--json-report", f"--json-report-file={report_path}"],
         capture_output=True, text=True,
+        cwd=str(repo_root),
     )
     try:
         with open(report_path) as f:
@@ -104,98 +115,79 @@ def _discover_pr_fixed_tests_impl(
     return sorted(failing_at_base & passing_at_head)
 
 
+FILE_SEPARATOR_PREFIX = "# === FILE: "
+FILE_SEPARATOR_SUFFIX = " ==="
+
+
+def _write_candidate_files(repo_root: Path, file_paths: list[str], candidate_code: str) -> str | None:
+    """
+    Write candidate_code into the repo. Supports two formats:
+      - Multi-file: sections delimited by '# === FILE: path/to/file.py ==='
+      - Single-file: candidate_code written directly to file_paths[0]
+    Returns a syntax error message if any section fails to parse, else None.
+    """
+    import re
+    separator_re = re.compile(r"^# === FILE: (.+?) ===$", re.MULTILINE)
+    parts = separator_re.split(candidate_code.strip())
+
+    if len(parts) > 1:
+        # Multi-file format: ['', 'path1', 'content1', 'path2', 'content2', ...]
+        it = iter(parts[1:])
+        for fname, content in zip(it, it):
+            fname = fname.strip()
+            content = content.strip()
+            try:
+                ast.parse(content)
+            except SyntaxError as e:
+                return f"SyntaxError in {fname}: {e}"
+            dest = repo_root / fname
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(content + "\n")
+    else:
+        # Single-file: write to the first (and presumably only) file path
+        try:
+            ast.parse(candidate_code)
+        except SyntaxError as e:
+            return str(e)
+        dest = repo_root / file_paths[0]
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(candidate_code)
+    return None
+
+
 def _run_tests_impl(
     github_token: str,
     owner: str,
     repo: str,
     base_sha: str,
-    file_path: str,
+    file_paths: list[str],
     candidate_code: str,
     test_files: list[dict],
     challenge_test_ids: list[str],
 ) -> tuple[list[dict], str]:
-    """Inject candidate_code into repo at base_sha, run PR-fixed tests. Returns (results, stdout)."""
-    # 1. Syntax check candidate
-    try:
-        candidate_tree = ast.parse(candidate_code)
-    except SyntaxError as e:
-        return [{"name": "syntax_error", "passed": False, "message": str(e)}], ""
-
-    # 2. Fetch and prepare
+    """Write candidate_code into repo at base_sha, run PR-fixed tests. Returns (results, stdout)."""
+    # 1. Fetch and prepare
     repo_root = _fetch_and_prepare_impl(github_token, owner, repo, base_sha, test_files)
 
-    # 3. Parse original file
-    orig_path = repo_root / file_path
-    try:
-        orig_src = orig_path.read_text()
-        orig_tree = ast.parse(orig_src)
-    except Exception as e:
-        return [{"name": "source_file_unparseable", "passed": False, "message": str(e)}], ""
-
-    orig_lines = orig_src.splitlines(True)
-
-    # 4. Build map of original top-level functions (last occurrence wins)
-    orig_funcs: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
-    orig_import_strs: set[str] = set()
-    for node in orig_tree.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            orig_funcs[node.name] = node
-        elif isinstance(node, (ast.Import, ast.ImportFrom)):
-            seg = ast.get_source_segment(orig_src, node)
-            if seg:
-                orig_import_strs.add(seg)
-
-    # 5. Collect candidate functions and new imports
-    new_import_lines: list[str] = []
-    replacements: dict[int, tuple[int, str]] = {}  # start_line -> (end_line, new_code)
-    append_funcs: list[str] = []
-
-    for node in candidate_tree.body:
-        if isinstance(node, (ast.Import, ast.ImportFrom)):
-            seg = ast.get_source_segment(candidate_code, node)
-            if seg and seg not in orig_import_strs:
-                new_import_lines.append(seg + "\n")
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            seg = ast.get_source_segment(candidate_code, node)
-            if seg:
-                if node.name in orig_funcs:
-                    orig_node = orig_funcs[node.name]
-                    start = (
-                        orig_node.decorator_list[0].lineno
-                        if orig_node.decorator_list
-                        else orig_node.lineno
-                    )
-                    end = orig_node.end_lineno
-                    replacements[start] = (end, seg)
-                else:
-                    append_funcs.append(seg)
-
-    # 6. Rebuild file
-    new_parts: list[str] = []
-    if new_import_lines:
-        new_parts.extend(new_import_lines)
-
-    i = 1  # 1-indexed
-    while i <= len(orig_lines):
-        if i in replacements:
-            end, new_code = replacements[i]
-            new_parts.append(new_code + "\n")
-            i = end + 1
-        else:
-            new_parts.append(orig_lines[i - 1])
-            i += 1
-
-    for fn_code in append_funcs:
-        new_parts.append("\n\n" + fn_code + "\n")
-
-    orig_path.write_text("".join(new_parts))
+    # 2. Write candidate code (single or multi-file)
+    err = _write_candidate_files(repo_root, file_paths, candidate_code)
+    if err:
+        return [{"name": "syntax_error", "passed": False, "message": err}], ""
 
     # 7. Run pytest
     report_path = tempfile.mktemp(suffix="_pytest_report.json")
-    pytest_args = challenge_test_ids if challenge_test_ids else [str(repo_root)]
+    if challenge_test_ids:
+        pytest_args = challenge_test_ids  # relative node IDs — needs cwd=repo_root
+        print(f"[_run_tests_impl] running {len(pytest_args)} specific test(s): {pytest_args}", flush=True)
+    else:
+        pytest_args = [str(repo_root)]
+        print(f"[_run_tests_impl] no specific tests — running full suite at {repo_root}", flush=True)
+    env = {**os.environ, "PYTHONPATH": str(repo_root)}
     result = subprocess.run(
         ["pytest", *pytest_args, "--tb=short", "-q", "--json-report", f"--json-report-file={report_path}"],
         capture_output=True, text=True,
+        cwd=str(repo_root),
+        env=env,
     )
     pytest_stdout = result.stdout + result.stderr
 
@@ -216,6 +208,9 @@ def _run_tests_impl(
             }
             for t in tests
         ]
+        if not results:
+            # No tests collected — likely a syntax/import error in the submitted file
+            return [{"name": "collection_error", "passed": False, "message": pytest_stdout[:2000]}], pytest_stdout
         return results, pytest_stdout
     except Exception:
         return [{"name": "pytest_parse_failed", "passed": False, "message": pytest_stdout[:2000]}], pytest_stdout
@@ -245,13 +240,13 @@ def _run_tests(
     owner: str,
     repo: str,
     base_sha: str,
-    file_path: str,
+    file_paths: list[str],
     candidate_code: str,
     test_files: list[dict],
     challenge_test_ids: list[str],
 ) -> tuple[list[dict], str]:
     return _run_tests_impl(
-        github_token, owner, repo, base_sha, file_path,
+        github_token, owner, repo, base_sha, file_paths,
         candidate_code, test_files, challenge_test_ids,
     )
 
@@ -268,12 +263,19 @@ async def discover_pr_fixed_tests(
     head_sha: str,
     test_files: list[dict],
 ) -> list[str]:
+    logger.info(
+        "[github_runner] calling discover_pr_fixed_tests via Modal: %s/%s base=%s head=%s",
+        owner, repo, base_sha[:8], head_sha[:8],
+    )
     try:
-        return await _discover_pr_fixed_tests.remote.aio(
+        fn = modal.Function.from_name("lucidly-github-runner", "_discover_pr_fixed_tests")
+        result = await fn.remote.aio(
             github_token, owner, repo, base_sha, head_sha, test_files
         )
+        logger.info("[github_runner] Modal returned %d test ID(s): %s", len(result), result)
+        return result
     except Exception as e:
-        logger.warning("discover_pr_fixed_tests failed: %s", e)
+        logger.warning("[github_runner] discover_pr_fixed_tests failed: %s", e)
         return []
 
 
@@ -284,12 +286,15 @@ async def run_in_repo_context(
     test_files: list[dict],
 ) -> tuple[list[dict], str]:
     try:
-        return await _run_tests.remote.aio(
+        # Support legacy single-file repo_context rows
+        file_paths = repo_context.file_paths or ([repo_context.file_path] if repo_context.file_path else [])
+        fn = modal.Function.from_name("lucidly-github-runner", "_run_tests")
+        return await fn.remote.aio(
             github_token,
             repo_context.owner,
             repo_context.repo,
             repo_context.base_sha,
-            repo_context.file_path,
+            file_paths,
             candidate_code,
             test_files,
             repo_context.challenge_test_ids,

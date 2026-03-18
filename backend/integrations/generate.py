@@ -1,10 +1,8 @@
 """LLM-based test case parsing and generation for interview challenges."""
 
-import ast
 import json
-import re
 import logging
-from pathlib import Path
+import re
 
 from llm import LLM
 from config import settings
@@ -78,109 +76,6 @@ async def generate_test_cases_from_diff(
         return []
 
 
-def _select_source_file(
-    pr_fixed_test_ids: list[str],
-    base_source_files: list[dict],
-) -> dict:
-    """Select the most relevant source file based on test file stem matching."""
-    if not base_source_files:
-        raise ValueError("base_source_files is empty")
-    if not pr_fixed_test_ids:
-        return base_source_files[0]
-
-    scores: dict[str, int] = {f["filename"]: 0 for f in base_source_files}
-    for node_id in pr_fixed_test_ids:
-        test_file = node_id.split("::")[0]  # "tests/test_parser.py"
-        test_stem = Path(test_file).stem     # "test_parser"
-        if test_stem.startswith("test_"):
-            test_stem = test_stem[5:]        # "parser"
-        for source_file in base_source_files:
-            src_stem = Path(source_file["filename"]).stem
-            if src_stem == test_stem:
-                scores[source_file["filename"]] += 1
-
-    best_score = max(scores.values())
-    if best_score == 0:
-        return base_source_files[0]
-
-    # On tie, use first file in original order that has the best score
-    for f in base_source_files:
-        if scores[f["filename"]] == best_score:
-            return f
-
-    return base_source_files[0]
-
-
-def _extract_functions_for_tests(
-    pr_fixed_test_ids: list[str],
-    source_content: str,
-    test_cases: list[dict] | None = None,
-) -> str | None:
-    """
-    Extract the function definitions from source_content that are exercised
-    by the PR-fixed test IDs (primary) and test case inputs (secondary).
-    Returns None if extraction fails or yields nothing.
-    """
-    # 1. Collect candidate function names from test node IDs
-    name_candidates: set[str] = set()
-    for node_id in pr_fixed_test_ids:
-        test_fn = node_id.split("::")[-1]  # "test_tokenize_operators_attached"
-        if test_fn.startswith("test_"):
-            name_candidates.add(test_fn[5:])
-        # Also try the base name part before first underscore after "test_"
-        # e.g. "test_tokenize_basic" → "tokenize"
-        stripped = test_fn[5:] if test_fn.startswith("test_") else test_fn
-        first_word = stripped.split("_")[0]
-        if first_word:
-            name_candidates.add(first_word)
-
-    # Secondary: regex on test case inputs — re.match requires '(' right after the
-    # identifier, so 'obj.method(x)' does NOT match (no '(' after 'obj').
-    if test_cases:
-        for tc in test_cases:
-            m = re.match(r"^([A-Za-z_]\w*)\s*\(", tc.get("input", "").strip())
-            if m:
-                name_candidates.add(m.group(1))
-
-    if not name_candidates:
-        return None
-
-    # 2. Parse source file
-    try:
-        tree = ast.parse(source_content)
-    except SyntaxError:
-        return None
-
-    source_lines = source_content.splitlines()
-
-    # 3. Find matching top-level functions (last occurrence wins for duplicates)
-    matched: dict[str, str] = {}
-    for node in tree.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            if node.name in name_candidates:
-                start = (
-                    node.decorator_list[0].lineno
-                    if node.decorator_list
-                    else node.lineno
-                )
-                end = node.end_lineno
-                matched[node.name] = "\n".join(source_lines[start - 1 : end])
-
-    if not matched:
-        return None
-
-    # Preserve original source order; deduplicate by tracking emitted names
-    seen: set[str] = set()
-    ordered: list[str] = []
-    for node in tree.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            if node.name in matched and node.name not in seen:
-                seen.add(node.name)
-                ordered.append(matched[node.name])
-
-    return "\n\n".join(ordered)
-
-
 async def build_challenge_from_issue(
     issue: dict,
     changed_files: list[dict],
@@ -207,25 +102,14 @@ async def build_challenge_from_issue(
     test_cases: list[dict] = []
     source = "llm_generated"
 
-    for tf in test_files:
-        parsed = await parse_test_cases_from_file(tf["content"])
-        test_cases.extend(parsed)
-    if test_cases:
-        source = "existing_tests"
-
-    if not test_cases:
-        diff_text = "\n".join(
-            f"--- {f['filename']}\n{f.get('patch', '')}"
-            for f in changed_files
-        )
-        failures_text = _format_ci_failures(ci_annotations or [])
-        test_cases = await generate_test_cases_from_diff(title, description, diff_text, failures_text)
-
     # Determine starter_code and repo_context
     repo_context: dict | None = None
     starter_code: str = _extract_stubs(changed_files)
 
     if is_merged and base_source_files and pr_owner and pr_repo and base_sha and head_sha:
+        # Repo-context path: test_cases are not needed — eval runs real pytest tests
+        # and results are reported by test node ID directly.
+
         # Get GitHub token for discovery
         github_token = get_integration(user_id, "github") if user_id else None
 
@@ -236,32 +120,53 @@ async def build_challenge_from_issue(
                 challenge_test_ids = await discover_pr_fixed_tests(
                     github_token, pr_owner, pr_repo, base_sha, head_sha, test_files
                 )
+                logger.info(
+                    "[generate] discover_pr_fixed_tests returned %d test(s): %s",
+                    len(challenge_test_ids),
+                    challenge_test_ids or "(none — will run full suite)",
+                )
             except Exception as e:
                 logger.warning("discover_pr_fixed_tests failed: %s", e)
                 challenge_test_ids = []
-
-        # Select source file based on PR-fixed test stems
-        selected_file = _select_source_file(challenge_test_ids, base_source_files)
-        file_path = selected_file["filename"]
-        source_content = selected_file["content"]
-
-        # Extract functions exercised by PR-fixed tests (test_cases used as secondary name source)
-        extracted = _extract_functions_for_tests(challenge_test_ids, source_content, test_cases)
-        if extracted:
-            starter_code = extracted
         else:
-            starter_code = _extract_stubs(changed_files)
+            logger.warning("[generate] no github_token — skipping test discovery, will run full suite")
+
+        # Use ALL changed source files — build multi-file starter code
+        file_paths = [f["filename"] for f in base_source_files]
+        if len(base_source_files) == 1:
+            starter_code = base_source_files[0]["content"]
+        else:
+            starter_code = "\n\n".join(
+                f"# === FILE: {f['filename']} ===\n{f['content']}"
+                for f in base_source_files
+            )
+        logger.info("[generate] using %d source file(s) as starter_code: %s", len(file_paths), file_paths)
 
         repo_context = {
             "owner": pr_owner,
             "repo": pr_repo,
             "base_sha": base_sha,
-            "file_path": file_path,
+            "file_paths": file_paths,
             "challenge_test_ids": challenge_test_ids,
         }
     elif base_source_files:
         # Non-merged PR with base source files — use full source as starter code
         starter_code = "\n\n".join(f["content"] for f in base_source_files)
+
+    # For non-repo-context challenges, generate test_cases via LLM
+    if not repo_context:
+        for tf in test_files:
+            parsed = await parse_test_cases_from_file(tf["content"])
+            test_cases.extend(parsed)
+        if test_cases:
+            source = "existing_tests"
+        else:
+            diff_text = "\n".join(
+                f"--- {f['filename']}\n{f.get('patch', '')}"
+                for f in changed_files
+            )
+            failures_text = _format_ci_failures(ci_annotations or [])
+            test_cases = await generate_test_cases_from_diff(title, description, diff_text, failures_text)
 
     result: dict = {
         "title": title,

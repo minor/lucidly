@@ -15,6 +15,8 @@ class InterviewChallenge(BaseModel):
     test_suite: list[TestCase] | None = None
     reference_html: str | None = None
     sort_order: int = 0
+    repo_context: dict | None = None   # set for merged-PR challenges; enables repo-context eval
+    test_files: list[dict] = []        # [{path, content}] pytest files for repo-context eval
 
 
 class InterviewConfig(BaseModel):
@@ -87,6 +89,8 @@ class AddChallengeRequest(BaseModel):
     solution_code: str | None = None
     test_suite: list[TestCase] | None = None
     reference_html: str | None = None
+    repo_context: dict | None = None
+    test_files: list[dict] = []
 
 
 class UpdateChallengeRequest(BaseModel):

@@ -76,6 +76,8 @@ def _row_to_room(row: dict) -> InterviewRoom:
             test_suite=ch["test_suite"] if "test_suite" in ch else ch.get("test_cases"),  # compat: old rows used test_cases
             reference_html=ch.get("reference_html"),
             sort_order=ch.get("sort_order", 0),
+            repo_context=ch.get("repo_context"),
+            test_files=ch.get("test_files") or [],
         ))
 
     return InterviewRoom(
@@ -310,6 +312,8 @@ def add_challenge(
     solution_code: str | None = None,
     test_suite: list | None = None,
     reference_html: str | None = None,
+    repo_context: dict | None = None,
+    test_files: list | None = None,
 ) -> InterviewChallenge | None:
     room = get_room(room_id)
     if room is None:
@@ -325,6 +329,8 @@ def add_challenge(
         test_suite=test_suite,
         reference_html=reference_html,
         sort_order=len(room.challenges),
+        repo_context=repo_context,
+        test_files=test_files or [],
     )
     room.challenges.append(challenge)
 

@@ -244,4 +244,9 @@ async def generate_challenge(
         head_sha=head_sha,
         is_merged=is_merged,
     )
+    # Embed the github_token in repo_context so the interview evaluator can use
+    # it without needing to look up by room.created_by (which is a display name,
+    # not an Auth0 user ID).
+    if github_token and result.get("repo_context"):
+        result["repo_context"]["github_token"] = github_token
     return result

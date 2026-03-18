@@ -363,6 +363,7 @@ export async function terminateSandbox(sandboxId: string): Promise<void> {
 // ---- Run Tests ----
 
 export interface TestCaseResult {
+  name?: string;
   input: string;
   expected: string;
   actual: string | null;
@@ -669,6 +670,8 @@ export async function addInterviewChallenge(
     solution_code?: string;
     test_suite?: { input: string; expected_output: string }[];
     reference_html?: string;
+    repo_context?: Record<string, unknown> | null;
+    test_files?: { path: string; content: string }[];
   }
 ): Promise<InterviewChallenge> {
   return fetchJSON<InterviewChallenge>(
@@ -755,7 +758,8 @@ export async function streamInterviewPrompt(
     test_results: TestCaseResult[] | null;
   }) => void,
   onError?: (error: string) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  onEvaluating?: (accumulatedContent: string) => void
 ): Promise<void> {
   let response: Response;
   try {
@@ -815,6 +819,8 @@ export async function streamInterviewPrompt(
             if (data.type === "chunk") {
               fullResponse += data.content;
               onChunk?.(data.content);
+            } else if (data.type === "evaluating") {
+              onEvaluating?.(fullResponse);
             } else if (data.type === "done") {
               onComplete?.({
                 content: data.content || fullResponse,

@@ -18,8 +18,11 @@ class RepoContext(BaseModel):
     owner: str
     repo: str
     base_sha: str
-    file_path: str               # repo-relative path of the selected source file
+    file_paths: list[str]        # repo-relative paths of all changed source files
     challenge_test_ids: list[str]  # PR-fixed test node IDs; empty = run full suite
+    github_token: str | None = None  # embedded at challenge-creation time for evaluation
+    # Legacy single-file field — kept for backward compat with existing DB rows
+    file_path: str | None = None
 
 
 class Challenge(BaseModel):

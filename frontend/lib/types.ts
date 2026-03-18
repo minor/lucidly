@@ -255,4 +255,6 @@ export interface GeneratedChallenge {
   starter_code: string;
   test_cases: Array<{ input: string; expected_output: string }>;
   source: "existing_tests" | "llm_generated";
+  repo_context?: Record<string, unknown> | null;
+  test_files?: { path: string; content: string }[];
 }

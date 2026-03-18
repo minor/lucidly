@@ -11,16 +11,18 @@ import {
   updateVercelSandboxCode,
   stopVercelSandbox,
 } from "@/lib/api";
-import { PromptInput } from "@/components/PromptInput";
+import { ChatPanel } from "@/components/ChatPanel";
 import { ScoreBar } from "@/components/ScoreBar";
 import { SimpleMarkdown } from "@/components/SimpleMarkdown";
+import { TestResultsPanel } from "@/components/TestResultsPanel";
+import { useTestResults } from "@/hooks/useTestResults";
 import { extractRenderableUI, extractPythonCode } from "@/lib/codeExtract";
 import type {
   InterviewRoom,
   InterviewSession,
   InterviewChallenge,
 } from "@/lib/types";
-import type { ChatMessage, TestCaseResult } from "@/lib/api";
+import type { ChatMessage } from "@/lib/api";
 import {
   Loader2,
   Sparkles,
@@ -30,9 +32,6 @@ import {
   GripHorizontal,
   Trophy,
   AlertTriangle,
-  CheckCircle2,
-  XCircle,
-  FlaskConical,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -61,7 +60,7 @@ export default function CandidateInterviewPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [currentStreamingMessage, setCurrentStreamingMessage] = useState("");
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [isWaitingForFirstToken, setIsWaitingForFirstToken] = useState(false);
 
   // Metrics
   const startTimeRef = useRef<number>(Date.now());
@@ -72,9 +71,8 @@ export default function CandidateInterviewPage() {
   const [estimatedTokens, setEstimatedTokens] = useState(0);
 
   // Test results (updated after each turn)
-  const [testResults, setTestResults] = useState<TestCaseResult[] | null>(null);
+  const { testResults, runningTests, latestCode, testTab, setTestTab, startEval, cancelEval, setResults, setCode, reset: resetTestResults } = useTestResults();
   const [latestAccuracy, setLatestAccuracy] = useState<number | null>(null);
-  const [testTab, setTestTab] = useState<"results" | "code">("results");
 
   // Model
   const [selectedModel, setSelectedModel] = useState("grok-4-1-fast-non-reasoning");
@@ -95,8 +93,7 @@ export default function CandidateInterviewPage() {
   const vercelSandboxIdRef = useRef<string | null>(null);
   const [iframeKey, setIframeKey] = useState(0);
 
-  // Test results (for coding challenges — shown if interviewer allows)
-  const [latestCode, setLatestCode] = useState("");
+  // latestCode comes from useTestResults hook above
 
   // Submission
   const [submitState, setSubmitState] = useState<"idle" | "pending" | "completed">("idle");
@@ -151,11 +148,6 @@ export default function CandidateInterviewPage() {
     return () => clearInterval(interval);
   }, [joined, submitState, room]);
 
-  // ---- Auto-scroll chat ----
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, currentStreamingMessage]);
-
   // ---- Vercel Sandbox for frontend challenges ----
   // DISABLED: using plain srcDoc HTML rendering instead. Re-enable these
   // useEffects to restore Vercel Sandbox.
@@ -205,7 +197,7 @@ export default function CandidateInterviewPage() {
       if (extracted) setRenderedCode(extracted.html);
     } else if (activeChallenge?.category === "function") {
       const code = extractPythonCode(latest.content);
-      if (code) setLatestCode(code);
+      if (code) setCode(code);
     }
   }, [messages, isStreaming, activeChallenge]);
 
@@ -263,6 +255,7 @@ export default function CandidateInterviewPage() {
     const updatedMessages = [...messages, userMessage];
     setMessages(updatedMessages);
     setIsStreaming(true);
+    setIsWaitingForFirstToken(true);
     setCurrentStreamingMessage("");
     setTotalTurns((t) => t + 1);
 
@@ -275,23 +268,22 @@ export default function CandidateInterviewPage() {
       prompt,
       model,
       (chunk) => {
+        setIsWaitingForFirstToken(false);
         setCurrentStreamingMessage((prev) => prev + chunk);
         setEstimatedTokens((prev) => prev + chunk.length / 4);
       },
       (data) => {
-        const assistantMessage: ChatMessage = {
-          role: "assistant",
-          content: data.content,
-        };
-        setMessages([...updatedMessages, assistantMessage]);
+        // Message was already committed in onEvaluating; just finalize metrics + results
         setCurrentStreamingMessage("");
         setIsStreaming(false);
+        setIsWaitingForFirstToken(false);
+        cancelEval();
         setTotalTokens(data.total_tokens || 0);
         setTotalTurns(data.total_turns || 0);
         if (data.cost) setTotalCost((c) => c + data.cost);
         setEstimatedTokens(0);
         if (data.test_results !== null) {
-          setTestResults(data.test_results);
+          setResults(data.test_results);
           setLatestAccuracy(data.accuracy);
         }
         abortControllerRef.current = null;
@@ -305,10 +297,19 @@ export default function CandidateInterviewPage() {
         setMessages([...updatedMessages, errorMessage]);
         setCurrentStreamingMessage("");
         setIsStreaming(false);
+        setIsWaitingForFirstToken(false);
+        cancelEval();
         setEstimatedTokens(0);
         abortControllerRef.current = null;
       },
-      abortControllerRef.current?.signal
+      abortControllerRef.current?.signal,
+      (accumulatedContent) => {
+        const assistantMessage: ChatMessage = { role: "assistant", content: accumulatedContent };
+        setMessages([...updatedMessages, assistantMessage]);
+        setCurrentStreamingMessage("");
+        setIsStreaming(false);
+        startEval();
+      }
     );
   };
 
@@ -341,11 +342,11 @@ export default function CandidateInterviewPage() {
     setActiveChallenge(ch);
     setMessages([]);
     setRenderedCode("");
-    setLatestCode("");
+    setCode("");
     setCurrentStreamingMessage("");
     setSubmitState("idle");
     setFinalScores(null);
-    setTestResults(null);
+    resetTestResults();
     setLatestAccuracy(null);
     setTestTab("results");
 
@@ -684,118 +685,13 @@ export default function CandidateInterviewPage() {
                 )}
 
                 {isCoding && (
-                  <>
-                    <div className="flex items-center justify-between border-b border-border px-4 py-2 shrink-0">
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => setTestTab("results")}
-                          className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer ${
-                            testTab === "results"
-                              ? "bg-accent/10 text-accent"
-                              : "text-muted hover:text-foreground"
-                          }`}
-                        >
-                          <FlaskConical className="h-3 w-3" />
-                          Tests
-                        </button>
-                        <button
-                          onClick={() => setTestTab("code")}
-                          className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer ${
-                            testTab === "code"
-                              ? "bg-accent/10 text-accent"
-                              : "text-muted hover:text-foreground"
-                          }`}
-                        >
-                          <Code className="h-3 w-3" />
-                          Code
-                        </button>
-                      </div>
-                      {testResults && (
-                        <span
-                          className={`text-xs font-medium ${
-                            testResults.every((r) => r.passed)
-                              ? "text-green-500"
-                              : "text-red-400"
-                          }`}
-                        >
-                          {testResults.filter((r) => r.passed).length}/{testResults.length} passed
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="flex-1 min-h-0 overflow-y-auto">
-                      {testTab === "results" ? (
-                        testResults ? (
-                          <div className="p-4 space-y-2">
-                            {/* Summary banner */}
-                            <div
-                              className={`rounded-lg px-3 py-2 text-xs font-medium ${
-                                testResults.every((r) => r.passed)
-                                  ? "bg-green-500/10 text-green-500"
-                                  : "bg-red-400/10 text-red-400"
-                              }`}
-                            >
-                              {testResults.every((r) => r.passed)
-                                ? "✓ All tests passed!"
-                                : `✗ ${testResults.filter((r) => !r.passed).length} test(s) failed`}
-                            </div>
-                            {/* Individual results */}
-                            {testResults.map((tc, i) => (
-                              <div
-                                key={i}
-                                className={`rounded-lg border px-3 py-2 text-xs ${
-                                  tc.passed
-                                    ? "border-green-500/20 bg-green-500/5"
-                                    : "border-red-400/20 bg-red-400/5"
-                                }`}
-                              >
-                                <div className="flex items-center gap-2 mb-1">
-                                  {tc.passed ? (
-                                    <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0" />
-                                  ) : (
-                                    <XCircle className="h-3.5 w-3.5 text-red-400 shrink-0" />
-                                  )}
-                                  <span className="font-mono text-foreground truncate">
-                                    {tc.input}
-                                  </span>
-                                </div>
-                                {!tc.passed && (
-                                  <div className="ml-5 mt-1 space-y-0.5 text-xs font-mono">
-                                    {tc.error ? (
-                                      <div className="text-red-400">Error: {tc.error}</div>
-                                    ) : (
-                                      <>
-                                        <div className="text-muted">
-                                          Expected:{" "}
-                                          <span className="text-green-500">{tc.expected}</span>
-                                        </div>
-                                        <div className="text-muted">
-                                          Got:{" "}
-                                          <span className="text-red-400">{tc.actual}</span>
-                                        </div>
-                                      </>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="flex items-center justify-center h-full">
-                            <span className="text-sm text-muted">No test results yet</span>
-                          </div>
-                        )
-                      ) : latestCode ? (
-                        <pre className="h-full overflow-auto p-4 bg-code-bg text-xs font-mono">
-                          <code>{latestCode}</code>
-                        </pre>
-                      ) : (
-                        <div className="flex items-center justify-center h-full">
-                          <span className="text-sm text-muted">No code yet</span>
-                        </div>
-                      )}
-                    </div>
-                  </>
+                  <TestResultsPanel
+                    results={testResults}
+                    running={runningTests}
+                    tab={testTab}
+                    onTabChange={setTestTab}
+                    latestCode={latestCode}
+                  />
                 )}
               </div>
             </>
@@ -806,93 +702,22 @@ export default function CandidateInterviewPage() {
         <div className="flex flex-col w-1/2 shrink-0">
           <div className="border-b border-border px-6 py-3 flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-muted" />
-            <h2 className="text-sm font-medium text-foreground">
-              Workspace
-            </h2>
+            <h2 className="text-sm font-medium text-foreground">Workspace</h2>
           </div>
-
-          <div className="flex-1 overflow-y-auto">
-            <div className="px-6 py-8">
-              {messages.length === 0 && !isStreaming && (
-                <div className="flex flex-col items-center justify-center h-full min-h-[400px]">
-                  <div className="text-center max-w-md">
-                    <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-accent/10 mb-4">
-                      <Sparkles className="h-6 w-6 text-accent" />
-                    </div>
-                    <h3 className="text-lg font-medium text-foreground mb-2">
-                      Start prompting
-                    </h3>
-                    <p className="text-sm text-muted">
-                      Describe what you want to build. The AI will generate
-                      code based on your prompt.
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              <div className="space-y-8">
-                {messages.map((message, index) => (
-                  <div
-                    key={index}
-                    className={`flex gap-4 group ${
-                      message.role === "user" ? "flex-row-reverse" : ""
-                    }`}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm leading-relaxed">
-                        {message.role === "user" ? (
-                          <div className="bg-foreground/5 border border-border rounded-lg px-4 py-3 text-foreground">
-                            <div className="whitespace-pre-wrap break-words">
-                              {message.content}
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="text-foreground">
-                            <div className="whitespace-pre-wrap break-words">
-                              {message.content}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-
-                {isStreaming && (
-                  <div className="flex gap-4 group">
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm leading-relaxed text-foreground">
-                        <div className="whitespace-pre-wrap break-words">
-                          {currentStreamingMessage}
-                          <span className="inline-block w-0.5 h-4 bg-foreground ml-1 align-middle animate-pulse" />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div ref={messagesEndRef} />
-            </div>
-          </div>
-
-          <div className="border-t border-border bg-background">
-            <div className="px-6 py-4">
-              <PromptInput
-                onSubmit={handleSubmit}
-                onStop={handleStop}
-                isStreaming={isStreaming}
-                selectedModel={selectedModel}
-                onModelChange={setSelectedModel}
-                placeholder="Describe what you want to build…"
-                disabled={
-                  isStreaming ||
-                  submitState !== "idle" ||
-                  timeExpired
-                }
-              />
-            </div>
-          </div>
+          <ChatPanel
+            messages={messages}
+            isStreaming={isStreaming}
+            currentStreamingMessage={currentStreamingMessage}
+            isWaitingForFirstToken={isWaitingForFirstToken}
+            selectedModel={selectedModel}
+            onModelChange={setSelectedModel}
+            onSubmit={handleSubmit}
+            onStop={handleStop}
+            disabled={isStreaming || submitState !== "idle" || timeExpired}
+            placeholder="Describe what you want to build…"
+            emptyTitle="Start prompting"
+            emptyDescription="Describe what you want to build. The AI will generate code based on your prompt."
+          />
         </div>
       </div>
     </div>
