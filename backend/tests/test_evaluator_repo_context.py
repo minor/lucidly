@@ -10,7 +10,7 @@ REPO_CONTEXT = RepoContext(
     owner="acme",
     repo="myrepo",
     base_sha="base123",
-    file_path="src/parser.py",
+    file_paths=["src/parser.py"],
     challenge_test_ids=["tests/test_parser.py::test_tok"],
 )
 
