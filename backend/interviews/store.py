@@ -61,18 +61,23 @@ def _row_to_room(row: dict) -> InterviewRoom:
     if isinstance(challenges_data, str):
         challenges_data = json.loads(challenges_data)
 
+    # Normalize legacy category values to the canonical names used since the rename.
+    _CATEGORY_MAP = {"coding": "function", "frontend": "UI", "system_design": "system"}
+
     challenges = []
     for ch in challenges_data:
         challenges.append(InterviewChallenge(
             id=ch["id"],
             title=ch["title"],
             description=ch["description"],
-            category=ch["category"],
+            category=_CATEGORY_MAP.get(ch["category"], ch["category"]),
             starter_code=ch.get("starter_code"),
             solution_code=ch.get("solution_code"),
-            test_cases=ch.get("test_cases"),
+            test_suite=ch["test_suite"] if "test_suite" in ch else ch.get("test_cases"),  # compat: old rows used test_cases
             reference_html=ch.get("reference_html"),
             sort_order=ch.get("sort_order", 0),
+            repo_context=ch.get("repo_context"),
+            test_files=ch.get("test_files") or [],
         ))
 
     return InterviewRoom(
@@ -97,6 +102,7 @@ def _row_to_turn(row: dict) -> InterviewTurn:
         generated_code=row.get("generated_code") or "",
         prompt_tokens=row.get("prompt_tokens") or 0,
         response_tokens=row.get("response_tokens") or 0,
+        accuracy_at_turn=row.get("accuracy_at_turn") or 0.0,
         timestamp=_ts_to_float(row.get("timestamp")),
     )
 
@@ -304,8 +310,10 @@ def add_challenge(
     category: str,
     starter_code: str | None = None,
     solution_code: str | None = None,
-    test_cases: list | None = None,
+    test_suite: list | None = None,
     reference_html: str | None = None,
+    repo_context: dict | None = None,
+    test_files: list | None = None,
 ) -> InterviewChallenge | None:
     room = get_room(room_id)
     if room is None:
@@ -318,9 +326,11 @@ def add_challenge(
         category=category,
         starter_code=starter_code,
         solution_code=solution_code,
-        test_cases=test_cases,
+        test_suite=test_suite,
         reference_html=reference_html,
         sort_order=len(room.challenges),
+        repo_context=repo_context,
+        test_files=test_files or [],
     )
     room.challenges.append(challenge)
 
@@ -500,6 +510,7 @@ def add_turn(session_id: str, turn: InterviewTurn) -> InterviewSession | None:
             "generated_code": turn.generated_code,
             "prompt_tokens": turn.prompt_tokens,
             "response_tokens": turn.response_tokens,
+            "accuracy_at_turn": turn.accuracy_at_turn,
         }
         supabase.table("interview_turns").insert(turn_data).execute()
 

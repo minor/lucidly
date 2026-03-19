@@ -12,6 +12,9 @@ import type {
   InterviewConfig,
   InterviewSession,
   InterviewReport,
+  IntegrationStatus,
+  LinearIssue,
+  GeneratedChallenge,
 } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -360,6 +363,7 @@ export async function terminateSandbox(sandboxId: string): Promise<void> {
 // ---- Run Tests ----
 
 export interface TestCaseResult {
+  name?: string;
   input: string;
   expected: string;
   actual: string | null;
@@ -664,8 +668,10 @@ export async function addInterviewChallenge(
     category: string;
     starter_code?: string;
     solution_code?: string;
-    test_cases?: { input: string; expected_output: string }[];
+    test_suite?: { input: string; expected_output: string }[];
     reference_html?: string;
+    repo_context?: Record<string, unknown> | null;
+    test_files?: { path: string; content: string }[];
   }
 ): Promise<InterviewChallenge> {
   return fetchJSON<InterviewChallenge>(
@@ -748,9 +754,12 @@ export async function streamInterviewPrompt(
     cost: number;
     total_tokens: number;
     total_turns: number;
+    accuracy: number;
+    test_results: TestCaseResult[] | null;
   }) => void,
   onError?: (error: string) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  onEvaluating?: (accumulatedContent: string) => void
 ): Promise<void> {
   let response: Response;
   try {
@@ -810,6 +819,8 @@ export async function streamInterviewPrompt(
             if (data.type === "chunk") {
               fullResponse += data.content;
               onChunk?.(data.content);
+            } else if (data.type === "evaluating") {
+              onEvaluating?.(fullResponse);
             } else if (data.type === "done") {
               onComplete?.({
                 content: data.content || fullResponse,
@@ -819,6 +830,8 @@ export async function streamInterviewPrompt(
                 cost: data.cost || 0,
                 total_tokens: data.total_tokens || 0,
                 total_turns: data.total_turns || 0,
+                accuracy: data.accuracy ?? 0,
+                test_results: data.test_results ?? null,
               });
             } else if (data.type === "error") {
               onError?.(data.message || "Unknown error");
@@ -840,6 +853,8 @@ export async function streamInterviewPrompt(
         cost: 0,
         total_tokens: 0,
         total_turns: 0,
+        accuracy: 0,
+        test_results: null,
       });
       return;
     }
@@ -991,4 +1006,24 @@ export async function setUsername(auth0Id: string, username: string): Promise<st
   }
   const data = await res.json();
   return data.username;
+}
+
+// ---------------------------------------------------------------------------
+// Integrations (Linear + GitHub)
+// ---------------------------------------------------------------------------
+
+export async function getIntegrationStatus(): Promise<IntegrationStatus> {
+  return fetchJSON<IntegrationStatus>("/api/integrations/status");
+}
+
+export async function searchLinearIssues(query: string): Promise<LinearIssue[]> {
+  const q = encodeURIComponent(query);
+  return fetchJSON<LinearIssue[]>(`/api/integrations/linear/issues?query=${q}`);
+}
+
+export async function generateChallengeFromIssue(issueId: string): Promise<GeneratedChallenge> {
+  return fetchJSON<GeneratedChallenge>("/api/integrations/generate-challenge", {
+    method: "POST",
+    body: JSON.stringify({ issue_id: issueId }),
+  });
 }

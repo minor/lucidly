@@ -4,9 +4,11 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { getChallenge, runTests, runCode, createSandbox, terminateSandbox, MODEL_PRICING, MODELS, createVercelSandbox, updateVercelSandboxCode, stopVercelSandbox, streamPromptFeedback, createScoringSession, submitScore, setAuthToken, getDailyAttempts } from "@/lib/api";
-import { PromptInput } from "@/components/PromptInput";
+import { ChatPanel } from "@/components/ChatPanel";
 import { ScoreBar } from "@/components/ScoreBar";
 import { SimpleMarkdown } from "@/components/SimpleMarkdown";
+import { TestResultsPanel } from "@/components/TestResultsPanel";
+import { useTestResults } from "@/hooks/useTestResults";
 import { streamChat, type ChatMessage, type TestCaseResult, type RunTestsResponse, type StreamDoneData, type RunCodeResponse } from "@/lib/api";
 import { extractPythonCode, extractRenderableUI } from "@/lib/codeExtract";
 import type { Challenge, Scores } from "@/lib/types";
@@ -88,8 +90,6 @@ export default function ChallengePage() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [currentStreamingMessage, setCurrentStreamingMessage] = useState("");
   const [lastTurnAborted, setLastTurnAborted] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const chatContainerRef = useRef<HTMLDivElement>(null);
 
   // UI preview state
   const [renderedCode, setRenderedCode] = useState<string>("");
@@ -99,10 +99,7 @@ export default function ChallengePage() {
   const [referenceHtml, setReferenceHtml] = useState<string>("");
 
   // Test results state
-  const [testResults, setTestResults] = useState<RunTestsResponse | null>(null);
-  const [testTab, setTestTab] = useState<"results" | "code">("results");
-  const [latestCode, setLatestCode] = useState<string>("");
-  const [runningTests, setRunningTests] = useState(false);
+  const { testResults, runningTests, latestCode, testTab, setTestTab, startEval, setResults, setCode, reset: resetTestResults } = useTestResults();
 
   // UI evaluation score state
   const [uiScore, setUiScore] = useState<number | undefined>(undefined);
@@ -118,6 +115,8 @@ export default function ChallengePage() {
   const [sandboxId, setSandboxId] = useState<string | null>(null);
   const [sandboxError, setSandboxError] = useState<string | null>(null);
   const sandboxIdRef = useRef<string | null>(null);
+  // Prevents concurrent sandbox creation (React StrictMode double-invoke)
+  const sandboxCreatingRef = useRef(false);
   
   // Vercel Sandbox state (for UI challenges)
   const [vercelSandboxId, setVercelSandboxId] = useState<string | null>(null);
@@ -263,12 +262,11 @@ export default function ChallengePage() {
     return () => { ignore = true; };
   }, [challenge, challengeId, isAuthenticated, auth0Loading, usernameLoading]);
   const isReasoningModel = selectedModel === 'gpt-5.2-reasoning' || selectedModel === 'grok-4-1-fast-reasoning';
-  const isThinking = isWaitingForFirstToken && isReasoningModel;
 
   // Timer Logic (Merged)
   useEffect(() => {
     // Check for 100% accuracy to auto-pause timer
-    const isPerfect = testResults && testResults.total_count > 0 && testResults.passed_count === testResults.total_count;
+    const isPerfect = testResults && testResults.length > 0 && testResults.every((r) => r.passed);
 
 
     // Pause conditions:
@@ -293,7 +291,7 @@ export default function ChallengePage() {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      const isPerfect = testResults && testResults.total_count > 0 && testResults.passed_count === testResults.total_count;
+      const isPerfect = testResults && testResults.length > 0 && testResults.every((r) => r.passed);
       const shouldPause = attemptsExhausted || (isWaitingForFirstToken && !isReasoningModel) || (isExecuting && !isStreaming) || submitState !== 'idle' || (isPerfect && submitState === 'idle');
 
       if (!shouldPause) {
@@ -363,17 +361,6 @@ export default function ChallengePage() {
     window.addEventListener("mouseup", onUp);
   }, [workspaceWidth]);
 
-  const scrollToBottom = () => {
-    const container = chatContainerRef.current;
-    if (!container) return;
-    const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
-    if (isNearBottom) {
-      container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
-    }
-  };
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages, currentStreamingMessage]);
 
   // Ensure selectedModel is valid
   useEffect(() => {
@@ -390,21 +377,32 @@ export default function ChallengePage() {
     const isDataChallenge = challenge.category === "data";
     if (!hasFunctionTests && !isDataChallenge) return;
 
+    // Guard against concurrent creation (React StrictMode runs effects twice in dev)
+    if (sandboxCreatingRef.current || sandboxIdRef.current) return;
+    sandboxCreatingRef.current = true;
+
     let ignore = false;
     async function initSandbox() {
       try {
         const { sandbox_id } = await createSandbox();
-        if (ignore) return;
+        if (ignore) {
+          // Cleanup won the race — terminate the sandbox we just created
+          terminateSandbox(sandbox_id).catch(() => {});
+          return;
+        }
         setSandboxId(sandbox_id);
         sandboxIdRef.current = sandbox_id;
       } catch (err) {
         if (!ignore) setSandboxError((err as Error).message);
+      } finally {
+        sandboxCreatingRef.current = false;
       }
     }
     initSandbox();
 
     return () => {
       ignore = true;
+      sandboxCreatingRef.current = false;
       if (sandboxIdRef.current) {
         terminateSandbox(sandboxIdRef.current).catch(() => {});
         sandboxIdRef.current = null;
@@ -555,20 +553,19 @@ export default function ChallengePage() {
     if (hasFunctionTests && sandboxId) {
       const code = extractPythonCode(latest.content);
       if (code) {
-        setLatestCode(code);
-        setRunningTests(true);
+        setCode(code);
+        startEval();
         setIsExecuting(true);
         testRunInFlightRef.current = true;
         runTests(code, challengeId, sandboxId, scoringSessionIdRef.current ?? undefined)
           .then((results) => {
-            setTestResults(results);
-            setRunningTests(false);
+            setResults(results.results);
             setIsExecuting(false);
           })
           .catch((err) => {
             console.error("Test run failed:", err);
             handleSessionExpired(err.message);
-            setRunningTests(false);
+            cancelEval();
             setIsExecuting(false);
           })
           .finally(() => {
@@ -661,7 +658,7 @@ export default function ChallengePage() {
       previewAccuracy = uiScore != null ? uiScore / 100 : undefined;
       previewScore = uiScore;
     } else if (hasFunctionTests && testResults) {
-      previewAccuracy = testResults.passed_count / testResults.total_count;
+      previewAccuracy = testResults.length > 0 ? testResults.filter((r) => r.passed).length / testResults.length : 0;
       previewScore = previewAccuracy * 100;
     } else if (isDataChallenge && codeResult) {
       previewAccuracy = codeResult.returncode === 0 ? 1.0 : 0.0;
@@ -746,8 +743,7 @@ export default function ChallengePage() {
     setMessages([]);
     setLastTurnAborted(false);
     setRenderedCode("");
-    setTestResults(null);
-    setLatestCode("");
+    resetTestResults();
     setUiScore(undefined);
     setCodeResult(null);
     setTotalTurns(0);
@@ -1150,15 +1146,15 @@ export default function ChallengePage() {
           maxTurns={isProductChallenge ? 10 : 4}
           tokens={scoreBarFrozen && frozenStatsRef.current ? frozenStatsRef.current.tokens : Math.round(totalTokens + totalInputTokens + estimatedTokens)}
           elapsedSec={scoreBarFrozen && frozenStatsRef.current ? frozenStatsRef.current.elapsed : elapsed}
-          accuracy={scoreBarFrozen && frozenStatsRef.current ? frozenStatsRef.current.accuracy : (testResults ? testResults.passed_count / testResults.total_count : undefined)}
+          accuracy={scoreBarFrozen && frozenStatsRef.current ? frozenStatsRef.current.accuracy : (testResults && testResults.length > 0 ? testResults.filter((r) => r.passed).length / testResults.length : undefined)}
           accuracyLabel={isProductChallenge ? "Quality" : "Accuracy"}
           score={
             scoreBarFrozen && frozenStatsRef.current
               ? frozenStatsRef.current.score
               : isUiChallenge && uiScore !== undefined
                 ? uiScore
-                : testResults
-                  ? (testResults.passed_count / testResults.total_count) * 100
+                : testResults && testResults.length > 0
+                  ? (testResults.filter((r) => r.passed).length / testResults.length) * 100
                   : undefined
           }
           scoreLoading={scoreLoading && !scoreBarFrozen}
@@ -1482,129 +1478,13 @@ export default function ChallengePage() {
               )}
 
               {hasFunctionTests && !isUiChallenge && (
-                <>
-                  <div className="flex items-center justify-between border-b border-border px-4 py-2 shrink-0">
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => setTestTab("results")}
-                        className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer ${
-                          testTab === "results"
-                            ? "bg-accent/10 text-accent"
-                            : "text-muted hover:text-foreground"
-                        }`}
-                      >
-                        <FlaskConical className="h-3 w-3" />
-                        Tests
-                      </button>
-                      <button
-                        onClick={() => setTestTab("code")}
-                        className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer ${
-                          testTab === "code"
-                            ? "bg-accent/10 text-accent"
-                            : "text-muted hover:text-foreground"
-                        }`}
-                      >
-                        <Code className="h-3 w-3" />
-                        Code
-                      </button>
-                    </div>
-                    {testResults && (
-                      <span
-                        className={`text-xs font-medium ${
-                          testResults.all_passed
-                            ? "text-green-500"
-                            : "text-red-400"
-                        }`}
-                      >
-                        {testResults.passed_count}/{testResults.total_count}{" "}
-                        passed
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="flex-1 min-h-0 overflow-y-auto">
-                    {runningTests ? (
-                      <div className="flex items-center justify-center h-full gap-2">
-                        <Loader2 className="h-4 w-4 animate-spin text-muted" />
-                        <span className="text-sm text-muted">
-                          Running tests…
-                        </span>
-                      </div>
-                    ) : testTab === "results" && testResults ? (
-                      <div className="p-4 space-y-2">
-                        {/* Summary banner */}
-                        <div
-                          className={`rounded-lg px-3 py-2 text-xs font-medium ${
-                            testResults.all_passed
-                              ? "bg-green-500/10 text-green-500"
-                              : "bg-red-400/10 text-red-400"
-                          }`}
-                        >
-                          {testResults.all_passed
-                            ? "✓ All tests passed!"
-                            : `✗ ${testResults.total_count - testResults.passed_count} test(s) failed`}
-                        </div>
-
-                        {/* Individual results */}
-                        {testResults.results.map((tc, i) => (
-                          <div
-                            key={i}
-                            className={`rounded-lg border px-3 py-2 text-xs ${
-                              tc.passed
-                                ? "border-green-500/20 bg-green-500/5"
-                                : "border-red-400/20 bg-red-400/5"
-                            }`}
-                          >
-                            <div className="flex items-center gap-2 mb-1">
-                              {tc.passed ? (
-                                <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0" />
-                              ) : (
-                                <XCircle className="h-3.5 w-3.5 text-red-400 shrink-0" />
-                              )}
-                              <span className="font-mono text-foreground truncate">
-                                {tc.input}
-                              </span>
-                            </div>
-                            {!tc.passed && (
-                              <div className="ml-5.5 mt-1 space-y-0.5 text-xs font-mono">
-                                {tc.error ? (
-                                  <div className="text-red-400">
-                                    Error: {tc.error}
-                                  </div>
-                                ) : (
-                                  <>
-                                    <div className="text-muted">
-                                      Expected:{" "}
-                                      <span className="text-green-500">
-                                        {tc.expected}
-                                      </span>
-                                    </div>
-                                    <div className="text-muted">
-                                      Got:{" "}
-                                      <span className="text-red-400">
-                                        {tc.actual}
-                                      </span>
-                                    </div>
-                                  </>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    ) : testTab === "code" && latestCode ? (
-                      <pre className="h-full overflow-auto p-4 bg-code-bg text-xs font-mono">
-                        <code>{latestCode}</code>
-                      </pre>
-                    ) : (
-                      <div className="flex items-center justify-center h-full">
-                        <span className="text-sm text-muted">
-                          No test results yet
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                </>
+                <TestResultsPanel
+                  results={testResults}
+                  running={runningTests}
+                  tab={testTab}
+                  onTabChange={setTestTab}
+                  latestCode={latestCode}
+                />
               )}
             </div>
           )}
@@ -1664,83 +1544,73 @@ export default function ChallengePage() {
           </div>
 
           {workspaceTab === "chat" ? (
-          <div
-            ref={chatContainerRef}
-            className="flex-1 overflow-y-auto"
-          >
-            <div className="px-6 py-8">
-              {messages.length === 0 && !isStreaming && (
-                <div className="flex flex-col items-center justify-center h-full min-h-[200px] sm:min-h-[400px]">
-                  <div className="text-center max-w-md">
-                    <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-accent/10 mb-4">
-                      <Sparkles className="h-6 w-6 text-accent" />
-                    </div>
-                    <h3 className="text-lg font-medium text-foreground mb-2">
-                      {isProductChallenge && productPart === 1 ? "Ask the CRO questions" : "Start a conversation"}
-                    </h3>
-                    <p className="text-sm text-muted">
-                      {isProductChallenge && productPart === 1
-                        ? "Ask clarifying questions to understand the problem, pain points, and constraints. Take notes in the notepad."
-                        : isProductChallenge && productPart === 2
-                          ? "Chat with the assistant to draft your PRD. Use the Notepad / PRD tabs on the left to write."
-                          : "Describe what you want built for this challenge"}
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              <div className="space-y-8">
-                {messages.map((message, index) => (
-                  <div
-                    key={index}
-                    className={`flex gap-4 group ${
-                      message.role === "user" ? "flex-row-reverse" : ""
-                    }`}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm leading-relaxed">
-                        {message.role === "user" ? (
-                          <div className="bg-foreground/5 border border-border rounded-lg px-4 py-3 text-foreground">
-                            <div className="whitespace-pre-wrap break-words">
-                              {message.content}
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="text-foreground">
-                            <div className="whitespace-pre-wrap break-words">
-                              {message.content}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-
-                {isStreaming && (
-                  <div className="flex gap-4 group">
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm leading-relaxed text-foreground">
-                        {isThinking ? (
-                          <div className="flex items-center gap-2 text-muted-foreground py-1 animate-pulse">
-                            <Sparkles className="h-4 w-4 text-accent" />
-                            <span className="font-medium">Thinking...</span>
-                          </div>
-                        ) : (
-                          <div className="whitespace-pre-wrap break-words">
-                            {currentStreamingMessage}
-                            <span className="inline-block w-0.5 h-4 bg-foreground ml-1 align-middle animate-pulse" />
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
+          <ChatPanel
+            messages={messages}
+            isStreaming={isStreaming}
+            currentStreamingMessage={currentStreamingMessage}
+            isWaitingForFirstToken={isWaitingForFirstToken}
+            selectedModel={selectedModel}
+            onModelChange={setSelectedModel}
+            onSubmit={handleSubmit}
+            onStop={handleStop}
+            disabled={sessionExpired || attemptsExhausted || submitState === "completed" || totalTurns >= (isProductChallenge ? 10 : 4)}
+            submitDisabled={isStreaming || isExecuting || submitState === "pending"}
+            fixedModel={isProductChallenge && productPart === 1 ? "gpt-5.2" : undefined}
+            placeholder={(() => {
+              if (attemptsExhausted) return "No attempts remaining today";
+              const maxT = isProductChallenge ? 10 : 4;
+              const remaining = maxT - totalTurns;
+              if (remaining <= 0) return "Turn limit reached";
+              const base = isProductChallenge && productPart === 1 ? "Ask the CRO..." : "Ask anything...";
+              return `${base} (${remaining} turn${remaining === 1 ? "" : "s"} left)`;
+            })()}
+            emptyTitle={isProductChallenge && productPart === 1 ? "Ask the CRO questions" : "Start a conversation"}
+            emptyDescription={
+              isProductChallenge && productPart === 1
+                ? "Ask clarifying questions to understand the problem, pain points, and constraints. Take notes in the notepad."
+                : isProductChallenge && productPart === 2
+                  ? "Chat with the assistant to draft your PRD. Use the Notepad / PRD tabs on the left to write."
+                  : "Describe what you want built for this challenge"
+            }
+            footerPrefix={lastTurnAborted && messages.length >= 2 ? (
+              <div className="px-6 pt-3 pb-0">
+                <button
+                  type="button"
+                  onClick={handleUndoAbortedTurn}
+                  className="flex items-center gap-1.5 text-xs text-muted hover:text-foreground transition-colors"
+                >
+                  <ArrowLeft className="h-3 w-3" />
+                  Undo aborted turn
+                </button>
               </div>
-
-              <div ref={messagesEndRef} />
-            </div>
-          </div>
+            ) : undefined}
+            extraButton={
+              <button
+                type="button"
+                onClick={submitState === "completed" ? handleRetry : handleSubmitSolution}
+                disabled={
+                  sessionExpired || attemptsExhausted ||
+                  submitState === "pending" ||
+                  isExecuting ||
+                  isStreaming ||
+                  (isProductChallenge
+                    ? productPart !== 2 || !prdContent.trim()
+                    : !testResults && !codeResult && !renderedCode)
+                }
+                className={`sm:hidden shrink-0 rounded-lg bg-foreground text-background px-3 h-7 text-xs font-medium transition-opacity ${
+                  submitState === "pending" ||
+                  (submitState === "idle" &&
+                    (isExecuting ||
+                      isStreaming ||
+                      (isProductChallenge ? productPart !== 2 || !prdContent.trim() : !testResults && !codeResult && !renderedCode)))
+                    ? "opacity-50 cursor-not-allowed"
+                    : "hover:opacity-90 cursor-pointer"
+                }`}
+              >
+                {submitState === "pending" ? "Pending" : submitState === "completed" ? "Retry" : isProductChallenge && productPart === 2 ? "Submit PRD" : "Submit"}
+              </button>
+            }
+          />
           ) : (
             <div className="flex-1 overflow-y-auto">
               <div className="px-6 py-8">
@@ -1779,69 +1649,6 @@ export default function ChallengePage() {
             </div>
           )}
 
-          <div className="border-t border-border bg-background">
-            {lastTurnAborted && messages.length >= 2 && (
-              <div className="px-6 pt-3 pb-0">
-                <button
-                  type="button"
-                  onClick={handleUndoAbortedTurn}
-                  className="flex items-center gap-1.5 text-xs text-muted hover:text-foreground transition-colors"
-                >
-                  <ArrowLeft className="h-3 w-3" />
-                  Undo aborted turn
-                </button>
-              </div>
-            )}
-            <div className="px-6 py-4">
-              <div className="flex justify-between items-center mb-2">
-                <div></div>
-              </div>
-              <PromptInput
-                onSubmit={handleSubmit}
-                onStop={handleStop}
-                isStreaming={isStreaming}
-                selectedModel={selectedModel}
-                onModelChange={setSelectedModel}
-                fixedModel={isProductChallenge && productPart === 1 ? "gpt-5.2" : undefined}
-                placeholder={(() => {
-                  if (attemptsExhausted) return "No attempts remaining today";
-                  const maxT = isProductChallenge ? 10 : 4;
-                  const remaining = maxT - totalTurns;
-                  if (remaining <= 0) return `Turn limit reached`;
-                  const base = isProductChallenge && productPart === 1 ? "Ask the CRO..." : "Ask anything...";
-                  return `${base} (${remaining} turn${remaining === 1 ? "" : "s"} left)`;
-                })()}
-                disabled={sessionExpired || attemptsExhausted || submitState === "completed" || totalTurns >= (isProductChallenge ? 10 : 4)}
-                submitDisabled={isStreaming || isExecuting || submitState === "pending"}
-                extraButton={
-                  <button
-                    type="button"
-                    onClick={submitState === "completed" ? handleRetry : handleSubmitSolution}
-                    disabled={
-                      sessionExpired || attemptsExhausted ||
-                      submitState === "pending" ||
-                      isExecuting ||
-                      isStreaming ||
-                      (isProductChallenge
-                        ? productPart !== 2 || !prdContent.trim()
-                        : !testResults && !codeResult && !renderedCode)
-                    }
-                    className={`sm:hidden shrink-0 rounded-lg bg-foreground text-background px-3 h-7 text-xs font-medium transition-opacity ${
-                      submitState === "pending" ||
-                      (submitState === "idle" &&
-                        (isExecuting ||
-                          isStreaming ||
-                          (isProductChallenge ? productPart !== 2 || !prdContent.trim() : !testResults && !codeResult && !renderedCode)))
-                        ? "opacity-50 cursor-not-allowed"
-                        : "hover:opacity-90 cursor-pointer"
-                    }`}
-                  >
-                    {submitState === "pending" ? "Pending" : submitState === "completed" ? "Retry" : isProductChallenge && productPart === 2 ? "Submit PRD" : "Submit"}
-                  </button>
-                }
-              />
-            </div>
-          </div>
         </div>
       </div>
     </div>

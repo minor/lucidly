@@ -4,11 +4,15 @@ Creates a Modal sandbox when a challenge is loaded, reuses it for test runs,
 and terminates it when the challenge is submitted or the page is closed.
 """
 
+import asyncio
 import json
 import modal
 
 # In-memory store: sandbox_id -> modal.Sandbox
 _sandboxes: dict[str, modal.Sandbox] = {}
+
+# Hard cap: bail out if Modal doesn't respond within this many seconds
+_SANDBOX_CREATE_TIMEOUT_SEC = 60
 
 # Define the image with necessary dependencies for data challenges
 _sandbox_image = (
@@ -21,12 +25,22 @@ _sandbox_image = (
 
 
 async def create_sandbox() -> str:
-    """Create a new persistent Modal sandbox. Returns the sandbox_id."""
-    app = await modal.App.lookup.aio("lucidly-sandbox", create_if_missing=True)
-    sb = await modal.Sandbox.create.aio(
-        image=_sandbox_image,
-        app=app,
-        timeout=3600,  # 1 hour idle timeout
+    """Create a new persistent Modal sandbox. Returns the sandbox_id.
+
+    Raises asyncio.TimeoutError if Modal doesn't respond within
+    _SANDBOX_CREATE_TIMEOUT_SEC seconds, preventing indefinite hangs.
+    """
+    app = await asyncio.wait_for(
+        modal.App.lookup.aio("lucidly-sandbox", create_if_missing=True),
+        timeout=_SANDBOX_CREATE_TIMEOUT_SEC,
+    )
+    sb = await asyncio.wait_for(
+        modal.Sandbox.create.aio(
+            image=_sandbox_image,
+            app=app,
+            timeout=3600,  # 1 hour idle timeout
+        ),
+        timeout=_SANDBOX_CREATE_TIMEOUT_SEC,
     )
     _sandboxes[sb.object_id] = sb
     return sb.object_id
@@ -303,14 +317,24 @@ int main() {
     return "int main() { return 1; }"
 
 
+def _get_or_reconnect(sandbox_id: str) -> modal.Sandbox:
+    """Return the cached Sandbox object, reconnecting via Modal if missing (e.g. after server restart)."""
+    sb = _sandboxes.get(sandbox_id)
+    if sb is None:
+        try:
+            sb = modal.Sandbox.from_id(sandbox_id)
+            _sandboxes[sandbox_id] = sb
+        except Exception:
+            raise RuntimeError(f"Sandbox {sandbox_id} not found. It may have been terminated or the server restarted.")
+    return sb
+
+
 async def run_code_in_sandbox(
     sandbox_id: str,
     code: str,
 ) -> dict:
     """Execute arbitrary code in the sandbox and return stdout/stderr."""
-    sb = _sandboxes.get(sandbox_id)
-    if sb is None:
-        raise RuntimeError(f"Sandbox {sandbox_id} not found. It may have been terminated.")
+    sb = _get_or_reconnect(sandbox_id)
 
     # Execute in sandbox
     process = await sb.exec.aio("python", "-c", code, timeout=30)

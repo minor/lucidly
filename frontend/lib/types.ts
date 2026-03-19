@@ -159,10 +159,10 @@ export interface InterviewChallenge {
   id: string;
   title: string;
   description: string;
-  category: string; // coding, frontend, system_design
+  category: string; // function, UI, system
   starter_code: string | null;
   solution_code: string | null;
-  test_cases: InterviewTestCase[] | null;
+  test_suite: InterviewTestCase[] | null;
   reference_html: string | null;
   sort_order: number;
 }
@@ -229,4 +229,32 @@ export interface InterviewSessionReport {
 export interface InterviewReport {
   room: InterviewRoom;
   sessions: InterviewSessionReport[];
+}
+
+// ---------------------------------------------------------------------------
+// Integrations
+// ---------------------------------------------------------------------------
+
+export interface IntegrationStatus {
+  linear: boolean;
+  github: boolean;
+}
+
+export interface LinearIssue {
+  id: string;
+  identifier: string;
+  title: string;
+  description: string | null;
+  branchName: string | null;
+  url: string;
+}
+
+export interface GeneratedChallenge {
+  title: string;
+  description: string;
+  starter_code: string;
+  test_cases: Array<{ input: string; expected_output: string }>;
+  source: "existing_tests" | "llm_generated";
+  repo_context?: Record<string, unknown> | null;
+  test_files?: { path: string; content: string }[];
 }

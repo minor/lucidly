@@ -9,6 +9,14 @@ import time
 import httpx
 import traceback
 
+# Load .env into os.environ early so Modal (and other libs that read os.environ
+# directly) can pick up MODAL_TOKEN_ID / MODAL_TOKEN_SECRET.
+try:
+    from dotenv import load_dotenv
+    load_dotenv(override=False)  # don't override vars already set in the shell
+except ImportError:
+    pass
+
 import sentry_sdk
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 from sentry_sdk.integrations.starlette import StarletteIntegration
@@ -20,16 +28,11 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
 logger = logging.getLogger(__name__)
-
-# Ensure logger outputs to console
-if not logger.handlers:
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    console_handler.setFormatter(formatter)
-    logger.addHandler(console_handler)
-    logger.setLevel(logging.INFO)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel
@@ -79,6 +82,7 @@ from session_events import (
     unsubscribe_session_events,
 )
 from interviews import interview_router
+from integrations.router import router as integrations_router
 
 
 # ---------------------------------------------------------------------------
@@ -137,6 +141,7 @@ app.add_middleware(
 
 # Mount interview router
 app.include_router(interview_router)
+app.include_router(integrations_router)
 
 # Default LLM instance (can be overridden per-request)
 llm = LLM()

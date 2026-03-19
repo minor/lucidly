@@ -19,6 +19,8 @@ import {
   addInterviewChallenge,
 } from "@/lib/api";
 import type { InterviewConfig } from "@/lib/types";
+import { LinearImportModal } from "@/components/interview/LinearImportModal";
+import type { GeneratedChallenge } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
 // Types for local form state
@@ -33,9 +35,11 @@ interface ChallengeForm {
   id: string; // local key
   title: string;
   description: string;
-  category: "coding" | "frontend" | "system_design";
+  category: "function" | "UI" | "system";
   starter_code: string;
-  test_cases: TestCaseInput[];
+  test_suite: TestCaseInput[];
+  repo_context?: Record<string, unknown> | null;
+  test_files?: { path: string; content: string }[];
 }
 
 const EMPTY_TEST_CASE: TestCaseInput = { input: "", expected_output: "" };
@@ -45,9 +49,9 @@ function newChallengeForm(): ChallengeForm {
     id: crypto.randomUUID(),
     title: "",
     description: "",
-    category: "coding",
+    category: "function",
     starter_code: "",
-    test_cases: [{ ...EMPTY_TEST_CASE }],
+    test_suite: [{ ...EMPTY_TEST_CASE }],
   };
 }
 
@@ -55,9 +59,9 @@ const CATEGORY_META: Record<
   string,
   { label: string; icon: typeof Code; color: string }
 > = {
-  coding: { label: "Coding", icon: Code, color: "text-blue-500" },
-  frontend: { label: "Frontend", icon: Globe, color: "text-green-500" },
-  system_design: { label: "System Design", icon: Layout, color: "text-purple-500" },
+  function: { label: "Coding", icon: Code, color: "text-blue-500" },
+  UI: { label: "Frontend", icon: Globe, color: "text-green-500" },
+  system: { label: "System Design", icon: Layout, color: "text-purple-500" },
 };
 
 // ---------------------------------------------------------------------------
@@ -90,6 +94,7 @@ export default function CreateInterviewPage() {
   const [copied, setCopied] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showLinearModal, setShowLinearModal] = useState(false);
 
   // ---- Challenge helpers ----
 
@@ -106,14 +111,14 @@ export default function CreateInterviewPage() {
 
   const addTestCase = useCallback(() => {
     updateChallenge(activeChallengeIdx, {
-      test_cases: [...activeChallenge.test_cases, { ...EMPTY_TEST_CASE }],
+      test_suite: [...activeChallenge.test_suite, { ...EMPTY_TEST_CASE }],
     });
   }, [activeChallengeIdx, activeChallenge, updateChallenge]);
 
   const removeTestCase = useCallback(
     (tcIdx: number) => {
       updateChallenge(activeChallengeIdx, {
-        test_cases: activeChallenge.test_cases.filter((_, i) => i !== tcIdx),
+        test_suite: activeChallenge.test_suite.filter((_, i) => i !== tcIdx),
       });
     },
     [activeChallengeIdx, activeChallenge, updateChallenge]
@@ -122,7 +127,7 @@ export default function CreateInterviewPage() {
   const updateTestCase = useCallback(
     (tcIdx: number, field: "input" | "expected_output", value: string) => {
       updateChallenge(activeChallengeIdx, {
-        test_cases: activeChallenge.test_cases.map((tc, i) =>
+        test_suite: activeChallenge.test_suite.map((tc, i) =>
           i === tcIdx ? { ...tc, [field]: value } : tc
         ),
       });
@@ -143,6 +148,32 @@ export default function CreateInterviewPage() {
       prev >= challenges.length - 1 ? Math.max(0, prev - 1) : prev
     );
   };
+
+  const stripGitHubUrls = (text: string) =>
+    text
+      // Linear format: [text](<github-url>) or standard [text](github-url) → text
+      .replace(/\[([^\]]*)\]\(<?https?:\/\/github\.com[^)>]*>?\)/g, "$1")
+      // bare github URLs
+      .replace(/https?:\/\/github\.com\/\S+/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+  const handleLinearImport = useCallback(
+    (generated: GeneratedChallenge) => {
+      updateChallenge(activeChallengeIdx, {
+        title: stripGitHubUrls(generated.title),
+        description: stripGitHubUrls(generated.description),
+        starter_code: generated.starter_code,
+        test_suite: generated.test_cases.length > 0
+          ? generated.test_cases
+          : [{ ...EMPTY_TEST_CASE }],
+        category: "function",
+        repo_context: generated.repo_context ?? null,
+        test_files: generated.test_files ?? [],
+      });
+    },
+    [activeChallengeIdx, updateChallenge]
+  );
 
   // ---- Submission ----
 
@@ -168,7 +199,7 @@ export default function CreateInterviewPage() {
       // Add challenges
       for (const ch of challenges) {
         if (!ch.title.trim() || !ch.description.trim()) continue;
-        const validTests = ch.test_cases.filter(
+        const validTests = ch.test_suite.filter(
           (tc) => tc.input.trim() || tc.expected_output.trim()
         );
         await addInterviewChallenge(room.id, {
@@ -176,10 +207,12 @@ export default function CreateInterviewPage() {
           description: ch.description,
           category: ch.category,
           starter_code: ch.starter_code || undefined,
-          test_cases:
-            ch.category === "coding" && validTests.length > 0
+          test_suite:
+            ch.category === "function" && validTests.length > 0
               ? validTests
               : undefined,
+          repo_context: ch.repo_context ?? undefined,
+          test_files: ch.test_files,
         });
       }
 
@@ -374,14 +407,23 @@ export default function CreateInterviewPage() {
           {/* ================= STEP 2 ================= */}
           {step === 2 && (
             <div className="space-y-6">
-              <div>
-                <h2 className="text-lg font-semibold mb-1">
-                  Add Challenges
-                </h2>
-                <p className="text-sm text-muted">
-                  Create the questions candidates will solve. For coding
-                  questions, add test cases.
-                </p>
+              <div className="flex items-start justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold mb-1">Add Challenges</h2>
+                  <p className="text-sm text-muted">
+                    Create the questions candidates will solve. For coding
+                    questions, add test cases.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowLinearModal(true)}
+                  className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs text-muted hover:text-foreground hover:border-accent transition-colors cursor-pointer shrink-0"
+                >
+                  <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M3.5 19.5 15 8l-1.5-1.5L2 18zm16.5-12L11.5 16l1.5 1.5L21 9zM12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z"/>
+                  </svg>
+                  Import from Linear
+                </button>
               </div>
 
               {/* Challenge tabs */}
@@ -403,15 +445,23 @@ export default function CreateInterviewPage() {
                       </span>
                     )}
                     {challenges.length > 1 && (
-                      <button
+                      <span
+                        role="button"
+                        tabIndex={0}
                         onClick={(e) => {
                           e.stopPropagation();
                           removeChallenge(i);
                         }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.stopPropagation();
+                            removeChallenge(i);
+                          }
+                        }}
                         className="ml-1 text-muted hover:text-red-400 cursor-pointer"
                       >
                         <Trash2 className="h-3 w-3" />
-                      </button>
+                      </span>
                     )}
                   </button>
                 ))}
@@ -450,7 +500,7 @@ export default function CreateInterviewPage() {
                     </label>
                     <div className="flex flex-wrap gap-2">
                       {(
-                        ["coding", "frontend", "system_design"] as const
+                        ["function", "UI", "system"] as const
                       ).map((cat) => {
                         const meta = CATEGORY_META[cat];
                         const Icon = meta.icon;
@@ -516,67 +566,78 @@ export default function CreateInterviewPage() {
                     />
                   </div>
 
-                  {/* Test Cases (coding only) */}
-                  {activeChallenge.category === "coding" && (
-                    <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <label className="text-sm font-medium">
-                          Test Cases
-                        </label>
-                        <button
-                          onClick={addTestCase}
-                          className="flex items-center gap-1 text-xs text-accent hover:text-accent/80 cursor-pointer"
-                        >
-                          <Plus className="h-3 w-3" />
-                          Add test case
-                        </button>
+                  {/* Test Cases (function only, no repo_context) */}
+                  {activeChallenge.category === "function" && (
+                    activeChallenge.repo_context ? (
+                      <div className="rounded-lg border border-accent/20 bg-accent/5 px-4 py-3 text-sm text-accent">
+                        {(() => {
+                          const ids = (activeChallenge.repo_context as Record<string, unknown>)?.challenge_test_ids as string[] | undefined;
+                          return ids?.length
+                            ? `${ids.length} test${ids.length === 1 ? "" : "s"} automatically detected from PR`
+                            : "Tests automatically detected from PR (full suite will run)";
+                        })()}
                       </div>
-                      <div className="space-y-2">
-                        {activeChallenge.test_cases.map((tc, tcIdx) => (
-                          <div
-                            key={tcIdx}
-                            className="flex items-start gap-2 rounded-lg border border-border p-3"
+                    ) : (
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <label className="text-sm font-medium">
+                            Test Cases
+                          </label>
+                          <button
+                            onClick={addTestCase}
+                            className="flex items-center gap-1 text-xs text-accent hover:text-accent/80 cursor-pointer"
                           >
-                            <div className="flex-1 space-y-2">
-                              <input
-                                type="text"
-                                value={tc.input}
-                                onChange={(e) =>
-                                  updateTestCase(
-                                    tcIdx,
-                                    "input",
-                                    e.target.value
-                                  )
-                                }
-                                placeholder="Input: e.g. two_sum([2,7,11,15], 9)"
-                                className="w-full rounded-md border border-input-border bg-input px-3 py-1.5 text-xs font-mono focus:border-accent focus:outline-none"
-                              />
-                              <input
-                                type="text"
-                                value={tc.expected_output}
-                                onChange={(e) =>
-                                  updateTestCase(
-                                    tcIdx,
-                                    "expected_output",
-                                    e.target.value
-                                  )
-                                }
-                                placeholder="Expected: e.g. [0, 1]"
-                                className="w-full rounded-md border border-input-border bg-input px-3 py-1.5 text-xs font-mono focus:border-accent focus:outline-none"
-                              />
+                            <Plus className="h-3 w-3" />
+                            Add test case
+                          </button>
+                        </div>
+                        <div className="space-y-2">
+                          {activeChallenge.test_suite.map((tc, tcIdx) => (
+                            <div
+                              key={tcIdx}
+                              className="flex items-start gap-2 rounded-lg border border-border p-3"
+                            >
+                              <div className="flex-1 space-y-2">
+                                <input
+                                  type="text"
+                                  value={tc.input}
+                                  onChange={(e) =>
+                                    updateTestCase(
+                                      tcIdx,
+                                      "input",
+                                      e.target.value
+                                    )
+                                  }
+                                  placeholder="Input: e.g. two_sum([2,7,11,15], 9)"
+                                  className="w-full rounded-md border border-input-border bg-input px-3 py-1.5 text-xs font-mono focus:border-accent focus:outline-none"
+                                />
+                                <input
+                                  type="text"
+                                  value={tc.expected_output}
+                                  onChange={(e) =>
+                                    updateTestCase(
+                                      tcIdx,
+                                      "expected_output",
+                                      e.target.value
+                                    )
+                                  }
+                                  placeholder="Expected: e.g. [0, 1]"
+                                  className="w-full rounded-md border border-input-border bg-input px-3 py-1.5 text-xs font-mono focus:border-accent focus:outline-none"
+                                />
+                              </div>
+                              {activeChallenge.test_suite.length > 1 && (
+                                <button
+                                  onClick={() => removeTestCase(tcIdx)}
+                                  className="mt-1 text-muted hover:text-red-400 cursor-pointer"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              )}
                             </div>
-                            {activeChallenge.test_cases.length > 1 && (
-                              <button
-                                onClick={() => removeTestCase(tcIdx)}
-                                className="mt-1 text-muted hover:text-red-400 cursor-pointer"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
-                            )}
-                          </div>
-                        ))}
+                          ))}
+                        </div>
                       </div>
-                    </div>
+                    )
                   )}
                 </div>
               )}
@@ -680,6 +741,12 @@ export default function CreateInterviewPage() {
           )}
         </div>
       </div>
+      {showLinearModal && (
+        <LinearImportModal
+          onImport={handleLinearImport}
+          onClose={() => setShowLinearModal(false)}
+        />
+      )}
     </div>
   );
 }

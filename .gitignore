@@ -4,6 +4,7 @@ node_modules
 *.env
 **/package-lock.json
 package-lock.json
+docs/
 
 # Python cache files
 **/__pycache__/

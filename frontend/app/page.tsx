@@ -63,8 +63,7 @@ export default function Home() {
           Start practicing
           <ArrowRight className="h-4 w-4" />
         </button>
-        {/*
-        // DISABLED: Interview Mode homepage CTA
+        {/* DISABLED: Interview Mode homepage CTA
         <button
           onClick={() => router.push("/interview/create")}
           className="inline-flex items-center gap-2 text-sm text-muted hover:text-accent transition-colors cursor-pointer"

@@ -4,9 +4,7 @@ import pytest
 from httpx import AsyncClient
 
 # Keep this in sync with backend/interviews/router.py.
-# DISABLED: Interview mode endpoints are blocked (410).
-# To re-enable interview tests for rate limiting, set this to True.
-INTERVIEW_MODE_ENABLED = False
+INTERVIEW_MODE_ENABLED = True
 
 
 # ---------------------------------------------------------------------------

@@ -47,6 +47,12 @@ export function extractPythonCode(text: string): string {
   );
   const candidates = pythonBlocks.length > 0 ? pythonBlocks : blocks;
 
+  // Multi-file format: if any block contains file separators, concatenate all
+  // so both files are captured even when the LLM uses separate code blocks.
+  if (candidates.some((b) => b.code.includes("# === FILE:"))) {
+    return candidates.map((b) => b.code).join("\n\n");
+  }
+
   const withDef = candidates.filter(
     (b) => /\bdef\s+\w+/.test(b.code) || /\bclass\s+\w+/.test(b.code)
   );
