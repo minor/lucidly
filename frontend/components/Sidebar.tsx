@@ -24,7 +24,8 @@ import { useTheme, type ThemeMode } from "@/hooks/ThemeContext";
 
 const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
-const INTERVIEW_MODE_ENABLED = true;
+// DISABLED: Set to true to re-enable Interview Mode in sidebar UI.
+const INTERVIEW_MODE_ENABLED = false;
 
 const MODES = [
   { id: "arena", label: "Arena Mode", icon: Zap, href: "/play" },

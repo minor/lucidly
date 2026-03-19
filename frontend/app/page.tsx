@@ -8,7 +8,8 @@ import {
   Layout,
   Bug,
   FileText,
-  ClipboardList,
+  // DISABLED: Interview Mode CTA hidden until re-enabled
+  // ClipboardList,
 } from "lucide-react";
 
 const CATEGORIES = [
@@ -62,6 +63,7 @@ export default function Home() {
           Start practicing
           <ArrowRight className="h-4 w-4" />
         </button>
+        {/* DISABLED: Interview Mode homepage CTA
         <button
           onClick={() => router.push("/interview/create")}
           className="inline-flex items-center gap-2 text-sm text-muted hover:text-accent transition-colors cursor-pointer"
@@ -70,6 +72,7 @@ export default function Home() {
           Hiring? Try Interview Mode
           <ArrowRight className="h-3 w-3" />
         </button>
+        */}
       </div>
 
       {/* Category pills — what you can practice */}
