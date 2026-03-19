@@ -500,9 +500,9 @@ export const MODEL_PRICING: Record<string, { input: number; output: number }> = 
 };
 
 export const MODELS = [
-  { id:"grok-4-1-fast-non-reasoning", name: "Grok 4.1 Fast Non-Reasoning" },
-  { id: "grok-4-1-fast-reasoning", name: "Grok 4.1 Fast Reasoning" },
-  { id: "grok-code-fast-1", name: "Grok Code Fast" },
+  // { id:"grok-4-1-fast-non-reasoning", name: "Grok 4.1 Fast Non-Reasoning" },
+  // { id: "grok-4-1-fast-reasoning", name: "Grok 4.1 Fast Reasoning" },
+  // { id: "grok-code-fast-1", name: "Grok Code Fast" },
   { id: "gpt-5.2", name: "GPT-5.2 (Instant)" },
   { id: "gpt-5.2-reasoning", name: "GPT-5.2 (Reasoning)" },
   // DISABLED: Claude models hidden until re-enabled
