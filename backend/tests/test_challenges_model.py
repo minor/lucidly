@@ -8,7 +8,7 @@ def test_repo_context_model():
         owner="acme",
         repo="myrepo",
         base_sha="abc123",
-        file_path="src/parser.py",
+        file_paths=["src/parser.py"],
         challenge_test_ids=["tests/test_parser.py::test_tokenize"],
     )
     assert rc.owner == "acme"
@@ -25,13 +25,13 @@ def test_challenge_has_repo_context_field():
         user_id="user|123",
         repo_context=RepoContext(
             owner="acme", repo="myrepo", base_sha="abc",
-            file_path="src/parser.py", challenge_test_ids=[],
+            file_paths=["src/parser.py"], challenge_test_ids=[],
         ),
         test_files=[{"path": "tests/test_parser.py", "content": "def test_foo(): pass"}],
     )
     assert c.user_id == "user|123"
     assert c.repo_context is not None
-    assert c.repo_context.file_path == "src/parser.py"
+    assert c.repo_context.file_paths == ["src/parser.py"]
     assert c.test_files[0]["path"] == "tests/test_parser.py"
 
 
