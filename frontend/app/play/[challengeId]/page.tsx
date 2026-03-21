@@ -99,7 +99,7 @@ export default function ChallengePage() {
   const [referenceHtml, setReferenceHtml] = useState<string>("");
 
   // Test results state
-  const { testResults, runningTests, latestCode, testTab, setTestTab, startEval, setResults, setCode, reset: resetTestResults } = useTestResults();
+  const { testResults, runningTests, latestCode, testTab, setTestTab, startEval, cancelEval, setResults, setCode, reset: resetTestResults } = useTestResults();
 
   // UI evaluation score state
   const [uiScore, setUiScore] = useState<number | undefined>(undefined);
