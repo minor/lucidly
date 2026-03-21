@@ -469,6 +469,26 @@ async def complete_session(room_id: str, session_id: str):
     }
 
 
+@router.post("/{room_id}/sessions/{session_id}/cancel")
+async def cancel_session(room_id: str, session_id: str):
+    """Cancel an active session (interviewer action)."""
+    session = store.get_session(session_id)
+    if session is None or session.room_id != room_id:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.status != "active":
+        raise HTTPException(status_code=400, detail="Session is not active")
+
+    cancelled = store.cancel_session(session_id)
+
+    await realtime.broadcast(room_id, {
+        "type": "session_cancelled",
+        "session_id": session_id,
+        "timestamp": time.time(),
+    })
+
+    return {"session": cancelled}
+
+
 # ---------------------------------------------------------------------------
 # Run tests for interview challenges (coding)
 # ---------------------------------------------------------------------------

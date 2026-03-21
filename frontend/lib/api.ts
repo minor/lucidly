@@ -731,6 +731,15 @@ export async function completeInterviewSession(
   });
 }
 
+export async function cancelInterviewSession(
+  roomId: string,
+  sessionId: string
+): Promise<{ session: InterviewSession }> {
+  return fetchJSON(`/api/interviews/${roomId}/sessions/${sessionId}/cancel`, {
+    method: "POST",
+  });
+}
+
 export async function getInterviewReport(
   roomId: string
 ): Promise<InterviewReport> {

@@ -560,6 +560,30 @@ def update_session_accuracy(session_id: str, accuracy: float) -> None:
         logger.error("Error updating session accuracy %s: %s", session_id, e)
 
 
+def cancel_session(session_id: str) -> InterviewSession | None:
+    """Mark a session as cancelled by the interviewer."""
+    supabase = get_supabase_client()
+    if not supabase:
+        return None
+    try:
+        response = (
+            supabase.table("interview_sessions")
+            .update({
+                "status": "cancelled",
+                "completed_at": _float_to_iso(time.time()),
+            })
+            .eq("id", session_id)
+            .execute()
+        )
+        if not response.data:
+            return None
+        turns = _load_turns_for_session(session_id)
+        return _row_to_session(response.data[0], turns=turns)
+    except Exception as e:
+        logger.error("Error cancelling session %s: %s", session_id, e)
+        return None
+
+
 def complete_session(
     session_id: str,
     accuracy: float = 0.0,

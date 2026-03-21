@@ -4,9 +4,11 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams } from "next/navigation";
 import {
   getInterviewRoomByInvite,
+  getInterviewSession,
   startInterviewSession,
   streamInterviewPrompt,
   completeInterviewSession,
+  subscribeInterviewObserver,
   createVercelSandbox,
   updateVercelSandboxCode,
   stopVercelSandbox,
@@ -75,7 +77,7 @@ export default function CandidateInterviewPage() {
   const [latestAccuracy, setLatestAccuracy] = useState<number | null>(null);
 
   // Model
-  const [selectedModel, setSelectedModel] = useState("grok-4-1-fast-non-reasoning");
+  const [selectedModel, setSelectedModel] = useState("gpt-5.2");
 
   // Output panel
   const OUTPUT_PANEL_MIN = 120;
@@ -102,10 +104,59 @@ export default function CandidateInterviewPage() {
   // Timer expired
   const [timeExpired, setTimeExpired] = useState(false);
 
+  // Session cancelled by interviewer
+  const [cancelled, setCancelled] = useState(false);
+
   // Abort
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // ---- Fetch room ----
+  // ---- sessionStorage key for recovery ----
+  const storageKey = `interview-session-${inviteCode}`;
+
+  // ---- Warn before leaving ----
+  useEffect(() => {
+    if (!joined || submitState === "completed") return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [joined, submitState]);
+
+  // ---- Persist session to sessionStorage on changes ----
+  useEffect(() => {
+    if (!session || !room) return;
+    const data = {
+      sessionId: session.id,
+      roomId: room.id,
+      candidateName,
+      activeChallengeIdx,
+      startedAt: startTimeRef.current,
+    };
+    sessionStorage.setItem(storageKey, JSON.stringify(data));
+  }, [session, room, candidateName, activeChallengeIdx, storageKey]);
+
+  // ---- Listen for session cancellation from interviewer ----
+  useEffect(() => {
+    if (!room || !session) return;
+    const unsubscribe = subscribeInterviewObserver(room.id, (event) => {
+      if (
+        event.type === "session_cancelled" &&
+        event.session_id === session.id
+      ) {
+        setCancelled(true);
+        sessionStorage.removeItem(storageKey);
+        // Stop any active streaming
+        if (abortControllerRef.current) {
+          abortControllerRef.current.abort();
+          abortControllerRef.current = null;
+        }
+      }
+    });
+    return () => unsubscribe();
+  }, [room, session, storageKey]);
+
+  // ---- Fetch room + attempt session recovery ----
   useEffect(() => {
     let ignore = false;
     async function init() {
@@ -115,6 +166,45 @@ export default function CandidateInterviewPage() {
         setRoom(r);
         if (r.challenges.length > 0) {
           setActiveChallenge(r.challenges[0]);
+        }
+
+        // Attempt session recovery from sessionStorage
+        const saved = sessionStorage.getItem(storageKey);
+        if (saved) {
+          try {
+            const data = JSON.parse(saved);
+            const recovered = await getInterviewSession(data.roomId, data.sessionId);
+            if (!ignore && recovered && recovered.status === "active") {
+              // Restore session state
+              setSession(recovered);
+              setCandidateName(data.candidateName || recovered.candidate_name);
+              setJoined(true);
+              startTimeRef.current = data.startedAt || (recovered.started_at * 1000);
+
+              // Restore challenge
+              const chIdx = data.activeChallengeIdx || 0;
+              setActiveChallengeIdx(chIdx);
+              if (r.challenges[chIdx]) {
+                setActiveChallenge(r.challenges[chIdx]);
+              }
+
+              // Rebuild messages from turns
+              const restoredMessages: ChatMessage[] = [];
+              for (const turn of recovered.turns) {
+                restoredMessages.push({ role: "user", content: turn.prompt_text });
+                restoredMessages.push({ role: "assistant", content: turn.response_text });
+              }
+              setMessages(restoredMessages);
+
+              // Restore metrics
+              setTotalTokens(recovered.total_tokens);
+              setTotalTurns(recovered.total_turns);
+              setLatestAccuracy(recovered.accuracy || null);
+            }
+          } catch {
+            // Recovery failed — let user join fresh
+            sessionStorage.removeItem(storageKey);
+          }
         }
       } catch (err) {
         if (!ignore) setError((err as Error).message);
@@ -273,7 +363,14 @@ export default function CandidateInterviewPage() {
         setEstimatedTokens((prev) => prev + chunk.length / 4);
       },
       (data) => {
-        // Message was already committed in onEvaluating; just finalize metrics + results
+        // Ensure the assistant message is committed (onEvaluating may not fire for non-function challenges)
+        setMessages((prev) => {
+          const lastMsg = prev[prev.length - 1];
+          if (lastMsg?.role === "assistant") {
+            return prev; // already committed by onEvaluating
+          }
+          return [...prev, { role: "assistant", content: data.content }];
+        });
         setCurrentStreamingMessage("");
         setIsStreaming(false);
         setIsWaitingForFirstToken(false);
@@ -329,6 +426,7 @@ export default function CandidateInterviewPage() {
       const result = await completeInterviewSession(room.id, session.id);
       setFinalScores(result.scores);
       setSubmitState("completed");
+      sessionStorage.removeItem(storageKey);
     } catch {
       setSubmitState("idle");
     }
@@ -466,18 +564,37 @@ export default function CandidateInterviewPage() {
               Your interview has been submitted. The interviewer will review
               your performance.
             </p>
-            <div className="text-4xl font-black font-mono mb-1">
-              {finalScores.composite_score}
-            </div>
-            <div className="text-xs text-muted uppercase tracking-widest mb-6">
-              Score
-            </div>
             <ScoreBar
               turns={totalTurns}
               tokens={totalTokens}
               elapsedSec={elapsed}
               cost={totalCost}
             />
+            <a
+              href="/"
+              className="inline-block mt-6 rounded-lg bg-foreground px-6 py-2.5 text-sm font-medium text-background hover:opacity-90 cursor-pointer"
+            >
+              Return to Home
+            </a>
+          </div>
+        </div>
+      )}
+
+      {/* Session cancelled overlay */}
+      {cancelled && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/95 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-md rounded-2xl border border-border bg-card p-10 shadow-2xl text-center">
+            <AlertTriangle className="h-10 w-10 text-red-400 mx-auto mb-4" />
+            <h2 className="text-2xl font-bold mb-2">Session Cancelled</h2>
+            <p className="text-sm text-muted mb-6">
+              This session has been cancelled by the interviewer.
+            </p>
+            <a
+              href="/"
+              className="inline-block rounded-lg bg-foreground px-6 py-2.5 text-sm font-medium text-background hover:opacity-90 cursor-pointer"
+            >
+              Return to Home
+            </a>
           </div>
         </div>
       )}

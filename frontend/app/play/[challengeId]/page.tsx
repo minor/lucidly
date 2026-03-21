@@ -109,7 +109,7 @@ export default function ChallengePage() {
   const [runningCode, setRunningCode] = useState(false);
 
   // Model selection state
-  const [selectedModel, setSelectedModel] = useState("grok-4-1-fast-non-reasoning");
+  const [selectedModel, setSelectedModel] = useState("gpt-5.2");
 
   // Sandbox state
   const [sandboxId, setSandboxId] = useState<string | null>(null);

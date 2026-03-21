@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, type ReactNode } from "react";
+import { usePathname } from "next/navigation";
 import Image from "next/image";
 import { Menu } from "lucide-react";
 import { Sidebar } from "@/components/Sidebar";
@@ -10,9 +11,26 @@ import { AuthTokenSync } from "@/components/AuthTokenSync";
 import { UsernameProvider } from "@/hooks/UsernameContext";
 import { ThemeProvider } from "@/hooks/ThemeContext";
 
+/** Candidate interview pages — no sidebar, no auth bar, no chrome. */
+const INTERVIEW_CANDIDATE_RE = /^\/interview\/(?!create|observe|report)[^/]+$/;
+
 export function LayoutShell({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
   const closeMobile = useCallback(() => setMobileOpen(false), []);
+
+  // Candidate interview pages get a bare-bones shell
+  if (INTERVIEW_CANDIDATE_RE.test(pathname)) {
+    return (
+      <ThemeProvider>
+        <UsernameProvider>
+          <div className="h-screen overflow-hidden">
+            {children}
+          </div>
+        </UsernameProvider>
+      </ThemeProvider>
+    );
+  }
 
   return (
     <ThemeProvider>

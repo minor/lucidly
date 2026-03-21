@@ -193,6 +193,7 @@ export interface InterviewTurn {
   generated_code: string;
   prompt_tokens: number;
   response_tokens: number;
+  accuracy_at_turn: number;
   timestamp: number;
 }
 
